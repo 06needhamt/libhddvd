@@ -1,4 +1,4 @@
-# libhddvd 0.4.0
+# libhddvd 0.1.0
 
 Experimental open-source HD DVD inspection library.
 
@@ -21,6 +21,15 @@ hddvd-menuinfo archived.aca
 ```
 
 The ACA implementation was validated against a genuine HD DVD archive with 40 members. The sample itself is not distributed with this source tree. Regression tests construct a small synthetic archive using the observed container structure.
+
+## Resource APIs
+
+Phase 1 provides checked 64-bit file and memory streams, persistent ACA handles
+with bounded member streams, canonical `file:///dvddisc/...` URI parsing, and
+case-insensitive resource lookup through `hddvd_open_resource`. ACA member streams
+retain their backing archive stream and remain valid after the archive handle is
+closed. Resource lookup rejects traversal, encoded separators, ambiguous
+case-insensitive matches, and (on POSIX systems) symbolic links.
 
 ## Build
 
@@ -49,6 +58,8 @@ The test checks the fixed size and SHA-256 identity, the complete member
 inventory, and every member CRC.  Set `HDDVD_REFERENCE_REPORT` to write the JSON
 report to a chosen path.  With no `HDDVD_REFERENCE_ACA`, CTest reports the test as
 skipped.  See `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the remaining phases.
+Reviewable tasks, dependencies, and acceptance criteria for those phases are in
+`docs/IMPLEMENTATION_TASKS.md`.
 
 Parser fuzz harnesses can be built with Clang and
 `-DHDDVD_BUILD_FUZZERS=ON`; the checked-in inputs under `tests/fixtures` are
