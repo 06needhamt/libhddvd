@@ -199,6 +199,8 @@ int hddvd_stream_read_at(hddvd_stream *stream, uint64_t offset, void *buffer,
     if (!stream || (!buffer && size) || !read_size)
         return HDDVD_EINVAL;
     *read_size = 0;
+    if (!size)
+        return HDDVD_OK;
     return stream->read_at(stream, offset, buffer, size, read_size);
 }
 

@@ -47,6 +47,8 @@ int main(void)
     hddvd_uri_free(uri);
     assert(hddvd_uri_parse("file:///dvddisc/ADV_OBJ/%2e%2e/file", &uri) == HDDVD_EPARSE);
     assert(hddvd_uri_parse("file:///dvddisc/ADV_OBJ/a%2fb", &uri) == HDDVD_EPARSE);
+    assert(hddvd_uri_parse("file:///dvddisc/ADV_OBJ/a%3fb", &uri) == HDDVD_EPARSE);
+    assert(hddvd_uri_parse("file:///dvddisc/ADV_OBJ//file", &uri) == HDDVD_EPARSE);
     assert(hddvd_uri_parse("http://dvddisc/ADV_OBJ/a", &uri) == HDDVD_EPARSE);
     assert(hddvd_uri_parse("file:///dvddisc/", &uri) == HDDVD_EPARSE);
 

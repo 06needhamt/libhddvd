@@ -1,5 +1,4 @@
 #include "internal.h"
-#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -8,7 +7,7 @@ struct hddvd_uri { char *path; char *archive; char *member; };
 static int hex_value(unsigned char c)
 {
     if (c >= '0' && c <= '9') return c - '0';
-    c = (unsigned char)tolower(c);
+    if (c >= 'A' && c <= 'F') c = (unsigned char)(c + ('a' - 'A'));
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
     return -1;
 }
@@ -16,7 +15,11 @@ static int hex_value(unsigned char c)
 static int prefix_ci(const char *s, const char *prefix)
 {
     while (*prefix) {
-        if (!*s || tolower((unsigned char)*s) != tolower((unsigned char)*prefix))
+        unsigned char a = (unsigned char)*s;
+        unsigned char b = (unsigned char)*prefix;
+        if (a >= 'A' && a <= 'Z') a = (unsigned char)(a + ('a' - 'A'));
+        if (b >= 'A' && b <= 'Z') b = (unsigned char)(b + ('a' - 'A'));
+        if (!*s || a != b)
             return 0;
         s++;
         prefix++;
@@ -94,10 +97,10 @@ int hddvd_uri_parse(const char *text, hddvd_uri **out)
         if (slash) {
             size_t component = (size_t)(slash - cursor);
             if (component >= 4 &&
-                tolower((unsigned char)cursor[component-4]) == '.' &&
-                tolower((unsigned char)cursor[component-3]) == 'a' &&
-                tolower((unsigned char)cursor[component-2]) == 'c' &&
-                tolower((unsigned char)cursor[component-1]) == 'a') {
+                cursor[component-4] == '.' &&
+                (cursor[component-3] == 'a' || cursor[component-3] == 'A') &&
+                (cursor[component-2] == 'c' || cursor[component-2] == 'C') &&
+                (cursor[component-1] == 'a' || cursor[component-1] == 'A')) {
                 size_t archive_length = (size_t)(slash - normalized);
                 uri->archive = malloc(archive_length + 1);
                 if (!uri->archive) { hddvd_uri_free(uri); return HDDVD_ENOMEM; }

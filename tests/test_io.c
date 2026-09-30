@@ -14,6 +14,7 @@ static void exercise(hddvd_stream *stream)
     assert(got == 1 && buffer[0] == 'f');
     assert(hddvd_stream_read_at(stream, 99, buffer, 1, &got) == HDDVD_OK && got == 0);
     assert(hddvd_stream_read_at(stream, 0, NULL, 0, &got) == HDDVD_OK && got == 0);
+    assert(hddvd_stream_read_at(stream, UINT64_MAX, NULL, 0, &got) == HDDVD_OK && got == 0);
 }
 
 int main(void)
