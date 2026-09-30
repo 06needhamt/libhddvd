@@ -24,6 +24,37 @@ struct hddvd_xmf {
     size_t root_count;
 };
 
+static int xml_input(const void *input, size_t input_size, hddvd_object_type expected,
+                     unsigned char **owned, const void **data, size_t *size)
+{
+    hddvd_object *object;
+    hddvd_stream *payload;
+    uint64_t payload_size;
+    size_t got;
+    int rc;
+    *owned = NULL; *data = input; *size = input_size;
+    if (input_size < 8 || memcmp(input, "HDDVDOBJ", 8)) return HDDVD_OK;
+    rc = hddvd_object_open(input, input_size, &object);
+    if (rc) return rc;
+    if (hddvd_object_get_type(object) != expected) { hddvd_object_close(object); return HDDVD_EPARSE; }
+    rc = hddvd_object_open_payload(object, &payload);
+    if (rc) { hddvd_object_close(object); return rc; }
+    payload_size = hddvd_stream_size(payload);
+    if (payload_size > SIZE_MAX || payload_size > (uint64_t)INT_MAX) rc = HDDVD_ELIMIT;
+    else {
+        *owned = payload_size ? malloc((size_t)payload_size) : NULL;
+        if (payload_size && !*owned) rc = HDDVD_ENOMEM;
+        else {
+            rc = hddvd_stream_read_at(payload, 0, *owned, (size_t)payload_size, &got);
+            if (!rc && got != payload_size) rc = HDDVD_EIO;
+            if (!rc) { *data = *owned; *size = (size_t)payload_size; }
+        }
+    }
+    hddvd_stream_close(payload); hddvd_object_close(object);
+    if (rc) { free(*owned); *owned = NULL; }
+    return rc;
+}
+
 static char *dup_prop(xmlNodePtr node, const char *name)
 {
     xmlChar *value = xmlGetProp(node, (const xmlChar *)name);
@@ -147,16 +178,19 @@ int hddvd_xmf_open_with_limits(const void *data, size_t size,
     xmlDocPtr doc = NULL;
     xmlNodePtr root, node;
     size_t nodes = 0, references = 0;
+    unsigned char *owned = NULL;
     int rc = HDDVD_EPARSE, operation_rc;
     if (!data || !size || !result) return HDDVD_EINVAL;
     *result = NULL;
-    if (size > (size_t)INT_MAX) return HDDVD_ELIMIT;
+    operation_rc = xml_input(data, size, HDDVD_OBJECT_MANIFEST, &owned, &data, &size);
+    if (operation_rc) return operation_rc;
+    if (size > (size_t)INT_MAX) { free(owned); return HDDVD_ELIMIT; }
     if (!limits) { hddvd_xmf_limits_default(&defaults); limits = &defaults; }
     if (!limits->max_nodes || !limits->max_references) return HDDVD_EINVAL;
     doc = xmlReadMemory(data, (int)size, "manifest.xmf", NULL,
                         XML_PARSE_NONET | XML_PARSE_NOBLANKS |
                         XML_PARSE_NOERROR | XML_PARSE_NOWARNING);
-    if (!doc) return HDDVD_EPARSE;
+    if (!doc) { free(owned); return HDDVD_EPARSE; }
     root = xmlDocGetRootElement(doc);
     if (!root || root->type != XML_ELEMENT_NODE ||
         xmlStrcmp(root->name, (const xmlChar *)"Application") ||
@@ -204,6 +238,7 @@ int hddvd_xmf_open_with_limits(const void *data, size_t size,
 done:
     hddvd_xmf_close(xmf);
     xmlFreeDoc(doc);
+    free(owned);
     return rc;
 }
 
@@ -267,15 +302,20 @@ static void dump_xml(FILE *file, xmlNodePtr node, int depth)
 int hddvd_xmu_dump(const void *data, size_t size, const char *name, void *output)
 {
     xmlDocPtr doc;
+    unsigned char *owned = NULL;
     FILE *file = output;
+    int rc;
     if (!data || !size || !file) return HDDVD_EINVAL;
-    if (size > (size_t)INT_MAX) return HDDVD_ELIMIT;
+    rc = xml_input(data, size, HDDVD_OBJECT_MARKUP, &owned, &data, &size);
+    if (rc) return rc;
+    if (size > (size_t)INT_MAX) { free(owned); return HDDVD_ELIMIT; }
     doc = xmlReadMemory(data, (int)size, name ? name : "markup.xmu", NULL,
                         XML_PARSE_NONET | XML_PARSE_NOBLANKS |
                         XML_PARSE_NOERROR | XML_PARSE_NOWARNING);
-    if (!doc) return HDDVD_EPARSE;
+    if (!doc) { free(owned); return HDDVD_EPARSE; }
     fprintf(file, "XMU: %s\n", name ? name : "(memory)");
     dump_xml(file, xmlDocGetRootElement(doc), 0);
     xmlFreeDoc(doc);
+    free(owned);
     return HDDVD_OK;
 }

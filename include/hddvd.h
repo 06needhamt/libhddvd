@@ -22,12 +22,13 @@ extern "C"
     #define HDDVD_VERSION_PATCH 0
     #define HDDVD_PATH_MAX 1024
 
-    typedef enum hddvd_status { HDDVD_OK=0,HDDVD_EINVAL=-1,HDDVD_ENOMEM=-2,HDDVD_EIO=-3,HDDVD_EPARSE=-4,HDDVD_ENOTFOUND=-5,HDDVD_ENOTSUP=-6,HDDVD_ELIMIT=-7 } hddvd_status;
+    typedef enum hddvd_status { HDDVD_OK=0,HDDVD_EINVAL=-1,HDDVD_ENOMEM=-2,HDDVD_EIO=-3,HDDVD_EPARSE=-4,HDDVD_ENOTFOUND=-5,HDDVD_ENOTSUP=-6,HDDVD_ELIMIT=-7,HDDVD_EPROTECTED=-8 } hddvd_status;
     typedef struct hddvd_ctx hddvd_ctx;
     typedef struct hddvd_stream hddvd_stream;
     typedef struct hddvd_aca hddvd_aca;
     typedef struct hddvd_uri hddvd_uri;
     typedef struct hddvd_xmf hddvd_xmf;
+    typedef struct hddvd_object hddvd_object;
     typedef void (*hddvd_log_fn)(void*,int,const char*);
     typedef int (*hddvd_xmf_cb)(void*,const char*,const void*,size_t);
     typedef struct hddvd_aca_entry { uint32_t offset; uint32_t size; uint32_t crc32; uint8_t flags; char name[256]; } hddvd_aca_entry;
@@ -35,6 +36,13 @@ extern "C"
     typedef struct hddvd_xmf_limits { size_t max_nodes; size_t max_references; } hddvd_xmf_limits;
     typedef struct hddvd_xmf_region { uint32_t x; uint32_t y; uint32_t width; uint32_t height; } hddvd_xmf_region;
     typedef int (*hddvd_aca_entry_cb)(void*,const hddvd_aca_entry*);
+
+    typedef enum hddvd_object_type { HDDVD_OBJECT_UNKNOWN=0,HDDVD_OBJECT_MANIFEST=1,HDDVD_OBJECT_MARKUP=2,HDDVD_OBJECT_SCRIPT=3,HDDVD_OBJECT_IMAGE=4 } hddvd_object_type;
+    typedef struct hddvd_object_info { uint8_t version; uint8_t flags; uint16_t raw_type; uint32_t unknown_1; uint64_t declared_length; uint64_t payload_offset; uint64_t payload_length; uint64_t trailer_offset; uint32_t trailer_length; } hddvd_object_info;
+    /* A provider returns a newly allocated clear payload in *output.  The
+       library releases it with free().  Providers must not call back into the
+       object being opened. */
+    typedef int (*hddvd_decrypt_fn)(void*,const hddvd_object_info*,const void*,size_t,void**,size_t*);
 
     typedef enum hddvd_file_kind { HDDVD_FILE_UNKNOWN=0,HDDVD_FILE_IFO,HDDVD_FILE_BUP,HDDVD_FILE_VTI,HDDVD_FILE_MAP,HDDVD_FILE_EVO,HDDVD_FILE_XPL,HDDVD_FILE_ACA,HDDVD_FILE_DISCID } hddvd_file_kind;
     typedef struct hddvd_file_info { hddvd_file_kind kind; uint64_t size; char path[HDDVD_PATH_MAX]; } hddvd_file_info;
@@ -61,6 +69,17 @@ extern "C"
     HDDVD_API uint64_t hddvd_stream_size(const hddvd_stream*);
     HDDVD_API int hddvd_stream_read_at(hddvd_stream*,uint64_t,void*,size_t,size_t*);
     HDDVD_API void hddvd_stream_close(hddvd_stream*);
+    /* Object input is copied/retained by the returned immutable handle. */
+    HDDVD_API int hddvd_object_open(const void*,size_t,hddvd_object**);
+    HDDVD_API int hddvd_object_open_with_provider(const void*,size_t,hddvd_decrypt_fn,void*,hddvd_object**);
+    HDDVD_API int hddvd_object_open_stream(hddvd_stream*,hddvd_object**);
+    HDDVD_API int hddvd_object_open_unwrapped(hddvd_object_type,const void*,size_t,hddvd_object**);
+    HDDVD_API void hddvd_object_close(hddvd_object*);
+    HDDVD_API int hddvd_object_get_info(const hddvd_object*,hddvd_object_info*);
+    HDDVD_API hddvd_object_type hddvd_object_get_type(const hddvd_object*);
+    HDDVD_API const char *hddvd_object_name(const hddvd_object*);
+    HDDVD_API int hddvd_object_open_payload(const hddvd_object*,hddvd_stream**);
+    HDDVD_API int hddvd_object_get_trailer(const hddvd_object*,const void**,size_t*);
     HDDVD_API int hddvd_scan_files(const hddvd_ctx*,hddvd_file_cb,void*);
     HDDVD_API const char *hddvd_file_kind_name(hddvd_file_kind);
     HDDVD_API int hddvd_xpl_find_start_ref(const char*,char**);

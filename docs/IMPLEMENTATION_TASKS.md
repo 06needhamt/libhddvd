@@ -115,7 +115,7 @@ documented ownership and reentrancy behavior.
 
 ### P2-01 — Write the envelope format note and fixture generator
 
-**Status:** Ready  
+**Status:** Complete
 **Depends on:** Phase 0  
 **Likely files:** `docs/formats/aacs-object-envelope.md`,
 `tests/fixtures/generate_objects.py`
@@ -131,7 +131,7 @@ being assigned guessed meanings.
 
 ### P2-02 — Add a strict object-envelope parser
 
-**Status:** Blocked  
+**Status:** Complete
 **Depends on:** P1-01, P2-01  
 **Likely files:** `include/hddvd.h`, `src/object.c`, `tests/test_object.c`
 
@@ -145,7 +145,7 @@ classifies all 40 members without scanning for `<?xml` or PNG signatures.
 
 ### P2-03 — Model protected content explicitly
 
-**Status:** Blocked  
+**Status:** Complete
 **Depends on:** P1-05, P2-02  
 **Likely files:** `include/hddvd.h`, `src/resource.c`, `src/hddvd.c`
 
@@ -159,7 +159,7 @@ provider callbacks cannot recursively corrupt resolver state.
 
 ### P2-04 — Route inspection tools through object parsing
 
-**Status:** Blocked  
+**Status:** Complete
 **Depends on:** P2-02  
 **Likely files:** `src/xmf.c`, `tools/hddvd-menuinfo.c`,
 `tools/hddvd-acainfo.c`
