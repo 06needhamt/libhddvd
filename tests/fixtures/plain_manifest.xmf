@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Application id="test" xmlns="http://www.dvdforum.org/2005/HDDVDVideo/Manifest">
+  <Region x="0" y="0" width="1920" height="1080"/>
+  <Script id="script" src="file:///dvddisc/ADV_OBJ/test.aca/test.js"/>
+  <Markup id="markup" src="file:///dvddisc/ADV_OBJ/test.aca/plain_markup.xmu"/>
+  <Resource src="file:///dvddisc/ADV_OBJ/test.aca"/>
+</Application>

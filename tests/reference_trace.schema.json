@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "libhddvd reference-menu interaction trace",
+  "type": "object",
+  "required": ["schema", "player", "states", "transitions"],
+  "properties": {
+    "schema": {"const": 1},
+    "player": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "states": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "focused_element", "visible_elements", "screenshot_sha256"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "focused_element": {"type": ["string", "null"]},
+          "visible_elements": {"type": "array", "items": {"type": "string"}},
+          "screenshot_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "title": {"type": ["integer", "null"], "minimum": 0},
+          "position_90khz": {"type": ["integer", "null"], "minimum": 0}
+        },
+        "additionalProperties": false
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "event", "to", "host_commands"],
+        "properties": {
+          "from": {"type": "string"},
+          "event": {"enum": ["open", "close", "up", "down", "left", "right", "activate", "timer", "title_end"]},
+          "to": {"type": "string"},
+          "host_commands": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
