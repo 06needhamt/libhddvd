@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root xml:lang="en" xmlns="http://www.dvdforum.org/2005/ihd"
+      xmlns:state="http://www.dvdforum.org/2005/ihd#state"
+      xmlns:style="http://www.dvdforum.org/2005/ihd#style">
+  <head>
+    <styling>
+      <style id="panelStyle" style:position="absolute" style:x="10px"
+             style:y="20px" style:width="200px" style:height="100px"/>
+      <style id="buttonStyle"
+             style:backgroundImage="url('normal.png') url('focused.png')"
+             style:navRight="second"/>
+    </styling>
+    <timing clock="title"/>
+  </head>
+  <body>
+    <div id="panel" style="panelStyle">
+      <button id="first" style="buttonStyle" state:focused="true"/>
+      <button id="second"/>
+    </div>
+  </body>
+</root>

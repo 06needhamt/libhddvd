@@ -32,6 +32,28 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+## Reference-menu conformance test
+
+The HDi reference archive is deliberately not distributed or downloaded by the
+project.  To validate a separately obtained copy, enable the opt-in test and pass
+its path at test time:
+
+```sh
+cmake -S . -B build -DBUILD_TESTING=ON -DHDDVD_ENABLE_REFERENCE_TESTS=ON
+cmake --build build
+HDDVD_REFERENCE_ACA=/outside/the/repository/reference.aca \
+  ctest --test-dir build -R reference-menu --output-on-failure
+```
+
+The test checks the fixed size and SHA-256 identity, the complete member
+inventory, and every member CRC.  Set `HDDVD_REFERENCE_REPORT` to write the JSON
+report to a chosen path.  With no `HDDVD_REFERENCE_ACA`, CTest reports the test as
+skipped.  See `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the remaining phases.
+
+Parser fuzz harnesses can be built with Clang and
+`-DHDDVD_BUILD_FUZZERS=ON`; the checked-in inputs under `tests/fixtures` are
+original synthetic seeds and contain no bytes from the reference archive.
+
 ## Status
 
 This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Full IFO/MAP semantics and an HDi JavaScript/rendering runtime are future work.
