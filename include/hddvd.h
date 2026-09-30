@@ -27,10 +27,13 @@ extern "C"
     typedef struct hddvd_stream hddvd_stream;
     typedef struct hddvd_aca hddvd_aca;
     typedef struct hddvd_uri hddvd_uri;
+    typedef struct hddvd_xmf hddvd_xmf;
     typedef void (*hddvd_log_fn)(void*,int,const char*);
     typedef int (*hddvd_xmf_cb)(void*,const char*,const void*,size_t);
     typedef struct hddvd_aca_entry { uint32_t offset; uint32_t size; uint32_t crc32; uint8_t flags; char name[256]; } hddvd_aca_entry;
     typedef struct hddvd_limits { size_t max_aca_entries; uint64_t max_aca_member_size; } hddvd_limits;
+    typedef struct hddvd_xmf_limits { size_t max_nodes; size_t max_references; } hddvd_xmf_limits;
+    typedef struct hddvd_xmf_region { uint32_t x; uint32_t y; uint32_t width; uint32_t height; } hddvd_xmf_region;
     typedef int (*hddvd_aca_entry_cb)(void*,const hddvd_aca_entry*);
 
     typedef enum hddvd_file_kind { HDDVD_FILE_UNKNOWN=0,HDDVD_FILE_IFO,HDDVD_FILE_BUP,HDDVD_FILE_VTI,HDDVD_FILE_MAP,HDDVD_FILE_EVO,HDDVD_FILE_XPL,HDDVD_FILE_ACA,HDDVD_FILE_DISCID } hddvd_file_kind;
@@ -62,6 +65,20 @@ extern "C"
     HDDVD_API const char *hddvd_file_kind_name(hddvd_file_kind);
     HDDVD_API int hddvd_xpl_find_start_ref(const char*,char**);
     HDDVD_API int hddvd_xmf_dump(const void*,size_t,const char*,void*);
+    /* XMF objects are immutable. All returned strings are borrowed and remain
+       valid until hddvd_xmf_close(). Inputs are copied by the parser. */
+    HDDVD_API void hddvd_xmf_limits_default(hddvd_xmf_limits*);
+    HDDVD_API int hddvd_xmf_open(const void*,size_t,hddvd_xmf**);
+    HDDVD_API int hddvd_xmf_open_with_limits(const void*,size_t,const hddvd_xmf_limits*,hddvd_xmf**);
+    HDDVD_API void hddvd_xmf_close(hddvd_xmf*);
+    HDDVD_API const char *hddvd_xmf_application_id(const hddvd_xmf*);
+    HDDVD_API int hddvd_xmf_get_region(const hddvd_xmf*,hddvd_xmf_region*);
+    HDDVD_API size_t hddvd_xmf_script_count(const hddvd_xmf*);
+    HDDVD_API int hddvd_xmf_get_script(const hddvd_xmf*,size_t,const char**,const char**);
+    HDDVD_API size_t hddvd_xmf_markup_count(const hddvd_xmf*);
+    HDDVD_API int hddvd_xmf_get_markup(const hddvd_xmf*,size_t,const char**,const char**);
+    HDDVD_API size_t hddvd_xmf_resource_root_count(const hddvd_xmf*);
+    HDDVD_API const char *hddvd_xmf_resource_root(const hddvd_xmf*,size_t);
     HDDVD_API int hddvd_aca_supported(void);
     HDDVD_API int hddvd_aca_open(const char*,hddvd_aca**);
     HDDVD_API int hddvd_aca_open_stream(hddvd_stream*,hddvd_aca**);

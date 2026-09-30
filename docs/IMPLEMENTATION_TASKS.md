@@ -175,7 +175,7 @@ valid JSON; malformed envelopes fail before libxml2 is called.
 
 ### P3-01 — Implement the immutable XMF model
 
-**Status:** Ready  
+**Status:** Complete
 **Depends on:** none for unwrapped input; integrate P2-02 later  
 **Likely files:** `include/hddvd.h`, `src/xmf.c`, `tests/test_xmf.c`
 

@@ -9,6 +9,8 @@ Experimental open-source HD DVD inspection library.
 - Native `HDDVDACA` reader (no libzip dependency)
 - ACA directory listing, bounds validation, CRC-32 verification, member reads and safe extraction
 - XMF manifest and XMU markup inspection
+- Immutable typed XMF manifests with validated application metadata, regions,
+  ordered script/markup references, resource roots, and configurable limits
 - EVO program-stream probing
 - Conservative IFO/MAP probes (binary semantic decoding is still incomplete)
 

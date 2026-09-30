@@ -1,53 +1,70 @@
 #include "hddvd.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-static int read_file(const char *name, unsigned char **data, size_t *size)
+#define NS "http://www.dvdforum.org/2005/HDDVDVideo/Manifest"
+
+static int expect_parse(const char *xml, int expected)
 {
-    FILE *file = fopen(name, "rb");
-    long length;
-
-    if (!file || fseek(file, 0, SEEK_END) || (length = ftell(file)) < 0 ||
-        fseek(file, 0, SEEK_SET)) {
-        if (file)
-            fclose(file);
-        return 0;
-    }
-    *data = malloc((size_t)length);
-    if (!*data || fread(*data, 1, (size_t)length, file) != (size_t)length) {
-        free(*data);
-        fclose(file);
-        return 0;
-    }
-    fclose(file);
-    *size = (size_t)length;
-    return 1;
+    hddvd_xmf *xmf = NULL;
+    int rc = hddvd_xmf_open(xml, strlen(xml), &xmf);
+    hddvd_xmf_close(xmf);
+    return rc == expected;
 }
 
-static int check(const char *leaf, int xmu)
+static int valid_model(void)
 {
-    char path[1024];
-    unsigned char *data = NULL;
-    size_t size = 0;
-    FILE *sink;
-    int rc;
+    const char xml[] = "<Application xmlns=\"" NS "\" id=\"app\">"
+      "<Region x=\"0\" y=\"1\" width=\"1920\" height=\"1080\"/>"
+      "<Script id=\"s1\" src=\"one.js\"/><Script id=\"s2\" src=\"two.js\"/>"
+      "<Markup id=\"m1\" src=\"main.xmu\"/><Resource src=\"file:///dvddisc/ADV_OBJ\"/>"
+      "<Future optional=\"yes\"/></Application>";
+    hddvd_xmf *xmf = NULL;
+    hddvd_xmf_region region;
+    const char *id, *src;
+    int ok = hddvd_xmf_open(xml, sizeof(xml) - 1, &xmf) == HDDVD_OK;
+    ok = ok && !strcmp(hddvd_xmf_application_id(xmf), "app") &&
+         hddvd_xmf_get_region(xmf, &region) == HDDVD_OK && region.x == 0 &&
+         region.y == 1 && region.width == 1920 && region.height == 1080 &&
+         hddvd_xmf_script_count(xmf) == 2 && hddvd_xmf_markup_count(xmf) == 1 &&
+         hddvd_xmf_resource_root_count(xmf) == 1;
+    ok = ok && hddvd_xmf_get_script(xmf, 1, &id, &src) == HDDVD_OK &&
+         !strcmp(id, "s2") && !strcmp(src, "two.js") &&
+         hddvd_xmf_get_markup(xmf, 0, &id, &src) == HDDVD_OK &&
+         !strcmp(id, "m1") && !strcmp(src, "main.xmu") &&
+         !strcmp(hddvd_xmf_resource_root(xmf, 0), "file:///dvddisc/ADV_OBJ") &&
+         hddvd_xmf_get_script(xmf, 2, &id, &src) == HDDVD_EINVAL;
+    hddvd_xmf_close(xmf);
+    return ok;
+}
 
-    snprintf(path, sizeof(path), "%s/%s", HDDVD_FIXTURE_DIR, leaf);
-    if (!read_file(path, &data, &size))
-        return 0;
-    sink = tmpfile();
-    if (!sink) {
-        free(data);
-        return 0;
-    }
-    rc = xmu ? hddvd_xmu_dump(data, size, leaf, sink)
-             : hddvd_xmf_dump(data, size, leaf, sink);
-    fclose(sink);
-    free(data);
-    return rc == HDDVD_OK;
+static int limits_work(void)
+{
+    const char xml[] = "<Application xmlns=\"" NS "\" id=\"a\"><Region x=\"0\" y=\"0\" width=\"1\" height=\"1\"/><Script id=\"s\" src=\"s\"/></Application>";
+    hddvd_xmf_limits limits = { 2, 5 };
+    hddvd_xmf *xmf = NULL;
+    int ok = hddvd_xmf_open_with_limits(xml, sizeof(xml) - 1, &limits, &xmf) == HDDVD_ELIMIT;
+    limits.max_nodes = 5; limits.max_references = 1;
+    ok = ok && hddvd_xmf_open_with_limits(xml, sizeof(xml) - 1, &limits, &xmf) == HDDVD_OK;
+    hddvd_xmf_close(xmf);
+    return ok;
 }
 
 int main(void)
 {
-    return check("plain_manifest.xmf", 0) && check("plain_markup.xmu", 1) ? 0 : 1;
+    const char *bad[] = {
+      "<Application xmlns=\"wrong\" id=\"a\"><Region x=\"0\" y=\"0\" width=\"1\" height=\"1\"/></Application>",
+      "<Application xmlns=\"" NS "\"><Region x=\"0\" y=\"0\" width=\"1\" height=\"1\"/></Application>",
+      "<Application xmlns=\"" NS "\" id=\"a\"></Application>",
+      "<Application xmlns=\"" NS "\" id=\"a\"><Region x=\"-1\" y=\"0\" width=\"1\" height=\"1\"/></Application>",
+      "<Application xmlns=\"" NS "\" id=\"a\"><Region x=\"0\" y=\"0\" width=\"0\" height=\"1\"/></Application>",
+      "<Application xmlns=\"" NS "\" id=\"a\"><Region x=\"0\" y=\"0\" width=\"1\" height=\"1\"/><Script id=\"a\" src=\"x\"/></Application>",
+      "<Application xmlns=\"" NS "\" id=\"a\"><Region x=\"0\" y=\"0\" width=\"1\" height=\"1\"/><Script xmlns=\"wrong\" id=\"s\" src=\"x\"/></Application>"
+    };
+    size_t i;
+    if (!valid_model() || !limits_work()) return 1;
+    for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+        if (!expect_parse(bad[i], HDDVD_EPARSE)) return 2;
+    return 0;
 }
