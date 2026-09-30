@@ -22,6 +22,20 @@ hddvd-menuinfo archived.aca
 
 The ACA implementation was validated against a genuine HD DVD archive with 40 members. The sample itself is not distributed with this source tree. Regression tests construct a small synthetic archive using the observed container structure.
 
+## Resource APIs
+
+Phase 1 provides checked 64-bit file and memory streams, persistent ACA handles
+with bounded member streams, canonical `file:///dvddisc/...` URI parsing, and
+case-insensitive resource lookup through `hddvd_open_resource`. ACA member streams
+retain their backing archive stream and remain valid after the archive handle is
+closed. Resource lookup rejects traversal, encoded separators, ambiguous
+case-insensitive matches, and (on POSIX systems) symbolic links.
+
+Phase 2 adds strict parsing for the 283-byte AACS object envelope used by ACA
+members. Clear XML payloads are passed to the existing XMF/XMU inspection code;
+protected image and script payloads return `HDDVD_EPROTECTED` unless the caller
+supplies a decryptor. The library does not contain keys or AACS decryption code.
+
 ## Build
 
 Requires libxml2.
@@ -31,6 +45,30 @@ cmake -S . -B build -DBUILD_TESTING=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+## Reference-menu conformance test
+
+The HDi reference archive is deliberately not distributed or downloaded by the
+project.  To validate a separately obtained copy, enable the opt-in test and pass
+its path at test time:
+
+```sh
+cmake -S . -B build -DBUILD_TESTING=ON -DHDDVD_ENABLE_REFERENCE_TESTS=ON
+cmake --build build
+HDDVD_REFERENCE_ACA=/outside/the/repository/reference.aca \
+  ctest --test-dir build -R reference-menu --output-on-failure
+```
+
+The test checks the fixed size and SHA-256 identity, the complete member
+inventory, and every member CRC.  Set `HDDVD_REFERENCE_REPORT` to write the JSON
+report to a chosen path.  With no `HDDVD_REFERENCE_ACA`, CTest reports the test as
+skipped.  See `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the remaining phases.
+Reviewable tasks, dependencies, and acceptance criteria for those phases are in
+`docs/IMPLEMENTATION_TASKS.md`.
+
+Parser fuzz harnesses can be built with Clang and
+`-DHDDVD_BUILD_FUZZERS=ON`; the checked-in inputs under `tests/fixtures` are
+original synthetic seeds and contain no bytes from the reference archive.
 
 ## Status
 
