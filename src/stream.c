@@ -3,17 +3,20 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct file_stream {
+typedef struct file_stream
+{
     hddvd_stream base;
     FILE *file;
 } file_stream;
 
-typedef struct memory_stream {
+typedef struct memory_stream
+{
     hddvd_stream base;
     unsigned char *data;
 } memory_stream;
 
-typedef struct slice_stream {
+typedef struct slice_stream
+{
     hddvd_stream base;
     hddvd_stream *parent;
     uint64_t offset;
@@ -28,18 +31,18 @@ static int seek_file(FILE *file, uint64_t offset)
 #endif
 }
 
-static int file_read(hddvd_stream *stream, uint64_t offset, void *buffer,
-                     size_t size, size_t *read_size)
+static int file_read(hddvd_stream *stream, uint64_t offset, void *buffer, size_t size,
+                     size_t *read_size)
 {
     file_stream *self = (file_stream *)stream;
     size_t available;
 
-    if (offset >= stream->size) {
+    if (offset >= stream->size)
+    {
         *read_size = 0;
         return HDDVD_OK;
     }
-    available = stream->size - offset > SIZE_MAX ? SIZE_MAX
-                                                  : (size_t)(stream->size - offset);
+    available = stream->size - offset > SIZE_MAX ? SIZE_MAX : (size_t)(stream->size - offset);
     if (size > available)
         size = available;
     if (seek_file(self->file, offset))
@@ -71,14 +74,17 @@ int hddvd_stream_open_file(const char *path, hddvd_stream **out)
     if (!stream)
         return HDDVD_ENOMEM;
     stream->file = fopen(path, "rb");
-    if (!stream->file) {
+    if (!stream->file)
+    {
         free(stream);
         return HDDVD_EIO;
     }
 #ifdef _WIN32
-    if (_fseeki64(stream->file, 0, SEEK_END) || (end = _ftelli64(stream->file)) < 0) {
+    if (_fseeki64(stream->file, 0, SEEK_END) || (end = _ftelli64(stream->file)) < 0)
+    {
 #else
-    if (fseek(stream->file, 0, SEEK_END) || (end = ftell(stream->file)) < 0) {
+    if (fseek(stream->file, 0, SEEK_END) || (end = ftell(stream->file)) < 0)
+    {
 #endif
         file_destroy(&stream->base);
         return HDDVD_EIO;
@@ -91,13 +97,14 @@ int hddvd_stream_open_file(const char *path, hddvd_stream **out)
     return HDDVD_OK;
 }
 
-static int memory_read(hddvd_stream *stream, uint64_t offset, void *buffer,
-                       size_t size, size_t *read_size)
+static int memory_read(hddvd_stream *stream, uint64_t offset, void *buffer, size_t size,
+                       size_t *read_size)
 {
     memory_stream *self = (memory_stream *)stream;
     size_t available;
 
-    if (offset >= stream->size) {
+    if (offset >= stream->size)
+    {
         *read_size = 0;
         return HDDVD_OK;
     }
@@ -127,7 +134,8 @@ int hddvd_stream_open_memory(const void *data, size_t size, hddvd_stream **out)
     if (!stream)
         return HDDVD_ENOMEM;
     stream->data = malloc(size ? size : 1);
-    if (!stream->data) {
+    if (!stream->data)
+    {
         free(stream);
         return HDDVD_ENOMEM;
     }
@@ -141,22 +149,21 @@ int hddvd_stream_open_memory(const void *data, size_t size, hddvd_stream **out)
     return HDDVD_OK;
 }
 
-static int slice_read(hddvd_stream *stream, uint64_t offset, void *buffer,
-                      size_t size, size_t *read_size)
+static int slice_read(hddvd_stream *stream, uint64_t offset, void *buffer, size_t size,
+                      size_t *read_size)
 {
     slice_stream *self = (slice_stream *)stream;
     size_t available;
 
-    if (offset >= stream->size) {
+    if (offset >= stream->size)
+    {
         *read_size = 0;
         return HDDVD_OK;
     }
-    available = stream->size - offset > SIZE_MAX ? SIZE_MAX
-                                                  : (size_t)(stream->size - offset);
+    available = stream->size - offset > SIZE_MAX ? SIZE_MAX : (size_t)(stream->size - offset);
     if (size > available)
         size = available;
-    return hddvd_stream_read_at(self->parent, self->offset + offset, buffer, size,
-                                read_size);
+    return hddvd_stream_read_at(self->parent, self->offset + offset, buffer, size, read_size);
 }
 
 static void slice_destroy(hddvd_stream *stream)
@@ -166,8 +173,7 @@ static void slice_destroy(hddvd_stream *stream)
     free(self);
 }
 
-int hddvd_stream_slice(hddvd_stream *parent, uint64_t offset, uint64_t size,
-                       hddvd_stream **out)
+int hddvd_stream_slice(hddvd_stream *parent, uint64_t offset, uint64_t size, hddvd_stream **out)
 {
     slice_stream *stream;
 
@@ -193,8 +199,8 @@ uint64_t hddvd_stream_size(const hddvd_stream *stream)
     return stream ? stream->size : 0;
 }
 
-int hddvd_stream_read_at(hddvd_stream *stream, uint64_t offset, void *buffer,
-                         size_t size, size_t *read_size)
+int hddvd_stream_read_at(hddvd_stream *stream, uint64_t offset, void *buffer, size_t size,
+                         size_t *read_size)
 {
     if (!stream || (!buffer && size) || !read_size)
         return HDDVD_EINVAL;

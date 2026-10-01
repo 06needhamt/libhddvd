@@ -441,7 +441,7 @@ this repository.  Pin the libhddvd API/ABI version in every integration PR.
 
 ### P7-01 — Publish consumable build metadata and capabilities
 
-**Status:** Blocked  
+**Status:** Complete
 **Depends on:** stable APIs from P1, P3, P4, P5, and P6  
 **Likely files:** `CMakeLists.txt`, `libhddvd.pc.in`, installed CMake config
 
@@ -489,16 +489,32 @@ playback under leak and race detectors.
 remain synchronized behind the overlay, zero required capabilities are unknown,
 and failures identify the missing feature or protection provider.
 
-## Cross-cutting tasks
+## Phase 8 — release hardening
+
+The original cross-cutting tasks remain independently reviewable and keep their
+stable `X-` task IDs.
+
+### X-03 — CI hardening matrix
+
+**Status:** Complete
+**Depends on:** none
+
+Add GCC and Clang builds, ASan/UBSan, a Clang fuzzer compile check, install/consumer
+tests, and Windows/macOS jobs where project infrastructure permits.  The external
+reference archive remains absent from public CI.
+
+## Phase 9 — actionable diagnostics
 
 ### X-01 — Error detail API
 
-**Status:** Ready  
+**Status:** Complete
 **Depends on:** none
 
 Add structured per-context diagnostics containing status, subsystem, byte offset,
 resource URI, and a human-readable message while retaining `hddvd_strerror` for
 stable status names.
+
+## Future cross-cutting work
 
 ### X-02 — Configurable limits
 
@@ -508,15 +524,6 @@ stable status names.
 Define one limits object for archive members, resource bytes, XML nodes/depth,
 decoded pixels, script heap/instructions/recursion, timers, and queued events.
 Provide conservative defaults and tests proving every limit is enforced.
-
-### X-03 — CI hardening matrix
-
-**Status:** Ready  
-**Depends on:** none
-
-Add GCC and Clang builds, ASan/UBSan, a Clang fuzzer compile check, install/consumer
-tests, and Windows/macOS jobs where project infrastructure permits.  The external
-reference archive remains absent from public CI.
 
 ## Milestone completion order
 

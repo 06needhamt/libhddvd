@@ -9,13 +9,35 @@
 #define RMDIR(p) _rmdir(p)
 #else
 #include <unistd.h>
-#define MKDIR(p) mkdir((p),0755)
+#define MKDIR(p) mkdir((p), 0755)
 #define RMDIR(p) rmdir(p)
 #endif
 
-static void put16(FILE *file, unsigned value){fputc((value>>8)&255,file);fputc(value&255,file);}
-static void put32(FILE *file, unsigned value){fputc((value>>24)&255,file);fputc((value>>16)&255,file);fputc((value>>8)&255,file);fputc(value&255,file);}
-static unsigned crc32(const unsigned char *data,size_t size){unsigned crc=~0u;size_t i;for(i=0;i<size;i++){unsigned k;crc^=data[i];for(k=0;k<8;k++)crc=(crc>>1)^((0u-(crc&1u))&0xedb88320u);}return ~crc;}
+static void put16(FILE *file, unsigned value)
+{
+    fputc((value >> 8) & 255, file);
+    fputc(value & 255, file);
+}
+static void put32(FILE *file, unsigned value)
+{
+    fputc((value >> 24) & 255, file);
+    fputc((value >> 16) & 255, file);
+    fputc((value >> 8) & 255, file);
+    fputc(value & 255, file);
+}
+static unsigned crc32(const unsigned char *data, size_t size)
+{
+    unsigned crc = ~0u;
+    size_t i;
+    for (i = 0; i < size; i++)
+    {
+        unsigned k;
+        crc ^= data[i];
+        for (k = 0; k < 8; k++)
+            crc = (crc >> 1) ^ ((0u - (crc & 1u)) & 0xedb88320u);
+    }
+    return ~crc;
+}
 static void write_archive(const char *path)
 {
     const unsigned char payload[] = "member";
@@ -24,11 +46,23 @@ static void write_archive(const char *path)
     FILE *file = fopen(path, "wb");
     unsigned i;
     assert(file);
-    fwrite("HDDVDACA",1,8,file);put16(file,0x10);put16(file,1);put16(file,1);put16(file,0x35);
-    for(i=0;i<16;i++)fputc(0,file);
-    put32(file,offset);put32(file,sizeof(payload)-1);put32(file,crc32(payload,sizeof(payload)-1));fputc(0xff,file);fputc(8,file);fwrite(name,1,8,file);
-    for(i=0;i<32;i++)fputc(0,file);
-    fwrite(payload,1,sizeof(payload)-1,file);fclose(file);
+    fwrite("HDDVDACA", 1, 8, file);
+    put16(file, 0x10);
+    put16(file, 1);
+    put16(file, 1);
+    put16(file, 0x35);
+    for (i = 0; i < 16; i++)
+        fputc(0, file);
+    put32(file, offset);
+    put32(file, sizeof(payload) - 1);
+    put32(file, crc32(payload, sizeof(payload) - 1));
+    fputc(0xff, file);
+    fputc(8, file);
+    fwrite(name, 1, 8, file);
+    for (i = 0; i < 32; i++)
+        fputc(0, file);
+    fwrite(payload, 1, sizeof(payload) - 1, file);
+    fclose(file);
 }
 
 int main(void)
@@ -64,7 +98,8 @@ int main(void)
     assert(hddvd_stream_read_at(stream, 0, data, sizeof(data), &got) == HDDVD_OK);
     assert(got == 4 && !memcmp(data, "data", 4));
     hddvd_stream_close(stream);
-    assert(hddvd_open_resource(ctx, "file:///dvddisc/ADV_OBJ/menu.ACA/item.BIN", &stream) == HDDVD_OK);
+    assert(hddvd_open_resource(ctx, "file:///dvddisc/ADV_OBJ/menu.ACA/item.BIN", &stream) ==
+           HDDVD_OK);
     assert(hddvd_stream_read_at(stream, 0, data, sizeof(data), &got) == HDDVD_OK);
     assert(got == 4 && !memcmp(data, "memb", 4));
     hddvd_stream_close(stream);

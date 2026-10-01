@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(libhddvd VERSION 0.1.0 LANGUAGES C)
+project(libhddvd VERSION 0.4.0 LANGUAGES C)
 
 include(GNUInstallDirs)
 include(CTest)
+include(CMakePackageConfigHelpers)
 
 option(HDDVD_ENABLE_REFERENCE_TESTS
        "Enable tests using an external reference ACA" OFF)
@@ -38,6 +39,10 @@ target_include_directories(hddvd PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_link_libraries(hddvd PRIVATE LibXml2::LibXml2)
+if(BUILD_SHARED_LIBS)
+    target_compile_definitions(hddvd PRIVATE HDDVD_BUILD_SHARED)
+    target_compile_definitions(hddvd INTERFACE HDDVD_USE_SHARED)
+endif()
 set_target_properties(hddvd PROPERTIES
     C_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES
@@ -58,7 +63,7 @@ foreach(tool info menuinfo acainfo acaextract scriptdump)
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core io object uri xpl xmf aca evo script_decode display events player)
+    foreach(test core io object uri resource xpl xmf aca evo script_decode display events player)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         add_test(NAME ${test} COMMAND test-${test})
@@ -76,6 +81,16 @@ if(BUILD_TESTING)
                     ${CMAKE_CURRENT_SOURCE_DIR}/tests/reference_menu_expected.json)
         set_tests_properties(reference-menu PROPERTIES SKIP_RETURN_CODE 77)
     endif()
+
+    add_test(NAME install-consumer
+        COMMAND ${CMAKE_COMMAND}
+            -DHDDVD_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+            -DHDDVD_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+            -DHDDVD_GENERATOR=${CMAKE_GENERATOR}
+            -DHDDVD_CONFIG=$<CONFIG>
+            "-DHDDVD_C_FLAGS=${CMAKE_C_FLAGS}"
+            "-DHDDVD_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_install.cmake)
 endif()
 
 if(HDDVD_BUILD_FUZZERS)
@@ -104,3 +119,22 @@ install(FILES include/hddvd.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(EXPORT hddvdTargets
     NAMESPACE hddvd::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hddvd)
+
+configure_package_config_file(
+    cmake/hddvdConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/hddvdConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hddvd
+)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/hddvdConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+configure_file(libhddvd.pc.in libhddvd.pc @ONLY)
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/hddvdConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/hddvdConfigVersion.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hddvd
+)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libhddvd.pc
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)

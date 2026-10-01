@@ -1,4 +1,4 @@
-# libhddvd 0.1.0
+# libhddvd 0.4.0
 
 Experimental open-source HD DVD inspection library.
 
@@ -49,6 +49,40 @@ cmake -S . -B build -DBUILD_TESTING=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+All C and C++ sources use Allman braces and are formatted with the checked-in
+ClangFormat configuration. Run the following before submitting changes:
+
+```sh
+find include src tests tools -type f \
+  \( -name '*.c' -o -name '*.h' -o -name '*.cpp' \) -print0 | \
+  xargs -0 clang-format -i
+```
+
+## Integration and capabilities
+
+Installed builds provide both a `libhddvd.pc` pkg-config file and a CMake config
+package exporting the `hddvd::hddvd` target.  Consumers can query
+`hddvd_abi_version()` and `hddvd_get_features()` before enabling individual
+integration paths.  Feature bits deliberately distinguish the available script
+decoder and host-driven image display list from the not-yet-available script
+runtime and built-in image decoder; no feature bit implies complete HDi menu
+conformance.
+
+```cmake
+find_package(hddvd 0.4 CONFIG REQUIRED)
+target_link_libraries(my_player PRIVATE hddvd::hddvd)
+```
+
+The VLC access/demux and overlay modules remain downstream work in the VLC
+source tree.  This release supplies the versioned ABI, capability negotiation,
+renderer-neutral display list, and serialized navigation foundations those
+modules consume.
+
+Context-bound resource failures are available through
+`hddvd_get_last_error()`, which reports a stable status, subsystem, resource URI,
+optional byte offset, and explanatory message. A later successful resource
+operation clears the prior diagnostic so hosts do not display stale errors.
 
 ## Reference-menu conformance test
 

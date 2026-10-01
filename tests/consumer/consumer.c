@@ -1,0 +1,18 @@
+#include <hddvd.h>
+
+#include <string.h>
+
+int main(void)
+{
+    hddvd_features features = hddvd_get_features();
+
+    if (hddvd_abi_version() != HDDVD_ABI_VERSION)
+        return 1;
+    if (strcmp(hddvd_version(), "0.4.0") != 0)
+        return 2;
+    if ((features & HDDVD_FEATURE_OBJECT_ENVELOPE) == 0)
+        return 3;
+    if ((features & HDDVD_FEATURE_SCRIPT_RUNTIME) != 0)
+        return 4;
+    return 0;
+}
