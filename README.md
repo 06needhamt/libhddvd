@@ -17,6 +17,9 @@ Experimental open-source HD DVD inspection library.
 - Conservative IFO/MAP probes (binary semantic decoding is still incomplete)
 - A bounded, engine-neutral script-table decoder and disassembler for clean-room
   structural fixtures; commercial HDi bytecode remains explicitly unsupported
+- Renderer-neutral, damage-tracked display lists with host-decoded premultiplied
+  RGBA planes, nested clipping/layout, stable stacking, focus image selection,
+  letterbox transforms, and reverse-paint-order hit testing
 
 ## ACA tools
 

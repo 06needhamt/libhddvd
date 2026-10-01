@@ -30,6 +30,8 @@ extern "C"
     typedef struct hddvd_xmf hddvd_xmf;
     typedef struct hddvd_object hddvd_object;
     typedef struct hddvd_script hddvd_script;
+    typedef struct hddvd_image_cache hddvd_image_cache;
+    typedef struct hddvd_display_list hddvd_display_list;
     typedef void (*hddvd_log_fn)(void*,int,const char*);
     typedef int (*hddvd_xmf_cb)(void*,const char*,const void*,size_t);
     typedef struct hddvd_aca_entry { uint32_t offset; uint32_t size; uint32_t crc32; uint8_t flags; char name[256]; } hddvd_aca_entry;
@@ -39,6 +41,16 @@ extern "C"
     typedef struct hddvd_script_limits { size_t max_strings; size_t max_functions; size_t max_instructions; uint64_t max_bytes; } hddvd_script_limits;
     typedef struct hddvd_script_function { uint32_t name_index; uint32_t first_instruction; uint32_t instruction_count; } hddvd_script_function;
     typedef struct hddvd_script_instruction { uint8_t opcode; uint8_t flags; int32_t operand; } hddvd_script_instruction;
+    typedef struct hddvd_rect { int32_t x; int32_t y; uint32_t width; uint32_t height; } hddvd_rect;
+    typedef struct hddvd_image_plane { const uint8_t *pixels; uint32_t width; uint32_t height; size_t stride; void (*release)(void*,const uint8_t*); void *release_opaque; } hddvd_image_plane;
+    typedef int (*hddvd_image_decode_fn)(void*,const char*,const void*,size_t,hddvd_image_plane*);
+    typedef struct hddvd_display_limits { size_t max_images; uint64_t max_encoded_bytes; uint64_t max_decoded_pixels; uint32_t max_dimension; size_t max_quads; } hddvd_display_limits;
+    typedef struct hddvd_image_source { const char *identity; const void *encoded; size_t encoded_size; } hddvd_image_source;
+    /* Parents must precede children. Geometry is parent-relative; clip, when
+       non-empty, is node-relative. Equal z values retain authored order. */
+    typedef struct hddvd_scene_node { uint64_t id; size_t parent; hddvd_rect bounds; hddvd_rect clip; int32_t z_index; uint8_t opacity; uint8_t visible; uint8_t focused; uint8_t hit_test; hddvd_image_source normal_image; hddvd_image_source focused_image; } hddvd_scene_node;
+    typedef struct hddvd_display_quad { uint64_t node_id; hddvd_image_plane image; hddvd_rect source; hddvd_rect destination; hddvd_rect clip; int32_t z_index; uint8_t opacity; } hddvd_display_quad;
+    typedef struct hddvd_video_transform { int32_t x; int32_t y; uint32_t width; uint32_t height; uint32_t logical_width; uint32_t logical_height; } hddvd_video_transform;
     typedef int (*hddvd_aca_entry_cb)(void*,const hddvd_aca_entry*);
 
     typedef enum hddvd_object_type { HDDVD_OBJECT_UNKNOWN=0,HDDVD_OBJECT_MANIFEST=1,HDDVD_OBJECT_MARKUP=2,HDDVD_OBJECT_SCRIPT=3,HDDVD_OBJECT_IMAGE=4 } hddvd_object_type;
@@ -97,6 +109,21 @@ extern "C"
     HDDVD_API int hddvd_script_get_function(const hddvd_script*,size_t,hddvd_script_function*);
     HDDVD_API size_t hddvd_script_instruction_count(const hddvd_script*);
     HDDVD_API int hddvd_script_get_instruction(const hddvd_script*,size_t,hddvd_script_instruction*);
+    /* Decoders must return premultiplied RGBA8. The cache calls release exactly
+       once after the last display list using a plane is closed. All objects are
+       single-threaded and callbacks are made only by cache_get/build calls. */
+    HDDVD_API void hddvd_display_limits_default(hddvd_display_limits*);
+    HDDVD_API int hddvd_image_cache_create(hddvd_image_decode_fn,void*,const hddvd_display_limits*,hddvd_image_cache**);
+    HDDVD_API void hddvd_image_cache_destroy(hddvd_image_cache*);
+    HDDVD_API int hddvd_display_build(hddvd_image_cache*,uint32_t,uint32_t,const hddvd_scene_node*,size_t,const hddvd_display_list*,hddvd_display_list**);
+    HDDVD_API void hddvd_display_list_close(hddvd_display_list*);
+    HDDVD_API size_t hddvd_display_quad_count(const hddvd_display_list*);
+    HDDVD_API int hddvd_display_get_quad(const hddvd_display_list*,size_t,hddvd_display_quad*);
+    HDDVD_API size_t hddvd_display_damage_count(const hddvd_display_list*);
+    HDDVD_API int hddvd_display_get_damage(const hddvd_display_list*,size_t,hddvd_rect*);
+    HDDVD_API void hddvd_video_transform_fit(uint32_t,uint32_t,uint32_t,uint32_t,hddvd_video_transform*);
+    HDDVD_API int hddvd_video_to_logical(const hddvd_video_transform*,int32_t,int32_t,int32_t*,int32_t*);
+    HDDVD_API int hddvd_display_hit_test(const hddvd_display_list*,int32_t,int32_t,uint64_t*);
     HDDVD_API int hddvd_scan_files(const hddvd_ctx*,hddvd_file_cb,void*);
     HDDVD_API const char *hddvd_file_kind_name(hddvd_file_kind);
     HDDVD_API int hddvd_xpl_find_start_ref(const char*,char**);

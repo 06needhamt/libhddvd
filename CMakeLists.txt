@@ -14,6 +14,7 @@ find_package(LibXml2 REQUIRED)
 add_library(hddvd
     src/aca.c
     src/disc.c
+    src/display.c
     src/evo.c
     src/hddvd.c
     src/ifo.c
@@ -56,7 +57,7 @@ foreach(tool info menuinfo acainfo acaextract scriptdump)
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core io object uri xpl xmf aca evo script_decode)
+    foreach(test core io object uri xpl xmf aca evo script_decode display)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         add_test(NAME ${test} COMMAND test-${test})
