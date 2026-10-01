@@ -21,6 +21,7 @@ add_library(hddvd
     src/io.c
     src/map.c
     src/object.c
+    src/player.c
     src/resource.c
     src/script_decode.c
     src/stream.c
@@ -57,7 +58,7 @@ foreach(tool info menuinfo acainfo acaextract scriptdump)
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core io object uri xpl xmf aca evo script_decode display)
+    foreach(test core io object uri xpl xmf aca evo script_decode display events player)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         add_test(NAME ${test} COMMAND test-${test})

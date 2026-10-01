@@ -367,7 +367,7 @@ captured states; any allowed pixel tolerance is documented and narrowly bounded.
 
 ### P6-01 — Define timebase, event, and host-command types
 
-**Status:** Ready  
+**Status:** Complete
 **Depends on:** none  
 **Likely files:** `include/hddvd.h`, `tests/test_events.c`
 
@@ -409,7 +409,7 @@ C structs.
 
 ### P6-04 — Harden EVO packet and stream metadata parsing
 
-**Status:** Ready after stream API  
+**Status:** Complete
 **Depends on:** P1-01  
 **Likely files:** `src/evo.c`, `tests/test_evo.c`
 
@@ -423,7 +423,7 @@ overlap bytes.
 
 ### P6-05 — Add the deterministic navigation scheduler
 
-**Status:** Blocked  
+**Status:** Foundation complete; full runtime integration remains blocked
 **Depends on:** P4-05, P6-01, P6-02  
 **Likely files:** `src/player.c`, `tests/test_player.c`
 
