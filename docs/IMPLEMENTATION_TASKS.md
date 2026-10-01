@@ -314,7 +314,7 @@ replay produces every captured state transition without title-specific branches.
 
 ### P5-01 — Define image-decoder and display-list APIs
 
-**Status:** Blocked  
+**Status:** Complete
 **Depends on:** P1-05, P3-03  
 **Likely files:** `include/hddvd.h`, `src/display.c`, `tests/test_display.c`
 
@@ -327,7 +327,7 @@ metadata cannot overflow allocations; cache ownership and eviction are tested.
 
 ### P5-02 — Compute scene layout and interaction images
 
-**Status:** Blocked  
+**Status:** Complete
 **Depends on:** P5-01, P4-04  
 **Likely files:** `src/layout.c`, `tests/test_layout.c`
 
@@ -340,7 +340,7 @@ dimensions.
 
 ### P5-03 — Add damage tracking, transforms, and hit testing
 
-**Status:** Blocked  
+**Status:** Complete
 **Depends on:** P5-02  
 **Likely files:** `src/display.c`, `tests/test_display.c`
 
