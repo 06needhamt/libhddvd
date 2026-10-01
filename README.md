@@ -15,6 +15,8 @@ Experimental open-source HD DVD inspection library.
   ordered script/markup references, resource roots, and configurable limits
 - EVO program-stream probing
 - Conservative IFO/MAP probes (binary semantic decoding is still incomplete)
+- A bounded, engine-neutral script-table decoder and disassembler for clean-room
+  structural fixtures; commercial HDi bytecode remains explicitly unsupported
 
 ## ACA tools
 
