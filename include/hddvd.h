@@ -32,6 +32,8 @@ extern "C"
     typedef struct hddvd_script hddvd_script;
     typedef struct hddvd_image_cache hddvd_image_cache;
     typedef struct hddvd_display_list hddvd_display_list;
+    typedef struct hddvd_nav hddvd_nav;
+    typedef struct hddvd_evo_parser hddvd_evo_parser;
     typedef void (*hddvd_log_fn)(void*,int,const char*);
     typedef int (*hddvd_xmf_cb)(void*,const char*,const void*,size_t);
     typedef struct hddvd_aca_entry { uint32_t offset; uint32_t size; uint32_t crc32; uint8_t flags; char name[256]; } hddvd_aca_entry;
@@ -66,6 +68,19 @@ extern "C"
 
     typedef enum hddvd_stream_codec { HDDVD_CODEC_UNKNOWN=0,HDDVD_CODEC_MPEG2_VIDEO,HDDVD_CODEC_H264,HDDVD_CODEC_VC1,HDDVD_CODEC_MPEG_AUDIO,HDDVD_CODEC_AC3_EAC3,HDDVD_CODEC_DTS_HD,HDDVD_CODEC_LPCM,HDDVD_CODEC_TRUEHD_MLP,HDDVD_CODEC_SUBPICTURE } hddvd_stream_codec;
     typedef struct hddvd_stream_info { uint8_t stream_id; uint8_t substream_id; hddvd_stream_codec codec; uint64_t packet_count; } hddvd_stream_info;
+
+    /* Title time is always expressed in the MPEG 90 kHz clock.  Conversion
+       helpers reject negative values and saturation rather than wrapping. */
+    typedef struct hddvd_time { uint64_t ticks; } hddvd_time;
+    typedef enum hddvd_playback_state { HDDVD_PLAYBACK_STOPPED=0,HDDVD_PLAYBACK_PLAYING,HDDVD_PLAYBACK_PAUSED } hddvd_playback_state;
+    typedef enum hddvd_event_type { HDDVD_EVENT_CLOCK=0,HDDVD_EVENT_PLAYBACK_STATE,HDDVD_EVENT_DISCONTINUITY,HDDVD_EVENT_TITLE_END,HDDVD_EVENT_STREAM_SELECTION,HDDVD_EVENT_COMMAND_ACK,HDDVD_EVENT_TIMER,HDDVD_EVENT_INPUT } hddvd_event_type;
+    typedef enum hddvd_command_type { HDDVD_COMMAND_PLAY=0,HDDVD_COMMAND_PAUSE,HDDVD_COMMAND_SEEK,HDDVD_COMMAND_SELECT_TITLE,HDDVD_COMMAND_SELECT_PLAYLIST,HDDVD_COMMAND_SELECT_STREAM,HDDVD_COMMAND_SET_MENU_VISIBLE } hddvd_command_type;
+    typedef enum hddvd_command_result { HDDVD_COMMAND_ACCEPTED=0,HDDVD_COMMAND_REJECTED,HDDVD_COMMAND_FAILED } hddvd_command_result;
+    typedef struct hddvd_event { hddvd_event_type type; hddvd_time when; uint64_t sequence; union { hddvd_playback_state playback_state; struct { uint32_t stream_type; uint32_t stream_id; } stream; struct { uint64_t command_id; hddvd_command_result result; } acknowledgement; struct { uint64_t timer_id; } timer; struct { uint32_t key; uint8_t pressed; } input; } data; } hddvd_event;
+    typedef struct hddvd_command { hddvd_command_type type; uint64_t id; union { hddvd_time seek; uint32_t selection; uint8_t visible; } data; } hddvd_command;
+    typedef struct hddvd_nav_limits { size_t max_events; size_t max_timers; } hddvd_nav_limits;
+    typedef void (*hddvd_event_fn)(void*,const hddvd_event*);
+    typedef void (*hddvd_command_fn)(void*,const hddvd_command*);
 
     typedef struct hddvd_map_info { uint64_t size; uint32_t sector_count; int structure_validated; } hddvd_map_info;
 
@@ -164,6 +179,31 @@ extern "C"
     HDDVD_API const char *hddvd_uri_member_name(const hddvd_uri*);
     HDDVD_API int hddvd_open_resource(const hddvd_ctx*,const char*,hddvd_stream**);
     HDDVD_API int hddvd_xmu_dump(const void*,size_t,const char*,void*);
+    HDDVD_API int hddvd_time_from_milliseconds(uint64_t,hddvd_time*);
+    HDDVD_API int hddvd_time_to_milliseconds(hddvd_time,uint64_t*);
+    HDDVD_API int hddvd_time_from_seconds(uint64_t,hddvd_time*);
+    /* Navigation objects and callbacks have navigation-thread affinity. Events
+       with equal timestamps are delivered in posting order. The bounded queue
+       rejects its newest event with HDDVD_ELIMIT and never discards old work.
+       Host command callbacks run synchronously and must acknowledge later by
+       posting HDDVD_EVENT_COMMAND_ACK (including if the command is rejected). */
+    HDDVD_API void hddvd_nav_limits_default(hddvd_nav_limits*);
+    HDDVD_API int hddvd_nav_create(const hddvd_nav_limits*,hddvd_event_fn,hddvd_command_fn,void*,hddvd_nav**);
+    HDDVD_API void hddvd_nav_destroy(hddvd_nav*);
+    HDDVD_API int hddvd_nav_post(hddvd_nav*,const hddvd_event*);
+    HDDVD_API int hddvd_nav_schedule_timer(hddvd_nav*,uint64_t,hddvd_time);
+    HDDVD_API int hddvd_nav_cancel_timer(hddvd_nav*,uint64_t);
+    HDDVD_API int hddvd_nav_advance(hddvd_nav*,hddvd_time);
+    HDDVD_API size_t hddvd_nav_pump(hddvd_nav*,size_t);
+    HDDVD_API int hddvd_nav_command(hddvd_nav*,const hddvd_command*,uint64_t*);
+    /* The incremental EVO parser accepts arbitrarily split input. finish()
+       reports a truncated PES packet; metadata remains queryable afterward. */
+    HDDVD_API int hddvd_evo_parser_create(hddvd_evo_parser**);
+    HDDVD_API void hddvd_evo_parser_destroy(hddvd_evo_parser*);
+    HDDVD_API int hddvd_evo_parser_push(hddvd_evo_parser*,const void*,size_t);
+    HDDVD_API int hddvd_evo_parser_finish(hddvd_evo_parser*);
+    HDDVD_API size_t hddvd_evo_parser_stream_count(const hddvd_evo_parser*);
+    HDDVD_API int hddvd_evo_parser_get_stream(const hddvd_evo_parser*,size_t,hddvd_stream_info*);
     HDDVD_API int hddvd_evo_probe(const char*,hddvd_stream_info*,size_t,size_t*);
     HDDVD_API const char *hddvd_codec_name(hddvd_stream_codec);
     HDDVD_API int hddvd_map_probe(const char*,hddvd_map_info*);
