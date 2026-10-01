@@ -29,12 +29,16 @@ extern "C"
     typedef struct hddvd_uri hddvd_uri;
     typedef struct hddvd_xmf hddvd_xmf;
     typedef struct hddvd_object hddvd_object;
+    typedef struct hddvd_script hddvd_script;
     typedef void (*hddvd_log_fn)(void*,int,const char*);
     typedef int (*hddvd_xmf_cb)(void*,const char*,const void*,size_t);
     typedef struct hddvd_aca_entry { uint32_t offset; uint32_t size; uint32_t crc32; uint8_t flags; char name[256]; } hddvd_aca_entry;
     typedef struct hddvd_limits { size_t max_aca_entries; uint64_t max_aca_member_size; } hddvd_limits;
     typedef struct hddvd_xmf_limits { size_t max_nodes; size_t max_references; } hddvd_xmf_limits;
     typedef struct hddvd_xmf_region { uint32_t x; uint32_t y; uint32_t width; uint32_t height; } hddvd_xmf_region;
+    typedef struct hddvd_script_limits { size_t max_strings; size_t max_functions; size_t max_instructions; uint64_t max_bytes; } hddvd_script_limits;
+    typedef struct hddvd_script_function { uint32_t name_index; uint32_t first_instruction; uint32_t instruction_count; } hddvd_script_function;
+    typedef struct hddvd_script_instruction { uint8_t opcode; uint8_t flags; int32_t operand; } hddvd_script_instruction;
     typedef int (*hddvd_aca_entry_cb)(void*,const hddvd_aca_entry*);
 
     typedef enum hddvd_object_type { HDDVD_OBJECT_UNKNOWN=0,HDDVD_OBJECT_MANIFEST=1,HDDVD_OBJECT_MARKUP=2,HDDVD_OBJECT_SCRIPT=3,HDDVD_OBJECT_IMAGE=4 } hddvd_object_type;
@@ -80,6 +84,19 @@ extern "C"
     HDDVD_API const char *hddvd_object_name(const hddvd_object*);
     HDDVD_API int hddvd_object_open_payload(const hddvd_object*,hddvd_stream**);
     HDDVD_API int hddvd_object_get_trailer(const hddvd_object*,const void**,size_t*);
+    /* The decoder exposes validated, engine-neutral script structure. Strings
+       are borrowed and all indexes remain valid until hddvd_script_close(). */
+    HDDVD_API void hddvd_script_limits_default(hddvd_script_limits*);
+    HDDVD_API int hddvd_script_open(const void*,size_t,hddvd_script**);
+    HDDVD_API int hddvd_script_open_with_limits(const void*,size_t,const hddvd_script_limits*,hddvd_script**);
+    HDDVD_API void hddvd_script_close(hddvd_script*);
+    HDDVD_API uint16_t hddvd_script_version(const hddvd_script*);
+    HDDVD_API size_t hddvd_script_string_count(const hddvd_script*);
+    HDDVD_API const char *hddvd_script_string(const hddvd_script*,size_t);
+    HDDVD_API size_t hddvd_script_function_count(const hddvd_script*);
+    HDDVD_API int hddvd_script_get_function(const hddvd_script*,size_t,hddvd_script_function*);
+    HDDVD_API size_t hddvd_script_instruction_count(const hddvd_script*);
+    HDDVD_API int hddvd_script_get_instruction(const hddvd_script*,size_t,hddvd_script_instruction*);
     HDDVD_API int hddvd_scan_files(const hddvd_ctx*,hddvd_file_cb,void*);
     HDDVD_API const char *hddvd_file_kind_name(hddvd_file_kind);
     HDDVD_API int hddvd_xpl_find_start_ref(const char*,char**);
