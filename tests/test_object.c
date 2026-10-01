@@ -48,8 +48,9 @@ static int decrypt(void *opaque, const hddvd_object_info *info, const void *in, 
     (void)opaque;
     (void)info;
     copy = malloc(size);
-    if (!copy)
+    if (!copy) {
         return HDDVD_ENOMEM;
+    }
     memcpy(copy, in, size);
     *out = copy;
     *out_size = size;
@@ -79,43 +80,52 @@ int main(void)
     hddvd_object_close(object);
     memcpy(corrupt, bytes, size);
     corrupt[0] = 'X';
-    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE)
+    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE) {
         return 2;
+    }
     memcpy(corrupt, bytes, size);
     put64(corrupt + 16, 8);
-    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE)
+    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE) {
         return 3;
+    }
     memcpy(corrupt, bytes, size);
     corrupt[8] = 2;
-    if (hddvd_object_open(corrupt, size, &object) != HDDVD_ENOTSUP)
+    if (hddvd_object_open(corrupt, size, &object) != HDDVD_ENOTSUP) {
         return 7;
+    }
     memcpy(corrupt, bytes, size);
     corrupt[9] = 0x80;
-    if (hddvd_object_open(corrupt, size, &object) != HDDVD_ENOTSUP)
+    if (hddvd_object_open(corrupt, size, &object) != HDDVD_ENOTSUP) {
         return 8;
+    }
     memcpy(corrupt, bytes, size);
     put32(corrupt + 12, 31);
-    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE)
+    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE) {
         return 9;
+    }
     memcpy(corrupt, bytes, size);
     corrupt[32] = 0;
-    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE)
+    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE) {
         return 10;
+    }
     memcpy(corrupt, bytes, size);
     put16(corrupt + 24, 3);
     corrupt[35] = 1;
-    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE)
+    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE) {
         return 11;
+    }
     memcpy(corrupt, bytes, size);
     corrupt[9] = 1;
-    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPROTECTED)
+    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPROTECTED) {
         return 4;
+    }
     if (hddvd_object_open_with_provider(corrupt, size, decrypt, NULL, &object) ||
         hddvd_object_get_type(object) != HDDVD_OBJECT_MANIFEST)
         return 5;
     hddvd_object_close(object);
-    if (hddvd_object_open_unwrapped(HDDVD_OBJECT_MARKUP, "x", 1, &object))
+    if (hddvd_object_open_unwrapped(HDDVD_OBJECT_MARKUP, "x", 1, &object)) {
         return 6;
+    }
     hddvd_object_close(object);
     return 0;
 }

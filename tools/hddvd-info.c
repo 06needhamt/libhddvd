@@ -9,8 +9,9 @@ static int show(void *o, const hddvd_file_info *f)
     {
         hddvd_stream_info s[32];
         size_t n = 0, i;
-        if (hddvd_evo_probe(f->path, s, 32, &n) == HDDVD_OK)
+        if (hddvd_evo_probe(f->path, s, 32, &n) == HDDVD_OK) {
             for (i = 0; i < n; i++)
+        }
                 printf("       stream %02x/%02x %-14s packets=%llu\n", s[i].stream_id,
                        s[i].substream_id, hddvd_codec_name(s[i].codec),
                        (unsigned long long)s[i].packet_count);

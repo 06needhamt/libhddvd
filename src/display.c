@@ -38,8 +38,9 @@ struct hddvd_display_list
 
 void hddvd_display_limits_default(hddvd_display_limits *l)
 {
-    if (!l)
+    if (!l) {
         return;
+    }
     l->max_images = 256;
     l->max_encoded_bytes = 64U * 1024U * 1024U;
     l->max_decoded_pixels = 1920U * 1080U * 8U;
@@ -51,16 +52,19 @@ int hddvd_image_cache_create(hddvd_image_decode_fn fn, void *opaque,
                              const hddvd_display_limits *limits, hddvd_image_cache **out)
 {
     hddvd_image_cache *c;
-    if (!fn || !out)
+    if (!fn || !out) {
         return HDDVD_EINVAL;
+    }
     *out = NULL;
     c = (hddvd_image_cache *)calloc(1, sizeof(*c));
-    if (!c)
+    if (!c) {
         return HDDVD_ENOMEM;
+    }
     c->decode = fn;
     c->opaque = opaque;
-    if (limits)
+    if (limits) {
         c->limits = *limits;
+    }
     else
         hddvd_display_limits_default(&c->limits);
     if (!c->limits.max_images || !c->limits.max_decoded_pixels || !c->limits.max_dimension ||
@@ -76,13 +80,15 @@ int hddvd_image_cache_create(hddvd_image_decode_fn fn, void *opaque,
 void hddvd_image_cache_destroy(hddvd_image_cache *c)
 {
     cached_image *p, *n;
-    if (!c)
+    if (!c) {
         return;
+    }
     for (p = c->images; p; p = n)
     {
         n = p->next;
-        if (p->plane.release)
+        if (p->plane.release) {
             p->plane.release(p->plane.release_opaque, p->plane.pixels);
+        }
         free(p->identity);
         free(p);
     }
@@ -94,10 +100,12 @@ static int image_get(hddvd_image_cache *c, const hddvd_image_source *s, cached_i
     cached_image *p, *previous, *victim;
     hddvd_image_plane plane;
     uint64_t pixels;
-    if (!s->identity || !s->identity[0] || (!s->encoded && s->encoded_size))
+    if (!s->identity || !s->identity[0] || (!s->encoded && s->encoded_size)) {
         return HDDVD_EINVAL;
-    if ((uint64_t)s->encoded_size > c->limits.max_encoded_bytes)
+    }
+    if ((uint64_t)s->encoded_size > c->limits.max_encoded_bytes) {
         return HDDVD_ELIMIT;
+    }
     for (p = c->images; p; p = p->next)
         if (!strcmp(p->identity, s->identity))
         {
@@ -108,14 +116,16 @@ static int image_get(hddvd_image_cache *c, const hddvd_image_source *s, cached_i
     memset(&plane, 0, sizeof(plane));
     {
         int rc = c->decode(c->opaque, s->identity, s->encoded, s->encoded_size, &plane);
-        if (rc != HDDVD_OK)
+        if (rc != HDDVD_OK) {
             return rc;
+        }
     }
     if (!plane.pixels || !plane.width || !plane.height || plane.width > c->limits.max_dimension ||
         plane.height > c->limits.max_dimension || plane.stride < (size_t)plane.width * 4U)
     {
-        if (plane.release)
+        if (plane.release) {
             plane.release(plane.release_opaque, plane.pixels);
+        }
         return HDDVD_EPARSE;
     }
     pixels = (uint64_t)plane.width * plane.height;
@@ -130,34 +140,39 @@ static int image_get(hddvd_image_cache *c, const hddvd_image_source *s, cached_i
         }
         if (!victim)
         {
-            if (plane.release)
+            if (plane.release) {
                 plane.release(plane.release_opaque, plane.pixels);
+            }
             return HDDVD_ELIMIT;
         }
-        if (previous)
+        if (previous) {
             previous->next = victim->next;
+        }
         else
             c->images = victim->next;
         c->pixels -= (uint64_t)victim->plane.width * victim->plane.height;
         c->count--;
-        if (victim->plane.release)
+        if (victim->plane.release) {
             victim->plane.release(victim->plane.release_opaque, victim->plane.pixels);
+        }
         free(victim->identity);
         free(victim);
     }
     p = (cached_image *)calloc(1, sizeof(*p));
     if (!p)
     {
-        if (plane.release)
+        if (plane.release) {
             plane.release(plane.release_opaque, plane.pixels);
+        }
         return HDDVD_ENOMEM;
     }
     p->identity = hddvd_strdup(s->identity);
     if (!p->identity)
     {
         free(p);
-        if (plane.release)
+        if (plane.release) {
             plane.release(plane.release_opaque, plane.pixels);
+        }
         return HDDVD_ENOMEM;
     }
     p->plane = plane;
@@ -176,8 +191,9 @@ static int rect_intersect(hddvd_rect a, hddvd_rect b, hddvd_rect *o)
     int64_t ar = (int64_t)a.x + a.width, br = (int64_t)b.x + b.width, ab = (int64_t)a.y + a.height,
             bb = (int64_t)b.y + b.height;
     int64_t r = ar < br ? ar : br, bot = ab < bb ? ab : bb;
-    if (r <= l || bot <= t)
+    if (r <= l || bot <= t) {
         return 0;
+    }
     o->x = (int32_t)l;
     o->y = (int32_t)t;
     o->width = (uint32_t)(r - l);
@@ -187,10 +203,12 @@ static int rect_intersect(hddvd_rect a, hddvd_rect b, hddvd_rect *o)
 static int cmp_item(const void *a, const void *b)
 {
     const display_item *x = a, *y = b;
-    if (x->quad.z_index < y->quad.z_index)
+    if (x->quad.z_index < y->quad.z_index) {
         return -1;
-    if (x->quad.z_index > y->quad.z_index)
+    }
+    if (x->quad.z_index > y->quad.z_index) {
         return 1;
+    }
     return x->order < y->order ? -1 : x->order > y->order;
 }
 static int same_quad(const display_item *a, const display_item *b)
@@ -202,8 +220,9 @@ static int same_quad(const display_item *a, const display_item *b)
 }
 static void add_damage(hddvd_display_list *l, hddvd_rect r)
 {
-    if (r.width && r.height)
+    if (r.width && r.height) {
         l->damage[l->damage_count++] = r;
+    }
 }
 
 int hddvd_display_build(hddvd_image_cache *cache, uint32_t width, uint32_t height,
@@ -216,14 +235,17 @@ int hddvd_display_build(hddvd_image_cache *cache, uint32_t width, uint32_t heigh
     uint8_t *visible = NULL;
     size_t i, j;
     int rc = HDDVD_OK;
-    if (!cache || !out || (!nodes && count) || !width || !height)
+    if (!cache || !out || (!nodes && count) || !width || !height) {
         return HDDVD_EINVAL;
+    }
     *out = NULL;
-    if (count > cache->limits.max_quads)
+    if (count > cache->limits.max_quads) {
         return HDDVD_ELIMIT;
+    }
     l = (hddvd_display_list *)calloc(1, sizeof(*l));
-    if (!l)
+    if (!l) {
         return HDDVD_ENOMEM;
+    }
     l->items = (display_item *)calloc(count ? count : 1, sizeof(*l->items));
     l->damage = (hddvd_rect *)calloc((count + (old ? old->count : 0)) * 2 + 1, sizeof(*l->damage));
     xs = (int64_t *)calloc(count ? count : 1, sizeof(*xs));
@@ -255,11 +277,13 @@ int hddvd_display_build(hddvd_image_cache *cache, uint32_t width, uint32_t heigh
         }
         bounds = (hddvd_rect){(int32_t)xs[i], (int32_t)ys[i], n->bounds.width, n->bounds.height};
         clips[i] = (hddvd_rect){0, 0, width, height};
-        if (n->parent != SIZE_MAX)
+        if (n->parent != SIZE_MAX) {
             clips[i] = clips[n->parent];
+        }
         ownclip = n->clip;
-        if (!ownclip.width || !ownclip.height)
+        if (!ownclip.width || !ownclip.height) {
             ownclip = (hddvd_rect){0, 0, n->bounds.width, n->bounds.height};
+        }
         {
             int64_t cx = (int64_t)ownclip.x + xs[i], cy = (int64_t)ownclip.y + ys[i];
             if (cx < INT32_MIN || cx > INT32_MAX || cy < INT32_MIN || cy > INT32_MAX)
@@ -272,14 +296,17 @@ int hddvd_display_build(hddvd_image_cache *cache, uint32_t width, uint32_t heigh
         }
         visible[i] = (uint8_t)(n->visible && (n->parent == SIZE_MAX || visible[n->parent]) &&
                                rect_intersect(clips[i], ownclip, &clips[i]));
-        if (!visible[i] || !rect_intersect(clips[i], bounds, &ownclip))
+        if (!visible[i] || !rect_intersect(clips[i], bounds, &ownclip)) {
             continue;
+        }
         source = (n->focused && n->focused_image.identity) ? &n->focused_image : &n->normal_image;
-        if (!source->identity)
+        if (!source->identity) {
             continue;
+        }
         rc = image_get(cache, source, &img);
-        if (rc != HDDVD_OK)
+        if (rc != HDDVD_OK) {
             goto fail;
+        }
         l->items[l->count].quad = (hddvd_display_quad){
             n->id,      img->plane, {0, 0, img->plane.width, img->plane.height}, bounds, ownclip,
             n->z_index, n->opacity};
@@ -303,11 +330,13 @@ int hddvd_display_build(hddvd_image_cache *cache, uint32_t width, uint32_t heigh
                 }
                 break;
             }
-        if (!found)
+        if (!found) {
             add_damage(l, l->items[i].quad.clip);
+        }
     }
-    if (old)
+    if (old) {
         for (j = 0; j < old->count; j++)
+    }
         {
             int found = 0;
             for (i = 0; i < l->count; i++)
@@ -316,8 +345,9 @@ int hddvd_display_build(hddvd_image_cache *cache, uint32_t width, uint32_t heigh
                     found = 1;
                     break;
                 }
-            if (!found)
+            if (!found) {
                 add_damage(l, old->items[j].quad.clip);
+            }
         }
     free(xs);
     free(ys);
@@ -337,11 +367,13 @@ fail:
 void hddvd_display_list_close(hddvd_display_list *l)
 {
     size_t i;
-    if (!l)
+    if (!l) {
         return;
+    }
     for (i = 0; i < l->count; i++)
-        if (l->items[i].image)
+        if (l->items[i].image) {
             l->items[i].image->refs--;
+        }
     free(l->items);
     free(l->damage);
     free(l);
@@ -352,8 +384,9 @@ size_t hddvd_display_quad_count(const hddvd_display_list *l)
 }
 int hddvd_display_get_quad(const hddvd_display_list *l, size_t i, hddvd_display_quad *q)
 {
-    if (!l || !q || i >= l->count)
+    if (!l || !q || i >= l->count) {
         return HDDVD_EINVAL;
+    }
     *q = l->items[i].quad;
     return HDDVD_OK;
 }
@@ -363,8 +396,9 @@ size_t hddvd_display_damage_count(const hddvd_display_list *l)
 }
 int hddvd_display_get_damage(const hddvd_display_list *l, size_t i, hddvd_rect *r)
 {
-    if (!l || !r || i >= l->damage_count)
+    if (!l || !r || i >= l->damage_count) {
         return HDDVD_EINVAL;
+    }
     *r = l->damage[i];
     return HDDVD_OK;
 }
@@ -373,11 +407,13 @@ void hddvd_video_transform_fit(uint32_t lw, uint32_t lh, uint32_t vw, uint32_t v
                                hddvd_video_transform *t)
 {
     uint64_t w, h;
-    if (!t)
+    if (!t) {
         return;
+    }
     memset(t, 0, sizeof(*t));
-    if (!lw || !lh || !vw || !vh)
+    if (!lw || !lh || !vw || !vh) {
         return;
+    }
     t->logical_width = lw;
     t->logical_height = lh;
     if ((uint64_t)vw * lh <= (uint64_t)vh * lw)
@@ -408,8 +444,9 @@ int hddvd_video_to_logical(const hddvd_video_transform *t, int32_t x, int32_t y,
 int hddvd_display_hit_test(const hddvd_display_list *l, int32_t x, int32_t y, uint64_t *id)
 {
     size_t i;
-    if (!l || !id)
+    if (!l || !id) {
         return HDDVD_EINVAL;
+    }
     for (i = l->count; i; i--)
     {
         const display_item *p = &l->items[i - 1];

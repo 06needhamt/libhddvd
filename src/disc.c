@@ -6,22 +6,30 @@
 #include <stdlib.h>
 static hddvd_file_kind kind(const char *p)
 {
-    if (hddvd_ascii_endswith_ci(p, ".IFO"))
+    if (hddvd_ascii_endswith_ci(p, ".IFO")) {
         return HDDVD_FILE_IFO;
-    if (hddvd_ascii_endswith_ci(p, ".BUP"))
+    }
+    if (hddvd_ascii_endswith_ci(p, ".BUP")) {
         return HDDVD_FILE_BUP;
-    if (hddvd_ascii_endswith_ci(p, ".VTI"))
+    }
+    if (hddvd_ascii_endswith_ci(p, ".VTI")) {
         return HDDVD_FILE_VTI;
-    if (hddvd_ascii_endswith_ci(p, ".MAP"))
+    }
+    if (hddvd_ascii_endswith_ci(p, ".MAP")) {
         return HDDVD_FILE_MAP;
-    if (hddvd_ascii_endswith_ci(p, ".EVO"))
+    }
+    if (hddvd_ascii_endswith_ci(p, ".EVO")) {
         return HDDVD_FILE_EVO;
-    if (hddvd_ascii_endswith_ci(p, ".XPL"))
+    }
+    if (hddvd_ascii_endswith_ci(p, ".XPL")) {
         return HDDVD_FILE_XPL;
-    if (hddvd_ascii_endswith_ci(p, ".ACA"))
+    }
+    if (hddvd_ascii_endswith_ci(p, ".ACA")) {
         return HDDVD_FILE_ACA;
-    if (hddvd_ascii_endswith_ci(p, "DISCID.DAT"))
+    }
+    if (hddvd_ascii_endswith_ci(p, "DISCID.DAT")) {
         return HDDVD_FILE_DISCID;
+    }
     return HDDVD_FILE_UNKNOWN;
 }
 const char *hddvd_file_kind_name(hddvd_file_kind k)
@@ -33,15 +41,17 @@ static int scan_dir(const char *dir, hddvd_file_cb cb, void *op)
 {
     DIR *d = opendir(dir);
     struct dirent *e;
-    if (!d)
+    if (!d) {
         return HDDVD_ENOTFOUND;
+    }
     while ((e = readdir(d)))
     {
         char *p;
         struct stat st;
         hddvd_file_info fi;
-        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) {
             continue;
+        }
         p = hddvd_path_join(dir, e->d_name);
         if (!p)
         {
@@ -90,8 +100,9 @@ int hddvd_scan_files(const hddvd_ctx *c, hddvd_file_cb cb, void *op)
     free(a);
     free(h);
     rc = (ra == HDDVD_OK || rh == HDDVD_OK) ? HDDVD_OK : HDDVD_ENOTFOUND;
-    if (rc == HDDVD_OK)
+    if (rc == HDDVD_OK) {
         hddvd_clear_error((hddvd_ctx *)c);
+    }
     else
         hddvd_ctx_set_error(c, rc, HDDVD_SUBSYSTEM_DISC, c->root,
                             "HD DVD content directories were not found");

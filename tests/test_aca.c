@@ -41,8 +41,9 @@ int main(void)
     size_t bad = 9;
     void *b = NULL;
     size_t n = 0;
-    if (!f)
+    if (!f) {
         return 1;
+    }
     fwrite("HDDVDACA", 1, 8, f);
     put16(f, 0x10);
     put16(f, 1);
@@ -60,10 +61,12 @@ int main(void)
         fputc(0, f);
     fwrite(data, 1, sizeof(data) - 1, f);
     fclose(f);
-    if (hddvd_aca_verify(fn, &bad) || bad)
+    if (hddvd_aca_verify(fn, &bad) || bad) {
         return 2;
-    if (hddvd_aca_read_member(fn, name, &b, &n) || n != sizeof(data) - 1 || memcmp(b, data, n))
+    }
+    if (hddvd_aca_read_member(fn, name, &b, &n) || n != sizeof(data) - 1 || memcmp(b, data, n)) {
         return 3;
+    }
     hddvd_free(b);
     if (hddvd_aca_open(fn, &a) || hddvd_aca_count(a) != 1 || hddvd_aca_get_entry(a, 0, &e) ||
         strcmp(e.name, name) || hddvd_aca_open_member(a, "MAIN.XMF", &s))
@@ -75,12 +78,14 @@ int main(void)
         return 5;
     free(b);
     hddvd_stream_close(s);
-    if (hddvd_stream_open_file(fn, &file_stream))
+    if (hddvd_stream_open_file(fn, &file_stream)) {
         return 6;
+    }
     hddvd_limits_default(&limits);
     limits.max_aca_member_size = 1;
-    if (hddvd_aca_open_stream_with_limits(file_stream, &limits, &a) != HDDVD_ELIMIT)
+    if (hddvd_aca_open_stream_with_limits(file_stream, &limits, &a) != HDDVD_ELIMIT) {
         return 7;
+    }
     hddvd_stream_close(file_stream);
     remove(fn);
     return 0;

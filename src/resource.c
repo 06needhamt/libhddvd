@@ -9,12 +9,14 @@ static int resolve_component(const char *directory, const char *name, char **out
     DIR *dir = opendir(directory);
     struct dirent *entry;
     char *match = NULL;
-    if (!dir)
+    if (!dir) {
         return HDDVD_ENOTFOUND;
+    }
     while ((entry = readdir(dir)) != NULL)
     {
-        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) {
             continue;
+        }
         if (hddvd_ascii_equal_ci(entry->d_name, name))
         {
 #ifndef _WIN32
@@ -47,8 +49,9 @@ static int resolve_component(const char *directory, const char *name, char **out
         }
     }
     closedir(dir);
-    if (!match)
+    if (!match) {
         return HDDVD_ENOTFOUND;
+    }
     *out = match;
     return HDDVD_OK;
 }
@@ -58,8 +61,9 @@ static int resolve_path(const char *root, const char *relative, char **out)
     char *current = hddvd_strdup(root);
     const char *cursor = relative;
     int rc = HDDVD_OK;
-    if (!current)
+    if (!current) {
         return HDDVD_ENOMEM;
+    }
     while (*cursor)
     {
         const char *slash = strchr(cursor, '/');
@@ -74,12 +78,14 @@ static int resolve_path(const char *root, const char *relative, char **out)
         component[length] = 0;
         rc = resolve_component(current, component, &next);
         free(component);
-        if (rc)
+        if (rc) {
             break;
+        }
         free(current);
         current = next;
-        if (!slash)
+        if (!slash) {
             break;
+        }
         cursor = slash + 1;
     }
     if (rc)
@@ -124,12 +130,14 @@ int hddvd_open_resource(const hddvd_ctx *ctx, const char *text, hddvd_stream **o
             hddvd_aca_close(archive);
         }
     }
-    else if (!rc)
+    else if (!rc) {
         rc = hddvd_stream_open_file(path, out);
+    }
     free(path);
     hddvd_uri_free(uri);
-    if (rc == HDDVD_OK)
+    if (rc == HDDVD_OK) {
         hddvd_clear_error((hddvd_ctx *)ctx);
+    }
     else if (rc == HDDVD_ENOTFOUND)
         hddvd_ctx_set_error(ctx, rc, HDDVD_SUBSYSTEM_RESOURCE, text,
                             "resource was not found within the disc root");

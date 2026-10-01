@@ -40,11 +40,13 @@ static int xml_input(const void *input, size_t input_size, hddvd_object_type exp
     *owned = NULL;
     *data = input;
     *size = input_size;
-    if (input_size < 8 || memcmp(input, "HDDVDOBJ", 8))
+    if (input_size < 8 || memcmp(input, "HDDVDOBJ", 8)) {
         return HDDVD_OK;
+    }
     rc = hddvd_object_open(input, input_size, &object);
-    if (rc)
+    if (rc) {
         return rc;
+    }
     if (hddvd_object_get_type(object) != expected)
     {
         hddvd_object_close(object);
@@ -57,18 +59,21 @@ static int xml_input(const void *input, size_t input_size, hddvd_object_type exp
         return rc;
     }
     payload_size = hddvd_stream_size(payload);
-    if (payload_size > SIZE_MAX || payload_size > (uint64_t)INT_MAX)
+    if (payload_size > SIZE_MAX || payload_size > (uint64_t)INT_MAX) {
         rc = HDDVD_ELIMIT;
+    }
     else
     {
         *owned = payload_size ? malloc((size_t)payload_size) : NULL;
-        if (payload_size && !*owned)
+        if (payload_size && !*owned) {
             rc = HDDVD_ENOMEM;
+        }
         else
         {
             rc = hddvd_stream_read_at(payload, 0, *owned, (size_t)payload_size, &got);
-            if (!rc && got != payload_size)
+            if (!rc && got != payload_size) {
                 rc = HDDVD_EIO;
+            }
             if (!rc)
             {
                 *data = *owned;
@@ -90,11 +95,13 @@ static char *dup_prop(xmlNodePtr node, const char *name)
 {
     xmlChar *value = xmlGetProp(node, (const xmlChar *)name);
     char *copy;
-    if (!value)
+    if (!value) {
         return NULL;
+    }
     copy = malloc(strlen((const char *)value) + 1);
-    if (copy)
+    if (copy) {
         strcpy(copy, (const char *)value);
+    }
     xmlFree(value);
     return copy;
 }
@@ -109,13 +116,16 @@ static int count_elements(xmlNodePtr node, size_t limit, size_t *count)
     for (; node; node = node->next)
     {
         int rc;
-        if (node->type != XML_ELEMENT_NODE)
+        if (node->type != XML_ELEMENT_NODE) {
             continue;
-        if (*count == SIZE_MAX || ++*count > limit)
+        }
+        if (*count == SIZE_MAX || ++*count > limit) {
             return HDDVD_ELIMIT;
+        }
         rc = count_elements(node->children, limit, count);
-        if (rc)
+        if (rc) {
             return rc;
+        }
     }
     return HDDVD_OK;
 }
@@ -145,25 +155,30 @@ static int parse_uint_prop(xmlNodePtr node, const char *name, uint32_t *result)
 static int id_exists(const hddvd_xmf *xmf, const char *id)
 {
     size_t i;
-    if (!strcmp(xmf->id, id))
+    if (!strcmp(xmf->id, id)) {
         return 1;
+    }
     for (i = 0; i < xmf->script_count; i++)
-        if (!strcmp(xmf->scripts[i].id, id))
+        if (!strcmp(xmf->scripts[i].id, id)) {
             return 1;
+        }
     for (i = 0; i < xmf->markup_count; i++)
-        if (!strcmp(xmf->markups[i].id, id))
+        if (!strcmp(xmf->markups[i].id, id)) {
             return 1;
+        }
     return 0;
 }
 
 static int append_ref(struct xmf_ref **items, size_t *count, char *id, char *src)
 {
     struct xmf_ref *grown;
-    if (*count == SIZE_MAX / sizeof(**items))
+    if (*count == SIZE_MAX / sizeof(**items)) {
         return HDDVD_ELIMIT;
+    }
     grown = realloc(*items, (*count + 1) * sizeof(**items));
-    if (!grown)
+    if (!grown) {
         return HDDVD_ENOMEM;
+    }
     *items = grown;
     grown[*count].id = id;
     grown[*count].src = src;
@@ -174,11 +189,13 @@ static int append_ref(struct xmf_ref **items, size_t *count, char *id, char *src
 static int append_root(hddvd_xmf *xmf, char *src)
 {
     char **grown;
-    if (xmf->root_count == SIZE_MAX / sizeof(*grown))
+    if (xmf->root_count == SIZE_MAX / sizeof(*grown)) {
         return HDDVD_ELIMIT;
+    }
     grown = realloc(xmf->roots, (xmf->root_count + 1) * sizeof(*grown));
-    if (!grown)
+    if (!grown) {
         return HDDVD_ENOMEM;
+    }
     xmf->roots = grown;
     grown[xmf->root_count++] = src;
     return HDDVD_OK;
@@ -196,8 +213,9 @@ void hddvd_xmf_limits_default(hddvd_xmf_limits *limits)
 void hddvd_xmf_close(hddvd_xmf *xmf)
 {
     size_t i;
-    if (!xmf)
+    if (!xmf) {
         return;
+    }
     free(xmf->id);
     for (i = 0; i < xmf->script_count; i++)
     {
@@ -227,12 +245,14 @@ int hddvd_xmf_open_with_limits(const void *data, size_t size, const hddvd_xmf_li
     size_t nodes = 0, references = 0;
     unsigned char *owned = NULL;
     int rc = HDDVD_EPARSE, operation_rc;
-    if (!data || !size || !result)
+    if (!data || !size || !result) {
         return HDDVD_EINVAL;
+    }
     *result = NULL;
     operation_rc = xml_input(data, size, HDDVD_OBJECT_MANIFEST, &owned, &data, &size);
-    if (operation_rc)
+    if (operation_rc) {
         return operation_rc;
+    }
     if (size > (size_t)INT_MAX)
     {
         free(owned);
@@ -243,8 +263,9 @@ int hddvd_xmf_open_with_limits(const void *data, size_t size, const hddvd_xmf_li
         hddvd_xmf_limits_default(&defaults);
         limits = &defaults;
     }
-    if (!limits->max_nodes || !limits->max_references)
+    if (!limits->max_nodes || !limits->max_references) {
         return HDDVD_EINVAL;
+    }
     doc = xmlReadMemory(data, (int)size, "manifest.xmf", NULL,
                         XML_PARSE_NONET | XML_PARSE_NOBLANKS | XML_PARSE_NOERROR |
                             XML_PARSE_NOWARNING);
@@ -270,15 +291,18 @@ int hddvd_xmf_open_with_limits(const void *data, size_t size, const hddvd_xmf_li
         goto done;
     }
     xmf->id = dup_prop(root, "id");
-    if (!xmf->id || !*xmf->id)
+    if (!xmf->id || !*xmf->id) {
         goto done;
+    }
     for (node = root->children; node; node = node->next)
     {
         char *id = NULL, *src = NULL;
-        if (node->type != XML_ELEMENT_NODE)
+        if (node->type != XML_ELEMENT_NODE) {
             continue;
-        if (!in_xmf_namespace(node))
+        }
+        if (!in_xmf_namespace(node)) {
             goto done;
+        }
         if (!xmlStrcmp(node->name, (const xmlChar *)"Region"))
         {
             if (xmf->has_region || parse_uint_prop(node, "x", &xmf->region.x) ||
@@ -305,8 +329,9 @@ int hddvd_xmf_open_with_limits(const void *data, size_t size, const hddvd_xmf_li
                 free(src);
                 goto done;
             }
-            if (!xmlStrcmp(node->name, (const xmlChar *)"Script"))
+            if (!xmlStrcmp(node->name, (const xmlChar *)"Script")) {
                 operation_rc = append_ref(&xmf->scripts, &xmf->script_count, id, src);
+            }
             else
                 operation_rc = append_ref(&xmf->markups, &xmf->markup_count, id, src);
             if (operation_rc)
@@ -341,8 +366,9 @@ int hddvd_xmf_open_with_limits(const void *data, size_t size, const hddvd_xmf_li
         /* Unknown manifest elements are retained semantically by accepting
            them; typed access is added only once their meaning is known. */
     }
-    if (!xmf->has_region)
+    if (!xmf->has_region) {
         goto done;
+    }
     *result = xmf;
     xmf = NULL;
     rc = HDDVD_OK;
@@ -363,8 +389,9 @@ const char *hddvd_xmf_application_id(const hddvd_xmf *xmf)
 }
 int hddvd_xmf_get_region(const hddvd_xmf *xmf, hddvd_xmf_region *region)
 {
-    if (!xmf || !region)
+    if (!xmf || !region) {
         return HDDVD_EINVAL;
+    }
     *region = xmf->region;
     return HDDVD_OK;
 }
@@ -383,8 +410,9 @@ size_t hddvd_xmf_resource_root_count(const hddvd_xmf *xmf)
 static int get_ref(const struct xmf_ref *refs, size_t count, size_t index, const char **id,
                    const char **src)
 {
-    if (!refs || index >= count || !id || !src)
+    if (!refs || index >= count || !id || !src) {
         return HDDVD_EINVAL;
+    }
     *id = refs[index].id;
     *src = refs[index].src;
     return HDDVD_OK;
@@ -408,11 +436,13 @@ int hddvd_xmf_dump(const void *data, size_t size, const char *name, void *output
     FILE *file = output;
     size_t i;
     int rc;
-    if (!file)
+    if (!file) {
         return HDDVD_EINVAL;
+    }
     rc = hddvd_xmf_open(data, size, &xmf);
-    if (rc)
+    if (rc) {
         return rc;
+    }
     fprintf(file, "XMF: %s\nApplication id=%s\nRegion x=%u y=%u width=%u height=%u\n",
             name ? name : "(memory)", xmf->id, xmf->region.x, xmf->region.y, xmf->region.width,
             xmf->region.height);
@@ -435,8 +465,9 @@ static void dump_xml(FILE *file, xmlNodePtr node, int depth)
 {
     for (; node; node = node->next)
     {
-        if (node->type != XML_ELEMENT_NODE)
+        if (node->type != XML_ELEMENT_NODE) {
             continue;
+        }
         indent(file, depth);
         fprintf(file, "%s\n", (const char *)node->name);
         dump_xml(file, node->children, depth + 1);
@@ -448,11 +479,13 @@ int hddvd_xmu_dump(const void *data, size_t size, const char *name, void *output
     unsigned char *owned = NULL;
     FILE *file = output;
     int rc;
-    if (!data || !size || !file)
+    if (!data || !size || !file) {
         return HDDVD_EINVAL;
+    }
     rc = xml_input(data, size, HDDVD_OBJECT_MARKUP, &owned, &data, &size);
-    if (rc)
+    if (rc) {
         return rc;
+    }
     if (size > (size_t)INT_MAX)
     {
         free(owned);

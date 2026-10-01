@@ -70,10 +70,12 @@ int main(void)
         "\" id=\"a\"><Region x=\"0\" y=\"0\" width=\"1\" height=\"1\"/><Script xmlns=\"wrong\" "
         "id=\"s\" src=\"x\"/></Application>"};
     size_t i;
-    if (!valid_model() || !limits_work())
+    if (!valid_model() || !limits_work()) {
         return 1;
+    }
     for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
-        if (!expect_parse(bad[i], HDDVD_EPARSE))
+        if (!expect_parse(bad[i], HDDVD_EPARSE)) {
             return 2;
+        }
     return 0;
 }

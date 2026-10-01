@@ -24,22 +24,25 @@ struct hddvd_nav
 
 int hddvd_time_from_milliseconds(uint64_t value, hddvd_time *out)
 {
-    if (!out || value > UINT64_MAX / 90u)
+    if (!out || value > UINT64_MAX / 90u) {
         return HDDVD_EINVAL;
+    }
     out->ticks = value * 90u;
     return HDDVD_OK;
 }
 int hddvd_time_to_milliseconds(hddvd_time value, uint64_t *out)
 {
-    if (!out)
+    if (!out) {
         return HDDVD_EINVAL;
+    }
     *out = value.ticks / 90u;
     return HDDVD_OK;
 }
 int hddvd_time_from_seconds(uint64_t value, hddvd_time *out)
 {
-    if (!out || value > UINT64_MAX / 90000u)
+    if (!out || value > UINT64_MAX / 90000u) {
         return HDDVD_EINVAL;
+    }
     out->ticks = value * 90000u;
     return HDDVD_OK;
 }
@@ -56,17 +59,21 @@ int hddvd_nav_create(const hddvd_nav_limits *given, hddvd_event_fn ef, hddvd_com
 {
     hddvd_nav_limits d;
     hddvd_nav *n;
-    if (!out)
+    if (!out) {
         return HDDVD_EINVAL;
+    }
     *out = NULL;
     hddvd_nav_limits_default(&d);
-    if (given)
+    if (given) {
         d = *given;
-    if (!d.max_events || !d.max_timers)
+    }
+    if (!d.max_events || !d.max_timers) {
         return HDDVD_EINVAL;
+    }
     n = (hddvd_nav *)calloc(1, sizeof(*n));
-    if (!n)
+    if (!n) {
         return HDDVD_ENOMEM;
+    }
     n->events = (hddvd_event *)calloc(d.max_events, sizeof(*n->events));
     n->timers = (struct timer_entry *)calloc(d.max_timers, sizeof(*n->timers));
     if (!n->events || !n->timers)
@@ -97,10 +104,12 @@ void hddvd_nav_destroy(hddvd_nav *n)
 int hddvd_nav_post(hddvd_nav *n, const hddvd_event *event)
 {
     size_t at;
-    if (!n || !event)
+    if (!n || !event) {
         return HDDVD_EINVAL;
-    if (n->event_count == n->event_cap)
+    }
+    if (n->event_count == n->event_cap) {
         return HDDVD_ELIMIT;
+    }
     at = n->event_count;
     while (at && n->events[at - 1].when.ticks > event->when.ticks)
     {
@@ -115,16 +124,18 @@ int hddvd_nav_post(hddvd_nav *n, const hddvd_event *event)
 int hddvd_nav_schedule_timer(hddvd_nav *n, uint64_t id, hddvd_time due)
 {
     size_t i;
-    if (!n || !id)
+    if (!n || !id) {
         return HDDVD_EINVAL;
+    }
     for (i = 0; i < n->timer_count; i++)
         if (n->timers[i].id == id)
         {
             n->timers[i].due = due;
             return HDDVD_OK;
         }
-    if (n->timer_count == n->timer_cap)
+    if (n->timer_count == n->timer_cap) {
         return HDDVD_ELIMIT;
+    }
     n->timers[n->timer_count].id = id;
     n->timers[n->timer_count].due = due;
     n->timers[n->timer_count].order = n->next_timer_order++;
@@ -134,8 +145,9 @@ int hddvd_nav_schedule_timer(hddvd_nav *n, uint64_t id, hddvd_time due)
 int hddvd_nav_cancel_timer(hddvd_nav *n, uint64_t id)
 {
     size_t i;
-    if (!n || !id)
+    if (!n || !id) {
         return HDDVD_EINVAL;
+    }
     for (i = 0; i < n->timer_count; i++)
         if (n->timers[i].id == id)
         {
@@ -148,8 +160,9 @@ int hddvd_nav_cancel_timer(hddvd_nav *n, uint64_t id)
 }
 int hddvd_nav_advance(hddvd_nav *n, hddvd_time now)
 {
-    if (!n || now.ticks < n->now.ticks)
+    if (!n || now.ticks < n->now.ticks) {
         return HDDVD_EINVAL;
+    }
     n->now = now;
     for (;;)
     {
@@ -161,16 +174,19 @@ int hddvd_nav_advance(hddvd_nav *n, hddvd_time now)
                  (n->timers[i].due.ticks == n->timers[best].due.ticks &&
                   n->timers[i].order < n->timers[best].order)))
                 best = i;
-        if (best == (size_t)-1)
+        if (best == (size_t)-1) {
             return HDDVD_OK;
-        if (n->event_count == n->event_cap)
+        }
+        if (n->event_count == n->event_cap) {
             return HDDVD_ELIMIT;
+        }
         memset(&e, 0, sizeof(e));
         e.type = HDDVD_EVENT_TIMER;
         e.when = n->timers[best].due;
         e.data.timer.timer_id = n->timers[best].id;
-        if (hddvd_nav_post(n, &e) != HDDVD_OK)
+        if (hddvd_nav_post(n, &e) != HDDVD_OK) {
             return HDDVD_ELIMIT;
+        }
         memmove(n->timers + best, n->timers + best + 1,
                 (n->timer_count - best - 1) * sizeof(*n->timers));
         n->timer_count--;
@@ -179,16 +195,18 @@ int hddvd_nav_advance(hddvd_nav *n, hddvd_time now)
 size_t hddvd_nav_pump(hddvd_nav *n, size_t maximum)
 {
     size_t done = 0;
-    if (!n)
+    if (!n) {
         return 0;
+    }
     while (n->event_count && (!maximum || done < maximum) &&
            n->events[0].when.ticks <= n->now.ticks)
     {
         hddvd_event e = n->events[0];
         memmove(n->events, n->events + 1, (n->event_count - 1) * sizeof(*n->events));
         n->event_count--;
-        if (n->event_fn)
+        if (n->event_fn) {
             n->event_fn(n->opaque, &e);
+        }
         done++;
     }
     return done;
@@ -196,12 +214,14 @@ size_t hddvd_nav_pump(hddvd_nav *n, size_t maximum)
 int hddvd_nav_command(hddvd_nav *n, const hddvd_command *command, uint64_t *id)
 {
     hddvd_command c;
-    if (!n || !command || !id)
+    if (!n || !command || !id) {
         return HDDVD_EINVAL;
+    }
     c = *command;
     c.id = n->next_command++;
     *id = c.id;
-    if (n->command_fn)
+    if (n->command_fn) {
         n->command_fn(n->opaque, &c);
+    }
     return HDDVD_OK;
 }

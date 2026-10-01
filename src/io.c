@@ -17,17 +17,20 @@ char *hddvd_path_join(const char *a, const char *b)
     size_t na, nb;
     int sep;
     char *p;
-    if (!a || !b)
+    if (!a || !b) {
         return NULL;
+    }
     na = strlen(a);
     nb = strlen(b);
     sep = na && a[na - 1] != '/' && a[na - 1] != '\\';
     p = malloc(na + nb + (size_t)sep + 1);
-    if (!p)
+    if (!p) {
         return NULL;
+    }
     memcpy(p, a, na);
-    if (sep)
+    if (sep) {
         p[na++] = '/';
+    }
     memcpy(p + na, b, nb + 1);
     return p;
 }

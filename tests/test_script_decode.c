@@ -30,7 +30,8 @@ int main(void)
     limits.max_instructions = 1;
     ok = ok && hddvd_script_open_with_limits(valid, sizeof(valid), &limits, &s) == HDDVD_ELIMIT;
     ok = ok && hddvd_script_open(valid, 31, &s) == HDDVD_EPARSE;
-    if (!ok)
+    if (!ok) {
         fprintf(stderr, "script decoder test failed\n");
+    }
     return ok ? 0 : 1;
 }

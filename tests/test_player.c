@@ -11,10 +11,12 @@ struct state
 static void event(void *p, const hddvd_event *e)
 {
     struct state *s = p;
-    if (e->type == HDDVD_EVENT_TIMER)
+    if (e->type == HDDVD_EVENT_TIMER) {
         s->timers[s->n++] = e->data.timer.timer_id;
-    if (e->type == HDDVD_EVENT_COMMAND_ACK)
+    }
+    if (e->type == HDDVD_EVENT_COMMAND_ACK) {
         s->result = e->data.acknowledgement.result;
+    }
 }
 static void command(void *p, const hddvd_command *c)
 {

@@ -11,12 +11,15 @@ struct hddvd_uri
 
 static int hex_value(unsigned char c)
 {
-    if (c >= '0' && c <= '9')
+    if (c >= '0' && c <= '9') {
         return c - '0';
-    if (c >= 'A' && c <= 'F')
+    }
+    if (c >= 'A' && c <= 'F') {
         c = (unsigned char)(c + ('a' - 'A'));
-    if (c >= 'a' && c <= 'f')
+    }
+    if (c >= 'a' && c <= 'f') {
         return c - 'a' + 10;
+    }
     return -1;
 }
 
@@ -26,12 +29,15 @@ static int prefix_ci(const char *s, const char *prefix)
     {
         unsigned char a = (unsigned char)*s;
         unsigned char b = (unsigned char)*prefix;
-        if (a >= 'A' && a <= 'Z')
+        if (a >= 'A' && a <= 'Z') {
             a = (unsigned char)(a + ('a' - 'A'));
-        if (b >= 'A' && b <= 'Z')
+        }
+        if (b >= 'A' && b <= 'Z') {
             b = (unsigned char)(b + ('a' - 'A'));
-        if (!*s || a != b)
+        }
+        if (!*s || a != b) {
             return 0;
+        }
         s++;
         prefix++;
     }
@@ -42,8 +48,9 @@ static int decode_segment(const char *start, size_t length, char **out)
 {
     char *decoded = malloc(length + 1);
     size_t i = 0, j = 0;
-    if (!decoded)
+    if (!decoded) {
         return HDDVD_ENOMEM;
+    }
     while (i < length)
     {
         unsigned char c = (unsigned char)start[i++];
@@ -85,18 +92,22 @@ int hddvd_uri_parse(const char *text, hddvd_uri **out)
     hddvd_uri *uri;
     int rc = HDDVD_OK;
 
-    if (!text || !out)
+    if (!text || !out) {
         return HDDVD_EINVAL;
+    }
     *out = NULL;
-    if (!prefix_ci(text, prefix))
+    if (!prefix_ci(text, prefix)) {
         return HDDVD_EPARSE;
+    }
     cursor = text + sizeof(prefix) - 1;
-    if (!*cursor)
+    if (!*cursor) {
         return HDDVD_EPARSE;
+    }
     capacity = strlen(cursor) + 1;
     normalized = malloc(capacity);
-    if (!normalized)
+    if (!normalized) {
         return HDDVD_ENOMEM;
+    }
     while (*cursor)
     {
         char *segment;
@@ -104,15 +115,18 @@ int hddvd_uri_parse(const char *text, hddvd_uri **out)
         slash = strchr(cursor, '/');
         length = slash ? (size_t)(slash - cursor) : strlen(cursor);
         rc = decode_segment(cursor, length, &segment);
-        if (rc)
+        if (rc) {
             goto fail;
-        if (used)
+        }
+        if (used) {
             normalized[used++] = '/';
+        }
         memcpy(normalized + used, segment, strlen(segment));
         used += strlen(segment);
         free(segment);
-        if (!slash)
+        if (!slash) {
             break;
+        }
         cursor = slash + 1;
         if (!*cursor)
         {
@@ -163,8 +177,9 @@ int hddvd_uri_parse(const char *text, hddvd_uri **out)
                 break;
             }
         }
-        if (!slash)
+        if (!slash) {
             break;
+        }
         cursor = slash + 1;
     }
     *out = uri;

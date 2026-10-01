@@ -39,8 +39,9 @@ static void json_string(const char *s)
                 fputs("\\t", stdout);
                 break;
             default:
-                if (*p < 0x20)
+                if (*p < 0x20) {
                     printf("\\u%04x", (unsigned)*p);
+                }
                 else
                     putchar(*p);
         }
@@ -59,8 +60,9 @@ static int show(void *opaque, const hddvd_aca_entry *entry)
     }
     else
     {
-        if (!ctx->first)
+        if (!ctx->first) {
             fputs(",\n", stdout);
+        }
         fputs("    {\"name\":", stdout);
         json_string(entry->name);
         printf(",\"size\":%u,\"offset\":%u,\"crc32\":\"%08x\","
@@ -94,8 +96,9 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    if (ctx.json)
+    if (ctx.json) {
         fputs("{\n  \"entries\": [\n", stdout);
+    }
     rc = hddvd_aca_list(path, show, &ctx);
     if (rc)
     {

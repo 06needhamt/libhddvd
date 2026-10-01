@@ -10,19 +10,23 @@ int main(void)
     hddvd_stream_info s[8];
     size_t n = 0, i, split;
     int video = 0, audio = 0;
-    if (!f)
+    if (!f) {
         return 1;
+    }
     fwrite(pes, 1, sizeof(pes), f);
     fclose(f);
-    if (hddvd_evo_probe(p, s, 8, &n) != HDDVD_OK)
+    if (hddvd_evo_probe(p, s, 8, &n) != HDDVD_OK) {
         return 2;
+    }
     remove(p);
     for (i = 0; i < n; i++)
     {
-        if (s[i].codec == HDDVD_CODEC_MPEG2_VIDEO)
+        if (s[i].codec == HDDVD_CODEC_MPEG2_VIDEO) {
             video = 1;
-        if (s[i].codec == HDDVD_CODEC_AC3_EAC3)
+        }
+        if (s[i].codec == HDDVD_CODEC_AC3_EAC3) {
             audio = 1;
+        }
     }
     assert(video && audio);
     for (split = 0; split <= sizeof(pes); split++)

@@ -14,8 +14,9 @@ static xmlChar *first_uri_attr(xmlNodePtr n)
     for (i = 0; names[i]; i++)
     {
         xmlChar *v = xmlGetProp(n, (const xmlChar *)names[i]);
-        if (v)
+        if (v) {
             return v;
+        }
     }
     return NULL;
 }
@@ -33,14 +34,16 @@ static int walk(xmlNodePtr n, int in_start, char **out)
                 xmlFree(v);
                 return *out ? HDDVD_OK : HDDVD_ENOMEM;
             }
-            if (v)
+            if (v) {
                 xmlFree(v);
+            }
         }
         if (n->children)
         {
             int r = walk(n->children, here, out);
-            if (r == HDDVD_OK || r == HDDVD_ENOMEM)
+            if (r == HDDVD_OK || r == HDDVD_ENOMEM) {
                 return r;
+            }
         }
     }
     return HDDVD_ENOTFOUND;
@@ -49,13 +52,15 @@ int hddvd_xpl_find_start_ref(const char *path, char **out)
 {
     xmlDocPtr d;
     int r;
-    if (!path || !out)
+    if (!path || !out) {
         return HDDVD_EINVAL;
+    }
     *out = NULL;
     d = xmlReadFile(path, NULL,
                     XML_PARSE_NONET | XML_PARSE_NOBLANKS | XML_PARSE_NOERROR | XML_PARSE_NOWARNING);
-    if (!d)
+    if (!d) {
         return HDDVD_EPARSE;
+    }
     r = walk(xmlDocGetRootElement(d), 0, out);
     xmlFreeDoc(d);
     return r;

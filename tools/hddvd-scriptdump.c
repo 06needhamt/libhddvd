@@ -18,8 +18,9 @@ int main(int argc, char **argv)
     if (!f || fseek(f, 0, SEEK_END) || (end = ftell(f)) < 0 || fseek(f, 0, SEEK_SET))
     {
         fprintf(stderr, "%s: cannot read input\n", argv[0]);
-        if (f)
+        if (f) {
             fclose(f);
+        }
         return 1;
     }
     bytes = malloc((size_t)end ? (size_t)end : 1);

@@ -57,16 +57,20 @@ static int parse(hddvd_stream *s, const hddvd_limits *limits, hddvd_aca **out)
     uint16_t count;
     size_t i, j;
     int rc = exact(s, 0, h, sizeof(h));
-    if (rc)
+    if (rc) {
         return rc;
-    if (memcmp(h, "HDDVDACA", 8))
+    }
+    if (memcmp(h, "HDDVDACA", 8)) {
         return HDDVD_EPARSE;
+    }
     count = be16(h + 12);
-    if (!count || count > limits->max_aca_entries)
+    if (!count || count > limits->max_aca_entries) {
         return count ? HDDVD_ELIMIT : HDDVD_EPARSE;
+    }
     a = calloc(1, sizeof(*a));
-    if (!a)
+    if (!a) {
         return HDDVD_ENOMEM;
+    }
     a->entries = calloc(count, sizeof(*a->entries));
     if (!a->entries)
     {
@@ -87,8 +91,9 @@ static int parse(hddvd_stream *s, const hddvd_limits *limits, hddvd_aca **out)
             goto fail;
         }
         rc = exact(s, pos, b, sizeof(b));
-        if (rc)
+        if (rc) {
             goto fail;
+        }
         e->offset = be32(b);
         e->size = be32(b + 4);
         e->crc32 = be32(b + 8);
@@ -100,12 +105,14 @@ static int parse(hddvd_stream *s, const hddvd_limits *limits, hddvd_aca **out)
             goto fail;
         }
         rc = exact(s, pos + 14, e->name, nl);
-        if (rc)
+        if (rc) {
             goto fail;
+        }
         e->name[nl] = 0;
         rc = exact(s, pos + 14 + nl, pad, sizeof(pad));
-        if (rc)
+        if (rc) {
             goto fail;
+        }
         (void)pad;
         if ((uint64_t)e->offset > s->size || e->size > s->size - e->offset)
         {
@@ -117,8 +124,9 @@ static int parse(hddvd_stream *s, const hddvd_limits *limits, hddvd_aca **out)
             rc = HDDVD_ELIMIT;
             goto fail;
         }
-        if (i == 0)
+        if (i == 0) {
             first = e->offset;
+        }
         if (e->offset < first ||
             (i && e->offset < (uint64_t)a->entries[i - 1].offset + a->entries[i - 1].size))
         {
@@ -159,8 +167,9 @@ void hddvd_limits_default(hddvd_limits *l)
 }
 int hddvd_aca_open_stream_with_limits(hddvd_stream *s, const hddvd_limits *l, hddvd_aca **out)
 {
-    if (!s || !l || !out || !l->max_aca_entries)
+    if (!s || !l || !out || !l->max_aca_entries) {
         return HDDVD_EINVAL;
+    }
     *out = NULL;
     return parse(s, l, out);
 }
@@ -174,12 +183,14 @@ int hddvd_aca_open(const char *p, hddvd_aca **out)
 {
     hddvd_stream *s;
     int rc;
-    if (!p || !out)
+    if (!p || !out) {
         return HDDVD_EINVAL;
+    }
     *out = NULL;
     rc = hddvd_stream_open_file(p, &s);
-    if (rc)
+    if (rc) {
         return rc;
+    }
     rc = hddvd_aca_open_stream(s, out);
     hddvd_stream_close(s);
     return rc;
@@ -199,10 +210,12 @@ size_t hddvd_aca_count(const hddvd_aca *a)
 }
 int hddvd_aca_get_entry(const hddvd_aca *a, size_t i, hddvd_aca_entry *e)
 {
-    if (!a || !e)
+    if (!a || !e) {
         return HDDVD_EINVAL;
-    if (i >= a->count)
+    }
+    if (i >= a->count) {
         return HDDVD_ENOTFOUND;
+    }
     *e = a->entries[i];
     return HDDVD_OK;
 }
@@ -210,15 +223,17 @@ static const hddvd_aca_entry *find_entry(const hddvd_aca *a, const char *n)
 {
     size_t i;
     for (i = 0; i < a->count; i++)
-        if (hddvd_ascii_equal_ci(n, a->entries[i].name))
+        if (hddvd_ascii_equal_ci(n, a->entries[i].name)) {
             return &a->entries[i];
+        }
     return NULL;
 }
 int hddvd_aca_open_member(const hddvd_aca *a, const char *n, hddvd_stream **out)
 {
     const hddvd_aca_entry *e;
-    if (!a || !n || !out)
+    if (!a || !n || !out) {
         return HDDVD_EINVAL;
+    }
     *out = NULL;
     e = find_entry(a, n);
     return e ? hddvd_stream_slice(a->stream, e->offset, e->size, out) : HDDVD_ENOTFOUND;
@@ -228,13 +243,15 @@ int hddvd_aca_list(const char *p, hddvd_aca_entry_cb cb, void *o)
     hddvd_aca *a;
     size_t i;
     int rc = hddvd_aca_open(p, &a);
-    if (rc)
+    if (rc) {
         return rc;
+    }
     for (i = 0; i < a->count && cb; i++)
     {
         rc = cb(o, &a->entries[i]);
-        if (rc)
+        if (rc) {
             break;
+        }
     }
     hddvd_aca_close(a);
     return rc;
@@ -246,13 +263,15 @@ int hddvd_aca_read_member(const char *p, const char *n, void **out, size_t *sz)
     unsigned char *b;
     size_t got;
     int rc;
-    if (!p || !n || !out || !sz)
+    if (!p || !n || !out || !sz) {
         return HDDVD_EINVAL;
+    }
     *out = NULL;
     *sz = 0;
     rc = hddvd_aca_open(p, &a);
-    if (rc)
+    if (rc) {
         return rc;
+    }
     rc = hddvd_aca_open_member(a, n, &s);
     if (rc)
     {
@@ -267,8 +286,9 @@ int hddvd_aca_read_member(const char *p, const char *n, void **out, size_t *sz)
         return HDDVD_ENOMEM;
     }
     rc = hddvd_stream_read_at(s, 0, b, (size_t)s->size, &got);
-    if (!rc && got != s->size)
+    if (!rc && got != s->size) {
         rc = HDDVD_EIO;
+    }
     hddvd_stream_close(s);
     hddvd_aca_close(a);
     if (rc)
@@ -286,12 +306,14 @@ int hddvd_aca_verify(const char *p, size_t *bad)
     hddvd_aca *a;
     size_t i;
     int rc;
-    if (!bad)
+    if (!bad) {
         return HDDVD_EINVAL;
+    }
     *bad = 0;
     rc = hddvd_aca_open(p, &a);
-    if (rc)
+    if (rc) {
         return rc;
+    }
     for (i = 0; i < a->count; i++)
     {
         hddvd_aca_entry *e = &a->entries[i];
@@ -303,10 +325,12 @@ int hddvd_aca_verify(const char *p, size_t *bad)
             return HDDVD_ENOMEM;
         }
         rc = hddvd_stream_read_at(a->stream, e->offset, b, e->size, &got);
-        if (!rc && got != e->size)
+        if (!rc && got != e->size) {
             rc = HDDVD_EIO;
-        if (!rc && crc32_calc(b, got) != e->crc32)
+        }
+        if (!rc && crc32_calc(b, got) != e->crc32) {
             (*bad)++;
+        }
         free(b);
         if (rc)
         {
@@ -333,11 +357,13 @@ static int extract_cb(void *o, const hddvd_aca_entry *e)
     char *path;
     FILE *f;
     int rc;
-    if (!safe_name(e->name))
+    if (!safe_name(e->name)) {
         return HDDVD_EPARSE;
+    }
     rc = hddvd_aca_read_member(c->aca, e->name, &b, &n);
-    if (rc)
+    if (rc) {
         return rc;
+    }
     path = hddvd_path_join(c->dir, e->name);
     if (!path)
     {
@@ -359,10 +385,12 @@ static int extract_cb(void *o, const hddvd_aca_entry *e)
 int hddvd_aca_extract(const char *p, const char *d)
 {
     extract_ctx c;
-    if (!p || !d)
+    if (!p || !d) {
         return HDDVD_EINVAL;
-    if (!hddvd_path_is_dir(d) && MKDIR(d) != 0)
+    }
+    if (!hddvd_path_is_dir(d) && MKDIR(d) != 0) {
         return HDDVD_EIO;
+    }
     c.aca = p;
     c.dir = d;
     return hddvd_aca_list(p, extract_cb, &c);
@@ -379,11 +407,13 @@ static int visit_cb(void *o, const hddvd_aca_entry *e)
     void *b;
     size_t n;
     int rc;
-    if (!hddvd_ascii_endswith_ci(e->name, ".xmf"))
+    if (!hddvd_ascii_endswith_ci(e->name, ".xmf")) {
         return 0;
+    }
     rc = hddvd_aca_read_member(c->aca, e->name, &b, &n);
-    if (rc)
+    if (rc) {
         return rc;
+    }
     rc = c->cb(c->o, e->name, b, n);
     free(b);
     return rc;
@@ -391,8 +421,9 @@ static int visit_cb(void *o, const hddvd_aca_entry *e)
 int hddvd_aca_visit_xmf(const char *p, hddvd_xmf_cb cb, void *o)
 {
     visit_ctx c;
-    if (!p || !cb)
+    if (!p || !cb) {
         return HDDVD_EINVAL;
+    }
     c.aca = p;
     c.cb = cb;
     c.o = o;

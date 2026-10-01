@@ -13,26 +13,35 @@ struct hddvd_evo_parser
 };
 static hddvd_stream_codec classify(unsigned sid, unsigned sub)
 {
-    if (sid == 0xe0)
+    if (sid == 0xe0) {
         return HDDVD_CODEC_MPEG2_VIDEO;
-    if (sid == 0xe2)
+    }
+    if (sid == 0xe2) {
         return HDDVD_CODEC_H264;
-    if (sid == 0xc0)
+    }
+    if (sid == 0xc0) {
         return HDDVD_CODEC_MPEG_AUDIO;
-    if (sid == 0xfd && sub >= 0x55 && sub <= 0x5f)
+    }
+    if (sid == 0xfd && sub >= 0x55 && sub <= 0x5f) {
         return HDDVD_CODEC_VC1;
+    }
     if (sid == 0xbd)
     {
-        if (sub >= 0x20 && sub <= 0x3f)
+        if (sub >= 0x20 && sub <= 0x3f) {
             return HDDVD_CODEC_SUBPICTURE;
-        if (sub >= 0x88 && sub <= 0x9f)
+        }
+        if (sub >= 0x88 && sub <= 0x9f) {
             return HDDVD_CODEC_DTS_HD;
-        if (sub >= 0xa0 && sub <= 0xaf)
+        }
+        if (sub >= 0xa0 && sub <= 0xaf) {
             return HDDVD_CODEC_LPCM;
-        if (sub >= 0xb0 && sub <= 0xbf)
+        }
+        if (sub >= 0xb0 && sub <= 0xbf) {
             return HDDVD_CODEC_TRUEHD_MLP;
-        if (sub >= 0xc0 && sub <= 0xcf)
+        }
+        if (sub >= 0xc0 && sub <= 0xcf) {
             return HDDVD_CODEC_AC3_EAC3;
+        }
     }
     return HDDVD_CODEC_UNKNOWN;
 }
@@ -98,8 +107,9 @@ static int parse(hddvd_evo_parser *p, int final)
             consume(p, i);
             continue;
         }
-        if (p->size < 6)
+        if (p->size < 6) {
             break;
+        }
         sid = p->data[3];
         if (sid == 0xb9)
         {
@@ -108,11 +118,13 @@ static int parse(hddvd_evo_parser *p, int final)
         }
         if (sid == 0xba)
         {
-            if (p->size < 14)
+            if (p->size < 14) {
                 break;
+            }
             total = 14u + (size_t)(p->data[13] & 7u);
-            if (p->size < total)
+            if (p->size < total) {
                 break;
+            }
             consume(p, total);
             continue;
         }
@@ -125,15 +137,17 @@ static int parse(hddvd_evo_parser *p, int final)
                 next++;
             if (next + 3 >= p->size)
             {
-                if (!final)
+                if (!final) {
                     break;
+                }
                 total = p->size;
             }
             else
                 total = next;
         }
-        if (p->size < total)
+        if (p->size < total) {
             break;
+        }
         if (sid != 0xbb && sid != 0xbe && sid != 0xbf)
         {
             payload = 6;
@@ -147,8 +161,9 @@ static int parse(hddvd_evo_parser *p, int final)
                 }
                 payload = header;
             }
-            if ((sid == 0xbd || sid == 0xfd) && payload < total)
+            if ((sid == 0xbd || sid == 0xfd) && payload < total) {
                 sub = (unsigned)p->data[payload];
+            }
             add_stream(p, sid, sub);
         }
         consume(p, total);
@@ -168,8 +183,9 @@ static int parse(hddvd_evo_parser *p, int final)
 }
 int hddvd_evo_parser_create(hddvd_evo_parser **out)
 {
-    if (!out)
+    if (!out) {
         return HDDVD_EINVAL;
+    }
     *out = (hddvd_evo_parser *)calloc(1, sizeof(**out));
     return *out ? HDDVD_OK : HDDVD_ENOMEM;
 }
@@ -185,36 +201,42 @@ int hddvd_evo_parser_push(hddvd_evo_parser *p, const void *data, size_t size)
 {
     size_t need, cap;
     unsigned char *n;
-    if (!p || (!data && size) || p->finished || p->failed)
+    if (!p || (!data && size) || p->finished || p->failed) {
         return HDDVD_EINVAL;
-    if (size > SIZE_MAX - p->size)
+    }
+    if (size > SIZE_MAX - p->size) {
         return HDDVD_ELIMIT;
+    }
     need = p->size + size;
     if (need > p->cap)
     {
         cap = p->cap ? p->cap : 4096;
         while (cap < need)
         {
-            if (cap > SIZE_MAX / 2)
+            if (cap > SIZE_MAX / 2) {
                 return HDDVD_ELIMIT;
+            }
             cap *= 2;
         }
         n = (unsigned char *)realloc(p->data, cap);
-        if (!n)
+        if (!n) {
             return HDDVD_ENOMEM;
+        }
         p->data = n;
         p->cap = cap;
     }
-    if (size)
+    if (size) {
         memcpy(p->data + p->size, data, size);
+    }
     p->size = need;
     return parse(p, 0);
 }
 int hddvd_evo_parser_finish(hddvd_evo_parser *p)
 {
     int r;
-    if (!p || p->finished)
+    if (!p || p->finished) {
         return HDDVD_EINVAL;
+    }
     r = parse(p, 1);
     p->finished = 1;
     return r;
@@ -225,8 +247,9 @@ size_t hddvd_evo_parser_stream_count(const hddvd_evo_parser *p)
 }
 int hddvd_evo_parser_get_stream(const hddvd_evo_parser *p, size_t i, hddvd_stream_info *out)
 {
-    if (!p || !out || i >= p->stream_count)
+    if (!p || !out || i >= p->stream_count) {
         return HDDVD_EINVAL;
+    }
     *out = p->streams[i];
     return HDDVD_OK;
 }
@@ -237,12 +260,14 @@ int hddvd_evo_probe(const char *path, hddvd_stream_info *out, size_t cap, size_t
     size_t got, i, n;
     int r;
     hddvd_evo_parser *p;
-    if (!path || !count || (cap && !out))
+    if (!path || !count || (cap && !out)) {
         return HDDVD_EINVAL;
+    }
     *count = 0;
     f = fopen(path, "rb");
-    if (!f)
+    if (!f) {
         return HDDVD_EIO;
+    }
     r = hddvd_evo_parser_create(&p);
     if (r)
     {
@@ -250,13 +275,16 @@ int hddvd_evo_probe(const char *path, hddvd_stream_info *out, size_t cap, size_t
         return r;
     }
     while ((got = fread(b, 1, sizeof(b), f)) != 0)
-        if ((r = hddvd_evo_parser_push(p, b, got)) != 0)
+        if ((r = hddvd_evo_parser_push(p, b, got)) != 0) {
             break;
-    if (ferror(f) && r == 0)
+        }
+    if (ferror(f) && r == 0) {
         r = HDDVD_EIO;
+    }
     fclose(f);
-    if (r == 0)
+    if (r == 0) {
         r = hddvd_evo_parser_finish(p);
+    }
     n = hddvd_evo_parser_stream_count(p);
     *count = n;
     for (i = 0; i < n && i < cap; i++)

@@ -4,11 +4,13 @@ int hddvd_map_probe(const char *path, hddvd_map_info *o)
 {
     FILE *f;
     long z;
-    if (!path || !o)
+    if (!path || !o) {
         return HDDVD_EINVAL;
+    }
     f = fopen(path, "rb");
-    if (!f)
+    if (!f) {
         return HDDVD_EIO;
+    }
     if (fseek(f, 0, SEEK_END) != 0)
     {
         fclose(f);
@@ -16,8 +18,9 @@ int hddvd_map_probe(const char *path, hddvd_map_info *o)
     }
     z = ftell(f);
     fclose(f);
-    if (z < 0)
+    if (z < 0) {
         return HDDVD_EIO;
+    }
     o->size = (uint64_t)z;
     o->sector_count = (uint32_t)(((uint64_t)z + 2047u) / 2048u);
     o->structure_validated = 0;

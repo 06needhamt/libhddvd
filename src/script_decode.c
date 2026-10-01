@@ -27,8 +27,9 @@ static uint32_t be32(const unsigned char *p)
 
 void hddvd_script_limits_default(hddvd_script_limits *limits)
 {
-    if (!limits)
+    if (!limits) {
         return;
+    }
     limits->max_strings = 4096;
     limits->max_functions = 4096;
     limits->max_instructions = 1000000;
@@ -38,8 +39,9 @@ void hddvd_script_limits_default(hddvd_script_limits *limits)
 void hddvd_script_close(hddvd_script *script)
 {
     size_t i;
-    if (!script)
+    if (!script) {
         return;
+    }
     for (i = 0; i < script->string_count; ++i)
         free(script->strings[i]);
     free(script->strings);
@@ -62,29 +64,35 @@ int hddvd_script_open_with_limits(const void *data, size_t size, const hddvd_scr
     uint32_t sc, fc, ic, so, fo, io;
     size_t i, cursor;
     int rc = HDDVD_EPARSE;
-    if (!data || !limits || !out)
+    if (!data || !limits || !out) {
         return HDDVD_EINVAL;
+    }
     *out = NULL;
-    if ((uint64_t)size > limits->max_bytes)
+    if ((uint64_t)size > limits->max_bytes) {
         return HDDVD_ELIMIT;
-    if (size < SCRIPT_HEADER_SIZE || memcmp(p, "HDIS", 4) != 0)
+    }
+    if (size < SCRIPT_HEADER_SIZE || memcmp(p, "HDIS", 4) != 0) {
         return HDDVD_EPARSE;
-    if (be16(p + 6) != SCRIPT_HEADER_SIZE)
+    }
+    if (be16(p + 6) != SCRIPT_HEADER_SIZE) {
         return HDDVD_EPARSE;
+    }
     sc = be32(p + 8);
     fc = be32(p + 12);
     ic = be32(p + 16);
     so = be32(p + 20);
     fo = be32(p + 24);
     io = be32(p + 28);
-    if (sc > limits->max_strings || fc > limits->max_functions || ic > limits->max_instructions)
+    if (sc > limits->max_strings || fc > limits->max_functions || ic > limits->max_instructions) {
         return HDDVD_ELIMIT;
+    }
     if (!range_ok(size, fo, fc, 12) || !range_ok(size, io, ic, 8) || so < SCRIPT_HEADER_SIZE ||
         so > size)
         return HDDVD_EPARSE;
     s = calloc(1, sizeof(*s));
-    if (!s)
+    if (!s) {
         return HDDVD_ENOMEM;
+    }
     s->version = be16(p + 4);
     s->string_count = sc;
     s->function_count = fc;
@@ -108,12 +116,14 @@ int hddvd_script_open_with_limits(const void *data, size_t size, const hddvd_scr
     for (i = 0; i < sc; ++i)
     {
         uint32_t n;
-        if (cursor > size || size - cursor < 4)
+        if (cursor > size || size - cursor < 4) {
             goto fail;
+        }
         n = be32(p + cursor);
         cursor += 4;
-        if ((uint64_t)n + 1 > SIZE_MAX || n > size - cursor || memchr(p + cursor, 0, n))
+        if ((uint64_t)n + 1 > SIZE_MAX || n > size - cursor || memchr(p + cursor, 0, n)) {
             goto fail;
+        }
         s->strings[i] = malloc((size_t)n + 1);
         if (!s->strings[i])
         {
@@ -133,25 +143,30 @@ int hddvd_script_open_with_limits(const void *data, size_t size, const hddvd_scr
         count = be32(q + 8);
         s->functions[i].first_instruction = first;
         s->functions[i].instruction_count = count;
-        if (s->functions[i].name_index >= sc || first > ic || count > ic - first)
+        if (s->functions[i].name_index >= sc || first > ic || count > ic - first) {
             goto fail;
+        }
     }
     for (i = 0; i < ic; ++i)
     {
         const unsigned char *q = p + io + i * 8;
         uint32_t operand = be32(q + 4);
-        if (q[2] || q[3])
+        if (q[2] || q[3]) {
             goto fail;
+        }
         int64_t signed_operand = operand;
-        if (operand > INT32_MAX)
+        if (operand > INT32_MAX) {
             signed_operand -= INT64_C(4294967296);
+        }
         s->instructions[i].opcode = q[0];
         s->instructions[i].flags = q[1];
         s->instructions[i].operand = (int32_t)signed_operand;
-        if ((q[0] == 0x10 || q[0] == 0x11) && operand >= ic)
+        if ((q[0] == 0x10 || q[0] == 0x11) && operand >= ic) {
             goto fail;
-        if (q[0] == 0x20 && operand >= sc)
+        }
+        if (q[0] == 0x20 && operand >= sc) {
             goto fail;
+        }
     }
     *out = s;
     return HDDVD_OK;
@@ -185,8 +200,9 @@ size_t hddvd_script_function_count(const hddvd_script *s)
 }
 int hddvd_script_get_function(const hddvd_script *s, size_t i, hddvd_script_function *out)
 {
-    if (!s || !out || i >= s->function_count)
+    if (!s || !out || i >= s->function_count) {
         return HDDVD_EINVAL;
+    }
     *out = s->functions[i];
     return HDDVD_OK;
 }
@@ -196,8 +212,9 @@ size_t hddvd_script_instruction_count(const hddvd_script *s)
 }
 int hddvd_script_get_instruction(const hddvd_script *s, size_t i, hddvd_script_instruction *out)
 {
-    if (!s || !out || i >= s->instruction_count)
+    if (!s || !out || i >= s->instruction_count) {
         return HDDVD_EINVAL;
+    }
     *out = s->instructions[i];
     return HDDVD_OK;
 }

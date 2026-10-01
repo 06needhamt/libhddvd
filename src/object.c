@@ -37,8 +37,9 @@ static hddvd_object_type public_type(uint16_t type)
 
 void hddvd_object_close(hddvd_object *object)
 {
-    if (!object)
+    if (!object) {
         return;
+    }
     free(object->name);
     free(object->payload);
     free(object->trailer);
@@ -53,8 +54,9 @@ static int copy_bytes(unsigned char **out, const unsigned char *source, size_t s
         return HDDVD_OK;
     }
     *out = malloc(size);
-    if (!*out)
+    if (!*out) {
         return HDDVD_ENOMEM;
+    }
     memcpy(*out, source, size);
     return HDDVD_OK;
 }
@@ -69,30 +71,38 @@ int hddvd_object_open_with_provider(const void *input, size_t size, hddvd_decryp
     uint64_t payload_size, total;
     size_t i;
     int rc;
-    if (!input || !result)
+    if (!input || !result) {
         return HDDVD_EINVAL;
+    }
     *result = NULL;
-    if (size < OBJECT_HEADER_SIZE || memcmp(data, object_magic, sizeof(object_magic)))
+    if (size < OBJECT_HEADER_SIZE || memcmp(data, object_magic, sizeof(object_magic))) {
         return HDDVD_EPARSE;
-    if (data[8] != 1 || (data[9] & (uint8_t)~OBJECT_PROTECTED))
+    }
+    if (data[8] != 1 || (data[9] & (uint8_t)~OBJECT_PROTECTED)) {
         return HDDVD_ENOTSUP;
+    }
     header_size = be32(data + 12);
     payload_size = be64(data + 16);
     name_size = be16(data + 24);
     trailer_size = be16(data + 26);
-    if (header_size < OBJECT_HEADER_SIZE || name_size > header_size - OBJECT_HEADER_SIZE)
+    if (header_size < OBJECT_HEADER_SIZE || name_size > header_size - OBJECT_HEADER_SIZE) {
         return HDDVD_EPARSE;
+    }
     total = (uint64_t)header_size + payload_size + trailer_size;
-    if (total != size || payload_size > SIZE_MAX)
+    if (total != size || payload_size > SIZE_MAX) {
         return HDDVD_EPARSE;
-    if (name_size && memchr(data + OBJECT_HEADER_SIZE, 0, name_size))
+    }
+    if (name_size && memchr(data + OBJECT_HEADER_SIZE, 0, name_size)) {
         return HDDVD_EPARSE;
+    }
     for (i = OBJECT_HEADER_SIZE + name_size; i < header_size; i++)
-        if (data[i])
+        if (data[i]) {
             return HDDVD_EPARSE;
+        }
     object = calloc(1, sizeof(*object));
-    if (!object)
+    if (!object) {
         return HDDVD_ENOMEM;
+    }
     object->info.version = data[8];
     object->info.flags = data[9];
     object->info.raw_type = be16(data + 10);
@@ -164,12 +174,14 @@ int hddvd_object_open_unwrapped(hddvd_object_type type, const void *input, size_
 {
     hddvd_object *object;
     int rc;
-    if ((!input && size) || !result || type == HDDVD_OBJECT_UNKNOWN)
+    if ((!input && size) || !result || type == HDDVD_OBJECT_UNKNOWN) {
         return HDDVD_EINVAL;
+    }
     *result = NULL;
     object = calloc(1, sizeof(*object));
-    if (!object)
+    if (!object) {
         return HDDVD_ENOMEM;
+    }
     object->type = type;
     object->info.raw_type = (uint16_t)type;
     object->info.payload_length = size;
@@ -191,27 +203,33 @@ int hddvd_object_open_stream(hddvd_stream *stream, hddvd_object **result)
     unsigned char *data;
     size_t got = 0;
     int rc;
-    if (!stream || !result)
+    if (!stream || !result) {
         return HDDVD_EINVAL;
+    }
     length = hddvd_stream_size(stream);
-    if (length > SIZE_MAX)
+    if (length > SIZE_MAX) {
         return HDDVD_ELIMIT;
+    }
     data = length ? malloc((size_t)length) : NULL;
-    if (length && !data)
+    if (length && !data) {
         return HDDVD_ENOMEM;
+    }
     rc = hddvd_stream_read_at(stream, 0, data, (size_t)length, &got);
-    if (!rc && got != length)
+    if (!rc && got != length) {
         rc = HDDVD_EIO;
-    if (!rc)
+    }
+    if (!rc) {
         rc = hddvd_object_open(data, (size_t)length, result);
+    }
     free(data);
     return rc;
 }
 
 int hddvd_object_get_info(const hddvd_object *object, hddvd_object_info *info)
 {
-    if (!object || !info)
+    if (!object || !info) {
         return HDDVD_EINVAL;
+    }
     *info = object->info;
     return HDDVD_OK;
 }
@@ -231,8 +249,9 @@ int hddvd_object_open_payload(const hddvd_object *object, hddvd_stream **stream)
 }
 int hddvd_object_get_trailer(const hddvd_object *object, const void **data, size_t *size)
 {
-    if (!object || !data || !size)
+    if (!object || !data || !size) {
         return HDDVD_EINVAL;
+    }
     *data = object->trailer;
     *size = object->info.trailer_length;
     return HDDVD_OK;

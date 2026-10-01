@@ -43,10 +43,12 @@ static int file_read(hddvd_stream *stream, uint64_t offset, void *buffer, size_t
         return HDDVD_OK;
     }
     available = stream->size - offset > SIZE_MAX ? SIZE_MAX : (size_t)(stream->size - offset);
-    if (size > available)
+    if (size > available) {
         size = available;
-    if (seek_file(self->file, offset))
+    }
+    if (seek_file(self->file, offset)) {
         return HDDVD_EIO;
+    }
     *read_size = fread(buffer, 1, size, self->file);
     return *read_size == size || feof(self->file) ? HDDVD_OK : HDDVD_EIO;
 }
@@ -67,12 +69,14 @@ int hddvd_stream_open_file(const char *path, hddvd_stream **out)
     long end;
 #endif
 
-    if (!path || !out)
+    if (!path || !out) {
         return HDDVD_EINVAL;
+    }
     *out = NULL;
     stream = calloc(1, sizeof(*stream));
-    if (!stream)
+    if (!stream) {
         return HDDVD_ENOMEM;
+    }
     stream->file = fopen(path, "rb");
     if (!stream->file)
     {
@@ -109,8 +113,9 @@ static int memory_read(hddvd_stream *stream, uint64_t offset, void *buffer, size
         return HDDVD_OK;
     }
     available = (size_t)(stream->size - offset);
-    if (size > available)
+    if (size > available) {
         size = available;
+    }
     memcpy(buffer, self->data + (size_t)offset, size);
     *read_size = size;
     return HDDVD_OK;
@@ -127,20 +132,23 @@ int hddvd_stream_open_memory(const void *data, size_t size, hddvd_stream **out)
 {
     memory_stream *stream;
 
-    if ((!data && size) || !out)
+    if ((!data && size) || !out) {
         return HDDVD_EINVAL;
+    }
     *out = NULL;
     stream = calloc(1, sizeof(*stream));
-    if (!stream)
+    if (!stream) {
         return HDDVD_ENOMEM;
+    }
     stream->data = malloc(size ? size : 1);
     if (!stream->data)
     {
         free(stream);
         return HDDVD_ENOMEM;
     }
-    if (size)
+    if (size) {
         memcpy(stream->data, data, size);
+    }
     stream->base.size = size;
     stream->base.refs = 1;
     stream->base.read_at = memory_read;
@@ -161,8 +169,9 @@ static int slice_read(hddvd_stream *stream, uint64_t offset, void *buffer, size_
         return HDDVD_OK;
     }
     available = stream->size - offset > SIZE_MAX ? SIZE_MAX : (size_t)(stream->size - offset);
-    if (size > available)
+    if (size > available) {
         size = available;
+    }
     return hddvd_stream_read_at(self->parent, self->offset + offset, buffer, size, read_size);
 }
 
@@ -177,12 +186,14 @@ int hddvd_stream_slice(hddvd_stream *parent, uint64_t offset, uint64_t size, hdd
 {
     slice_stream *stream;
 
-    if (!parent || !out || offset > parent->size || size > parent->size - offset)
+    if (!parent || !out || offset > parent->size || size > parent->size - offset) {
         return HDDVD_EINVAL;
+    }
     *out = NULL;
     stream = calloc(1, sizeof(*stream));
-    if (!stream)
+    if (!stream) {
         return HDDVD_ENOMEM;
+    }
     stream->base.size = size;
     stream->base.refs = 1;
     stream->base.read_at = slice_read;
@@ -202,22 +213,26 @@ uint64_t hddvd_stream_size(const hddvd_stream *stream)
 int hddvd_stream_read_at(hddvd_stream *stream, uint64_t offset, void *buffer, size_t size,
                          size_t *read_size)
 {
-    if (!stream || (!buffer && size) || !read_size)
+    if (!stream || (!buffer && size) || !read_size) {
         return HDDVD_EINVAL;
+    }
     *read_size = 0;
-    if (!size)
+    if (!size) {
         return HDDVD_OK;
+    }
     return stream->read_at(stream, offset, buffer, size, read_size);
 }
 
 void hddvd_stream_close(hddvd_stream *stream)
 {
-    if (stream && --stream->refs == 0)
+    if (stream && --stream->refs == 0) {
         stream->destroy(stream);
+    }
 }
 
 void hddvd_stream_retain(hddvd_stream *stream)
 {
-    if (stream)
+    if (stream) {
         stream->refs++;
+    }
 }
