@@ -233,6 +233,31 @@ end-of-title, menu close, and reopen.
 captured interactions pass, audio/video continue correctly behind the overlay,
 and unsupported/protected configurations fail with actionable messages.
 
+### 8. Harden packaging, diagnostics, and release validation
+
+* Continuously build static and shared libraries with the supported compiler and
+  operating-system matrix, including sanitizer jobs on untrusted parser inputs.
+* Install the library into an isolated prefix and compile clean C and C++
+  consumers against the installed CMake package on every tested configuration.
+* Stabilize structured diagnostics and consolidate parser, resource, display,
+  script, timer, and event limits before declaring the ABI release-ready.
+
+**Exit criterion:** installed-package consumers, sanitizers, ABI checks, and all
+configured limits run as automated release gates on every supported platform.
+
+### 9. Add actionable host diagnostics
+
+* Retain structured status, subsystem, resource identity, optional byte offset,
+  and human-readable context on long-lived public handles.
+* Clear stale diagnostics after successful operations and keep stable status
+  strings available for callers that do not need detailed failure information.
+* Propagate protected, malformed, missing, ambiguous, and unsupported failures to
+  integrations without requiring them to parse log output.
+
+**Exit criterion:** hosts can present the failed subsystem and resource for every
+context-bound operation, and tests verify that successful recovery clears the
+previous failure.
+
 ## Public API shape to stabilize before VLC work
 
 Exact names are subject to review, but the API should cover these concepts:

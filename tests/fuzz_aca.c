@@ -21,7 +21,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     file = fopen(path, "wb");
     if (!file)
         return 0;
-    if (size && fwrite(data, 1, size, file) != size) {
+    if (size && fwrite(data, 1, size, file) != size)
+    {
         fclose(file);
         remove(path);
         return 0;
@@ -30,14 +31,16 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     (void)hddvd_aca_list(path, visit, NULL);
     (void)hddvd_aca_verify(path, &bad);
     remove(path);
-    
+
     hddvd_stream *stream;
     hddvd_aca *archive;
     if (hddvd_stream_open_memory(data, size, &stream) != HDDVD_OK)
         return 0;
-    if (hddvd_aca_open_stream(stream, &archive) == HDDVD_OK) {
+    if (hddvd_aca_open_stream(stream, &archive) == HDDVD_OK)
+    {
         size_t i;
-        for (i = 0; i < hddvd_aca_count(archive); i++) {
+        for (i = 0; i < hddvd_aca_count(archive); i++)
+        {
             hddvd_aca_entry entry;
             if (hddvd_aca_get_entry(archive, i, &entry) == HDDVD_OK)
                 (void)visit(NULL, &entry);
