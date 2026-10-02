@@ -15,6 +15,7 @@ option(HDDVD_BUILD_FUZZERS "Build libFuzzer harnesses (Clang only)" OFF)
 find_package(LibXml2 REQUIRED)
 
 add_library(hddvd
+    src/application.c
     src/aca.c
     src/disc.c
     src/display.c
@@ -67,7 +68,7 @@ foreach(tool info menuinfo acainfo acaextract scriptdump)
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core io object uri resource xpl xmf xmu style aca evo script_decode display events player)
+    foreach(test core io object uri resource application xpl xmf xmu style aca evo script_decode display events player)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         add_test(NAME ${test} COMMAND test-${test})
