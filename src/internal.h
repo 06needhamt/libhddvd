@@ -24,6 +24,7 @@ struct hddvd_ctx
     hddvd_log_fn log_fn;
     void *log_opaque;
     hddvd_error_detail error;
+    hddvd_config_limits limits;
 };
 struct hddvd_stream
 {
@@ -41,4 +42,5 @@ int hddvd_ascii_equal_ci(const char *a, const char *b);
 int hddvd_stream_slice(hddvd_stream *, uint64_t, uint64_t, hddvd_stream **);
 void hddvd_stream_retain(hddvd_stream *);
 void hddvd_ctx_set_error(const hddvd_ctx *, int, hddvd_subsystem, const char *, const char *);
+int hddvd_config_limits_valid(const hddvd_config_limits *);
 #endif

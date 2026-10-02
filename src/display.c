@@ -73,6 +73,20 @@ int hddvd_image_cache_create(hddvd_image_decode_fn fn, void *opaque,
     return HDDVD_OK;
 }
 
+int hddvd_image_cache_create_with_config(hddvd_image_decode_fn fn, void *opaque,
+                                         const hddvd_config_limits *config, hddvd_image_cache **out)
+{
+    hddvd_display_limits limits;
+    if (!hddvd_config_limits_valid(config))
+        return HDDVD_EINVAL;
+    limits.max_images = config->max_images;
+    limits.max_encoded_bytes = config->max_encoded_image_bytes;
+    limits.max_decoded_pixels = config->max_decoded_pixels;
+    limits.max_dimension = config->max_image_dimension;
+    limits.max_quads = config->max_quads;
+    return hddvd_image_cache_create(fn, opaque, &limits, out);
+}
+
 void hddvd_image_cache_destroy(hddvd_image_cache *c)
 {
     cached_image *p, *n;

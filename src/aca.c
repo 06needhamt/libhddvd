@@ -164,6 +164,16 @@ int hddvd_aca_open_stream_with_limits(hddvd_stream *s, const hddvd_limits *l, hd
     *out = NULL;
     return parse(s, l, out);
 }
+int hddvd_aca_open_stream_with_config(hddvd_stream *s, const hddvd_config_limits *config,
+                                      hddvd_aca **out)
+{
+    hddvd_limits limits;
+    if (!hddvd_config_limits_valid(config))
+        return HDDVD_EINVAL;
+    limits.max_aca_entries = config->max_archive_members;
+    limits.max_aca_member_size = config->max_archive_member_bytes;
+    return hddvd_aca_open_stream_with_limits(s, &limits, out);
+}
 int hddvd_aca_open_stream(hddvd_stream *s, hddvd_aca **out)
 {
     hddvd_limits l;
