@@ -104,6 +104,13 @@ skipped.  See `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the remaining phases.
 Reviewable tasks, dependencies, and acceptance criteria for those phases are in
 `docs/IMPLEMENTATION_TASKS.md`.
 
+Additional externally supplied menu corpora can be inventoried without copying
+assets into the repository. Enable `HDDVD_ENABLE_EXTERNAL_MENU_TESTS`, set
+`HDDVD_EXTERNAL_MENU_CORPUS` to a ZIP or extracted directory, and optionally set
+`HDDVD_EXTERNAL_MENU_REPORT` to a JSON output path. See
+`docs/EXTERNAL_MENU_INVENTORY.md` for the external-only data policy and report
+schema.
+
 Parser fuzz harnesses can be built with Clang and
 `-DHDDVD_BUILD_FUZZERS=ON`; the checked-in inputs under `tests/fixtures` are
 original synthetic seeds and contain no bytes from the reference archive.

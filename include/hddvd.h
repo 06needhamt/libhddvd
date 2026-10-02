@@ -40,6 +40,7 @@ typedef struct hddvd_stream hddvd_stream;
 typedef struct hddvd_aca hddvd_aca;
 typedef struct hddvd_uri hddvd_uri;
 typedef struct hddvd_xmf hddvd_xmf;
+typedef struct hddvd_xpl hddvd_xpl;
 typedef struct hddvd_object hddvd_object;
 typedef struct hddvd_script hddvd_script;
 typedef struct hddvd_image_cache hddvd_image_cache;
@@ -91,6 +92,125 @@ typedef struct hddvd_xmf_region
     uint32_t width;
     uint32_t height;
 } hddvd_xmf_region;
+typedef struct hddvd_xpl_limits
+{
+    size_t max_nodes;
+    size_t max_items;
+} hddvd_xpl_limits;
+typedef struct hddvd_xpl_time
+{
+    uint64_t frames;
+    uint32_t frame_rate;
+} hddvd_xpl_time;
+typedef enum hddvd_xpl_media_kind
+{
+    HDDVD_XPL_MEDIA_VIDEO = 1,
+    HDDVD_XPL_MEDIA_AUDIO,
+    HDDVD_XPL_MEDIA_SUBPICTURE
+} hddvd_xpl_media_kind;
+typedef enum hddvd_xpl_title_kind
+{
+    HDDVD_XPL_TITLE_FIRST_PLAY = 1,
+    HDDVD_XPL_TITLE_REGULAR
+} hddvd_xpl_title_kind;
+typedef enum hddvd_xpl_application_kind
+{
+    HDDVD_XPL_APPLICATION_SEGMENT = 1,
+    HDDVD_XPL_APPLICATION_PLAYLIST
+} hddvd_xpl_application_kind;
+typedef enum hddvd_xpl_event_kind
+{
+    HDDVD_XPL_EVENT_SCHEDULED = 1,
+    HDDVD_XPL_EVENT_PAUSE
+} hddvd_xpl_event_kind;
+typedef struct hddvd_xpl_configuration
+{
+    uint64_t streaming_buffer_size;
+    uint32_t aperture_width;
+    uint32_t aperture_height;
+    uint32_t main_video_default_color;
+    uint32_t network_timeout;
+    uint8_t has_streaming_buffer_size;
+    uint8_t has_aperture;
+    uint8_t has_main_video_default_color;
+    uint8_t has_network_timeout;
+} hddvd_xpl_configuration;
+typedef struct hddvd_xpl_media_attribute
+{
+    hddvd_xpl_media_kind kind;
+    uint32_t index;
+    const char *codec;
+    const char *channels;
+} hddvd_xpl_media_attribute;
+typedef struct hddvd_xpl_title_info
+{
+    hddvd_xpl_title_kind kind;
+    const char *id;
+    uint32_t number;
+    const char *type;
+    const char *display_name;
+    const char *on_end;
+    hddvd_xpl_time duration;
+    uint8_t selectable;
+    uint8_t has_number;
+    uint8_t has_duration;
+} hddvd_xpl_title_info;
+typedef struct hddvd_xpl_clip
+{
+    const char *src;
+    hddvd_xpl_time title_begin;
+    hddvd_xpl_time title_end;
+    hddvd_xpl_time clip_begin;
+    const char *data_source;
+    uint8_t seamless;
+    uint8_t has_title_begin;
+    uint8_t has_title_end;
+    uint8_t has_clip_begin;
+} hddvd_xpl_clip;
+typedef struct hddvd_xpl_chapter
+{
+    const char *id;
+    const char *display_name;
+    hddvd_xpl_time begin;
+} hddvd_xpl_chapter;
+typedef struct hddvd_xpl_track
+{
+    hddvd_xpl_media_kind kind;
+    uint32_t track;
+    uint32_t stream_number;
+    uint32_t media_attribute;
+    const char *language;
+    uint8_t selectable;
+    uint8_t has_stream_number;
+    uint8_t has_media_attribute;
+} hddvd_xpl_track;
+typedef struct hddvd_xpl_application
+{
+    hddvd_xpl_application_kind kind;
+    const char *src;
+    const char *language;
+    const char *description;
+    int32_t z_order;
+    hddvd_xpl_time title_begin;
+    hddvd_xpl_time title_end;
+    uint8_t autorun;
+    uint8_t has_z_order;
+    uint8_t has_title_begin;
+    uint8_t has_title_end;
+} hddvd_xpl_application;
+typedef struct hddvd_xpl_application_resource
+{
+    const char *src;
+    uint64_t size;
+    uint8_t multiplexed;
+    uint8_t has_size;
+} hddvd_xpl_application_resource;
+typedef struct hddvd_xpl_event
+{
+    hddvd_xpl_event_kind kind;
+    const char *id;
+    hddvd_xpl_time time;
+} hddvd_xpl_event;
 typedef struct hddvd_script_limits
 {
     size_t max_strings;
@@ -434,6 +554,36 @@ HDDVD_API int hddvd_display_hit_test(const hddvd_display_list *, int32_t, int32_
 HDDVD_API int hddvd_scan_files(const hddvd_ctx *, hddvd_file_cb, void *);
 HDDVD_API const char *hddvd_file_kind_name(hddvd_file_kind);
 HDDVD_API int hddvd_xpl_find_start_ref(const char *, char **);
+/* XPL objects are immutable. Strings in returned records are borrowed until
+   hddvd_xpl_close(). Times are normalized to frames using TitleSet timeBase. */
+HDDVD_API void hddvd_xpl_limits_default(hddvd_xpl_limits *);
+HDDVD_API int hddvd_xpl_open(const void *, size_t, hddvd_xpl **);
+HDDVD_API int hddvd_xpl_open_with_limits(const void *, size_t, const hddvd_xpl_limits *,
+                                         hddvd_xpl **);
+HDDVD_API void hddvd_xpl_close(hddvd_xpl *);
+HDDVD_API const char *hddvd_xpl_namespace(const hddvd_xpl *);
+HDDVD_API const char *hddvd_xpl_display_name(const hddvd_xpl *);
+HDDVD_API const char *hddvd_xpl_type(const hddvd_xpl *);
+HDDVD_API uint32_t hddvd_xpl_frame_rate(const hddvd_xpl *);
+HDDVD_API int hddvd_xpl_get_configuration(const hddvd_xpl *, hddvd_xpl_configuration *);
+HDDVD_API size_t hddvd_xpl_media_attribute_count(const hddvd_xpl *);
+HDDVD_API int hddvd_xpl_get_media_attribute(const hddvd_xpl *, size_t, hddvd_xpl_media_attribute *);
+HDDVD_API size_t hddvd_xpl_title_count(const hddvd_xpl *);
+HDDVD_API int hddvd_xpl_get_title(const hddvd_xpl *, size_t, hddvd_xpl_title_info *);
+HDDVD_API size_t hddvd_xpl_clip_count(const hddvd_xpl *, size_t);
+HDDVD_API int hddvd_xpl_get_clip(const hddvd_xpl *, size_t, size_t, hddvd_xpl_clip *);
+HDDVD_API size_t hddvd_xpl_chapter_count(const hddvd_xpl *, size_t);
+HDDVD_API int hddvd_xpl_get_chapter(const hddvd_xpl *, size_t, size_t, hddvd_xpl_chapter *);
+HDDVD_API size_t hddvd_xpl_track_count(const hddvd_xpl *, size_t);
+HDDVD_API int hddvd_xpl_get_track(const hddvd_xpl *, size_t, size_t, hddvd_xpl_track *);
+/* Use SIZE_MAX as the title index for playlist-wide applications. */
+HDDVD_API size_t hddvd_xpl_application_count(const hddvd_xpl *, size_t);
+HDDVD_API int hddvd_xpl_get_application(const hddvd_xpl *, size_t, size_t, hddvd_xpl_application *);
+HDDVD_API size_t hddvd_xpl_application_resource_count(const hddvd_xpl *, size_t, size_t);
+HDDVD_API int hddvd_xpl_get_application_resource(const hddvd_xpl *, size_t, size_t, size_t,
+                                                 hddvd_xpl_application_resource *);
+HDDVD_API size_t hddvd_xpl_event_count(const hddvd_xpl *, size_t);
+HDDVD_API int hddvd_xpl_get_event(const hddvd_xpl *, size_t, size_t, hddvd_xpl_event *);
 HDDVD_API int hddvd_xmf_dump(const void *, size_t, const char *, void *);
 /* XMF objects are immutable. All returned strings are borrowed and remain
    valid until hddvd_xmf_close(). Inputs are copied by the parser. */

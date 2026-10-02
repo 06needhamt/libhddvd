@@ -40,7 +40,7 @@ model.
 ### P1-01 — Add the checked byte-stream API
 
 **Status:** Complete
-**Depends on:** Phase 0  
+**Depends on:** Phase 0
 **Likely files:** `include/hddvd.h`, `src/io.c`, `src/internal.h`, `tests/test_io.c`
 
 Add opaque `hddvd_stream` objects with `read_at`, `size`, and `close` operations.
@@ -56,7 +56,7 @@ than 2 GiB where the platform permits sparse files, and injected short reads.
 ### P1-02 — Introduce a persistent ACA archive handle
 
 **Status:** Complete
-**Depends on:** P1-01  
+**Depends on:** P1-01
 **Likely files:** `include/hddvd.h`, `src/aca.c`, `tests/test_aca.c`
 
 Add `hddvd_aca_open`, lookup/iteration, member-stream, verify, and close APIs.
@@ -71,7 +71,7 @@ state; ASan/LSan report no leaks over repeated open/close cycles.
 ### P1-03 — Harden ACA directory validation
 
 **Status:** Complete
-**Depends on:** P1-02  
+**Depends on:** P1-02
 **Likely files:** `src/aca.c`, `tests/test_aca.c`, `tests/fuzz_aca.c`
 
 Replace fixed-name truncation with owned names and validate every header field,
@@ -86,7 +86,7 @@ writes every input to `/tmp`.
 ### P1-04 — Implement canonical HD DVD URI handling
 
 **Status:** Complete
-**Depends on:** none  
+**Depends on:** none
 **Likely files:** `src/uri.c`, `src/internal.h`, `tests/test_uri.c`
 
 Parse `file:///dvddisc/...` URIs, percent-decode once, normalize separators and
@@ -100,7 +100,7 @@ ambiguous case-folded names, absolute host paths, and archive-member traversal.
 ### P1-05 — Add the unified resource resolver
 
 **Status:** Complete
-**Depends on:** P1-02, P1-04  
+**Depends on:** P1-02, P1-04
 **Likely files:** `include/hddvd.h`, `src/resource.c`, `tests/test_resource.c`
 
 Resolve structured disc URIs to a bounded `hddvd_stream`, including direct disc
@@ -116,7 +116,7 @@ documented ownership and reentrancy behavior.
 ### P2-01 — Write the envelope format note and fixture generator
 
 **Status:** Complete
-**Depends on:** Phase 0  
+**Depends on:** Phase 0
 **Likely files:** `docs/formats/aacs-object-envelope.md`,
 `tests/fixtures/generate_objects.py`
 
@@ -132,7 +132,7 @@ being assigned guessed meanings.
 ### P2-02 — Add a strict object-envelope parser
 
 **Status:** Complete
-**Depends on:** P1-01, P2-01  
+**Depends on:** P1-01, P2-01
 **Likely files:** `include/hddvd.h`, `src/object.c`, `tests/test_object.c`
 
 Expose object version/type, declared length, optional name, trailer metadata, and
@@ -146,7 +146,7 @@ classifies all 40 members without scanning for `<?xml` or PNG signatures.
 ### P2-03 — Model protected content explicitly
 
 **Status:** Complete
-**Depends on:** P1-05, P2-02  
+**Depends on:** P1-05, P2-02
 **Likely files:** `include/hddvd.h`, `src/resource.c`, `src/hddvd.c`
 
 Add `HDDVD_EPROTECTED`, a decryption-provider callback contract, and diagnostics
@@ -160,7 +160,7 @@ provider callbacks cannot recursively corrupt resolver state.
 ### P2-04 — Route inspection tools through object parsing
 
 **Status:** Complete
-**Depends on:** P2-02  
+**Depends on:** P2-02
 **Likely files:** `src/xmf.c`, `tools/hddvd-menuinfo.c`,
 `tools/hddvd-acainfo.c`
 
@@ -176,7 +176,7 @@ valid JSON; malformed envelopes fail before libxml2 is called.
 ### P3-01 — Implement the immutable XMF model
 
 **Status:** Complete
-**Depends on:** none for unwrapped input; integrate P2-02 later  
+**Depends on:** none for unwrapped input; integrate P2-02 later
 **Likely files:** `include/hddvd.h`, `src/xmf.c`, `tests/test_xmf.c`
 
 Parse application id, region, ordered script references, markup references, and
@@ -188,8 +188,8 @@ foreign-namespace tests fail predictably; no libxml2 pointers escape the ABI.
 
 ### P3-02 — Implement the XMU DOM and id index
 
-**Status:** Blocked  
-**Depends on:** P3-01 ownership conventions  
+**Status:** Ready; external multi-family construct inventory complete
+**Depends on:** P3-01 ownership conventions
 **Likely files:** `include/hddvd.h`, `src/xmu.c`, `tests/test_xmu.c`
 
 Parse supported elements into immutable nodes, retain namespaced attributes, and
@@ -201,8 +201,8 @@ forward id references work; depth/count limits are tested and fuzzed.
 
 ### P3-03 — Parse and compute styles
 
-**Status:** Blocked  
-**Depends on:** P3-02  
+**Status:** Blocked
+**Depends on:** P3-02
 **Likely files:** `src/style.c`, `tests/test_style.c`
 
 Parse style references and the properties required by the menu: absolute pixel
@@ -215,8 +215,8 @@ image selection inputs.
 
 ### P3-04 — Add dependency and capability reporting
 
-**Status:** Blocked  
-**Depends on:** P1-05, P3-01, P3-03  
+**Status:** Blocked
+**Depends on:** P1-05, P3-01, P3-03
 **Likely files:** `include/hddvd.h`, `src/application.c`,
 `tools/hddvd-menuinfo.c`
 
@@ -231,8 +231,8 @@ style property, element kind, and unresolved dependency with no hard-coded names
 
 ### P4-01 — Inventory and document the binary script format
 
-**Status:** Blocked on specification/research access  
-**Depends on:** P2-02  
+**Status:** Structural comparison expanded; semantics blocked on specification/research access
+**Depends on:** P2-02
 **Likely files:** `docs/formats/hdi-script.md`, `tools/hddvd-scriptinfo.c`
 
 Create a read-only header/table inspector.  Document facts from public
@@ -244,8 +244,8 @@ the four reference scripts as a known structure or explicitly unknown range.
 
 ### P4-02 — Build a script decoder and disassembler
 
-**Status:** Blocked  
-**Depends on:** P4-01  
+**Status:** Blocked
+**Depends on:** P4-01
 **Likely files:** `src/script_decode.c`, `tools/hddvd-scriptdump.c`,
 `tests/test_script_decode.c`
 
@@ -259,8 +259,8 @@ references or unbounded allocations.
 
 ### P4-03 — Select and isolate an ECMAScript execution backend
 
-**Status:** Blocked  
-**Depends on:** P4-02  
+**Status:** Blocked
+**Depends on:** P4-02
 **Likely files:** `cmake/`, `src/script_engine.h`, `docs/decisions/`
 
 Prototype translation to a maintained embeddable engine and compare required HDi
@@ -273,8 +273,8 @@ the backend is disabled.
 
 ### P4-04 — Implement DOM, focus, and event host objects
 
-**Status:** Blocked  
-**Depends on:** P3-03, P4-03  
+**Status:** Blocked
+**Depends on:** P3-03, P4-03
 **Likely files:** `src/runtime.c`, `src/runtime_dom.c`, `tests/test_runtime.c`
 
 Implement element lookup, state/style mutation, listener registration, ordered
@@ -286,8 +286,8 @@ removed nodes/listeners, timer cancellation, exceptions, and budget exhaustion.
 
 ### P4-05 — Implement player and application host objects
 
-**Status:** Blocked  
-**Depends on:** P4-04, P6-01  
+**Status:** Blocked
+**Depends on:** P4-04, P6-01
 **Likely files:** `src/runtime_player.c`, `tests/test_runtime_player.c`
 
 Expose title-clock reads, play/seek/title/chapter selection, menu visibility, and
@@ -300,8 +300,8 @@ an internal lock is held.
 
 ### P4-06 — Reach reference-script conformance
 
-**Status:** Blocked  
-**Depends on:** P4-02 through P4-05, conforming-player trace  
+**Status:** Blocked
+**Depends on:** P4-02 through P4-05, conforming-player trace
 **Likely files:** decoder/runtime tests and conformance report only
 
 Close remaining opcode and host-object gaps found by the reference scripts.  Add
@@ -315,7 +315,7 @@ replay produces every captured state transition without title-specific branches.
 ### P5-01 — Define image-decoder and display-list APIs
 
 **Status:** Complete
-**Depends on:** P1-05, P3-03  
+**Depends on:** P1-05, P3-03
 **Likely files:** `include/hddvd.h`, `src/display.c`, `tests/test_display.c`
 
 Define a host image decoder and immutable display list containing premultiplied
@@ -328,7 +328,7 @@ metadata cannot overflow allocations; cache ownership and eviction are tested.
 ### P5-02 — Compute scene layout and interaction images
 
 **Status:** Complete
-**Depends on:** P5-01, P4-04  
+**Depends on:** P5-01, P4-04
 **Likely files:** `src/layout.c`, `tests/test_layout.c`
 
 Compute nested absolute layout in the 1920x1080 logical region, clipping,
@@ -341,7 +341,7 @@ dimensions.
 ### P5-03 — Add damage tracking, transforms, and hit testing
 
 **Status:** Complete
-**Depends on:** P5-02  
+**Depends on:** P5-02
 **Likely files:** `src/display.c`, `tests/test_display.c`
 
 Emit only changed regions, map logical coordinates through letterbox/pillarbox
@@ -353,8 +353,8 @@ button bounds.
 
 ### P5-04 — Validate reference visual states
 
-**Status:** Blocked  
-**Depends on:** P4-06, P5-03, conforming-player screenshots  
+**Status:** Blocked
+**Depends on:** P4-06, P5-03, conforming-player screenshots
 **Likely files:** external conformance report; no menu assets
 
 Compare display-list structure and, where color pipelines permit, screenshot
@@ -368,7 +368,7 @@ captured states; any allowed pixel tolerance is documented and narrowly bounded.
 ### P6-01 — Define timebase, event, and host-command types
 
 **Status:** Complete
-**Depends on:** none  
+**Depends on:** none
 **Likely files:** `include/hddvd.h`, `tests/test_events.c`
 
 Define explicit 90 kHz title time (or one documented alternative), playback
@@ -381,13 +381,17 @@ acknowledgement.
 
 ### P6-02 — Replace start-reference-only XPL parsing
 
-**Status:** Blocked on fixture/spec inventory  
-**Depends on:** P1-01  
+**Status:** Core typed model complete; external conformance and less-common constructs remain
+**Depends on:** P1-01
 **Likely files:** `include/hddvd.h`, `src/xpl.c`, `tests/test_xpl.c`
 
-Add typed playlists, clips, title/chapter ranges, entry points, application
-lifecycle declarations, and branches required by the reference title.  Preserve
-the existing helper as a compatibility wrapper.
+The immutable typed model now covers configuration, media attributes, first-play
+and numbered titles, clips, chapters, track navigation, application declarations
+and resources, scheduled events, pause points, normalized frame times, and
+configurable node/item limits. The existing start-reference helper remains as a
+compatibility wrapper. Continue with external conformance, entry points, branch
+validation, lifecycle details, and less-common constructs recorded by the
+external inventory.
 
 **Acceptance:** original synthetic playlists cover forward references, time
 ranges, branches, malformed cycles, and limits; required reference constructs are
@@ -395,8 +399,8 @@ all represented in the conformance report.
 
 ### P6-03 — Decode required IFO and MAP navigation structures
 
-**Status:** Blocked on fixture/spec inventory  
-**Depends on:** P1-01, P6-02  
+**Status:** Blocked on fixture/spec inventory
+**Depends on:** P1-01, P6-02
 **Likely files:** `src/ifo.c`, `src/map.c`, `tests/test_ifo.c`, `tests/test_map.c`
 
 Replace size/signature probes with typed, bounds-checked structures required to
@@ -410,7 +414,7 @@ C structs.
 ### P6-04 — Harden EVO packet and stream metadata parsing
 
 **Status:** Complete
-**Depends on:** P1-01  
+**Depends on:** P1-01
 **Likely files:** `src/evo.c`, `tests/test_evo.c`
 
 Parse packets incrementally across arbitrary read boundaries, validate PES
@@ -424,7 +428,7 @@ overlap bytes.
 ### P6-05 — Add the deterministic navigation scheduler
 
 **Status:** Foundation complete; full runtime integration remains blocked
-**Depends on:** P4-05, P6-01, P6-02  
+**Depends on:** P4-05, P6-01, P6-02
 **Likely files:** `src/player.c`, `tests/test_player.c`
 
 Serialize clocks, input, script tasks, timers, playback acknowledgements, seeks,
@@ -442,7 +446,7 @@ this repository.  Pin the libhddvd API/ABI version in every integration PR.
 ### P7-01 — Publish consumable build metadata and capabilities
 
 **Status:** Complete
-**Depends on:** stable APIs from P1, P3, P4, P5, and P6  
+**Depends on:** stable APIs from P1, P3, P4, P5, and P6
 **Likely files:** `CMakeLists.txt`, `libhddvd.pc.in`, installed CMake config
 
 Install package metadata, ABI version information, and queryable feature bits for
@@ -453,7 +457,7 @@ shared and static libraries and can report exactly which optional backends exist
 
 ### P7-02 — Implement the VLC access/demux module
 
-**Status:** Blocked  
+**Status:** Blocked
 **Depends on:** P1-05, P6-02 through P6-04, P7-01
 
 Open an HD DVD root, provide authorized clear streams, map title/EVO ranges to
@@ -466,7 +470,7 @@ message rather than a generic I/O error.
 
 ### P7-03 — Implement VLC overlay and input bridging
 
-**Status:** Blocked  
+**Status:** Blocked
 **Depends on:** P5-03, P6-05, P7-02
 
 Convert display-list changes to VLC subpictures and translate VLC key/mouse/menu
@@ -478,7 +482,7 @@ letterbox, close, and reopen paths; ThreadSanitizer finds no event/clock races.
 
 ### P7-04 — Run end-to-end reference conformance
 
-**Status:** Blocked  
+**Status:** Blocked
 **Depends on:** P4-06, P5-04, P6-05, P7-03
 
 Run the complete interaction trace against VLC with clear and, where an authorized
@@ -518,7 +522,7 @@ stable status names.
 
 ### X-02 — Configurable limits
 
-**Status:** Ready after P1-01 API review  
+**Status:** Ready after P1-01 API review
 **Depends on:** P1-01 ownership conventions
 
 Define one limits object for archive members, resource bytes, XML nodes/depth,
