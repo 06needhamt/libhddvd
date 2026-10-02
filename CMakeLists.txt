@@ -8,6 +8,8 @@ include(CMakePackageConfigHelpers)
 
 option(HDDVD_ENABLE_REFERENCE_TESTS
        "Enable tests using an external reference ACA" OFF)
+option(HDDVD_ENABLE_EXTERNAL_MENU_TESTS
+       "Enable inventory tests using an external menu ZIP or directory" OFF)
 option(HDDVD_BUILD_FUZZERS "Build libFuzzer harnesses (Clang only)" OFF)
 
 find_package(LibXml2 REQUIRED)
@@ -71,6 +73,8 @@ if(BUILD_TESTING)
 
     target_compile_definitions(test-xmf PRIVATE
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+    target_compile_definitions(test-xpl PRIVATE
+        HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 
     if(HDDVD_ENABLE_REFERENCE_TESTS)
         find_package(Python3 3.8 REQUIRED COMPONENTS Interpreter)
@@ -80,6 +84,16 @@ if(BUILD_TESTING)
                     $<TARGET_FILE:hddvd-acainfo>
                     ${CMAKE_CURRENT_SOURCE_DIR}/tests/reference_menu_expected.json)
         set_tests_properties(reference-menu PROPERTIES SKIP_RETURN_CODE 77)
+    endif()
+
+    if(HDDVD_ENABLE_EXTERNAL_MENU_TESTS)
+        find_package(Python3 3.8 REQUIRED COMPONENTS Interpreter)
+        add_test(NAME external-menu-corpus
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_external_menu_corpus.py
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tools/inventory_external_menus.py
+                    $<TARGET_FILE:hddvd-acaextract>)
+        set_tests_properties(external-menu-corpus PROPERTIES SKIP_RETURN_CODE 77)
     endif()
 
     add_test(NAME install-consumer

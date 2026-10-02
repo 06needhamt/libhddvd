@@ -198,6 +198,13 @@ the trace in geometry, resource selection, visibility, and stacking.
 
 ### 6. Synchronize navigation with playback
 
+**Implementation status:** the core typed XPL model now represents configuration,
+media attributes, titles, clips, chapters, navigation tracks, applications,
+resources, scheduled events, pause points, and normalized frame times. An
+external-only inventory covers four independently authored playlists. Entry
+points, complete lifecycle/branch semantics, external conformance, and IFO/MAP
+navigation decoding remain outstanding.
+
 * Add monotonic title-clock updates, pause/rate/seek/discontinuity notifications,
   one-shot and repeating timers, and ordered event queues.  Define whether times
   use 90 kHz ticks or microseconds at every API boundary.
