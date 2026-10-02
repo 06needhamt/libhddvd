@@ -215,7 +215,7 @@ image selection inputs.
 
 ### P3-04 — Add dependency and capability reporting
 
-**Status:** Ready
+**Status:** Complete
 **Depends on:** P1-05, P3-01, P3-03
 **Likely files:** `include/hddvd.h`, `src/application.c`,
 `tools/hddvd-menuinfo.c`

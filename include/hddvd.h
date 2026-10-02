@@ -42,6 +42,7 @@ typedef struct hddvd_uri hddvd_uri;
 typedef struct hddvd_xmf hddvd_xmf;
 typedef struct hddvd_xmu hddvd_xmu;
 typedef struct hddvd_xmu_styles hddvd_xmu_styles;
+typedef struct hddvd_application hddvd_application;
 typedef struct hddvd_xpl hddvd_xpl;
 typedef struct hddvd_object hddvd_object;
 typedef struct hddvd_script hddvd_script;
@@ -94,6 +95,32 @@ typedef struct hddvd_xmf_region
     uint32_t width;
     uint32_t height;
 } hddvd_xmf_region;
+typedef enum hddvd_dependency_kind
+{
+    HDDVD_DEPENDENCY_SCRIPT = 1,
+    HDDVD_DEPENDENCY_MARKUP,
+    HDDVD_DEPENDENCY_IMAGE
+} hddvd_dependency_kind;
+typedef struct hddvd_dependency
+{
+    hddvd_dependency_kind kind;
+    const char *id;
+    const char *uri;
+    int status;
+} hddvd_dependency;
+typedef enum hddvd_requirement_kind
+{
+    HDDVD_REQUIREMENT_ELEMENT = 1,
+    HDDVD_REQUIREMENT_STYLE_PROPERTY
+} hddvd_requirement_kind;
+typedef struct hddvd_requirement
+{
+    hddvd_requirement_kind kind;
+    const char *namespace_uri;
+    const char *name;
+    size_t occurrences;
+    uint8_t supported;
+} hddvd_requirement;
 typedef struct hddvd_xmu_limits
 {
     size_t max_depth;
@@ -664,6 +691,18 @@ HDDVD_API size_t hddvd_xmf_markup_count(const hddvd_xmf *);
 HDDVD_API int hddvd_xmf_get_markup(const hddvd_xmf *, size_t, const char **, const char **);
 HDDVD_API size_t hddvd_xmf_resource_root_count(const hddvd_xmf *);
 HDDVD_API const char *hddvd_xmf_resource_root(const hddvd_xmf *, size_t);
+/* Application reports own the manifest and all report strings. Dependency
+   failures are recorded rather than making open fail, so callers can present
+   a complete preflight report before attempting execution. */
+HDDVD_API int hddvd_application_open(const hddvd_ctx *, const char *, hddvd_application **);
+HDDVD_API void hddvd_application_close(hddvd_application *);
+HDDVD_API const hddvd_xmf *hddvd_application_manifest(const hddvd_application *);
+HDDVD_API size_t hddvd_application_dependency_count(const hddvd_application *);
+HDDVD_API int hddvd_application_get_dependency(const hddvd_application *, size_t,
+                                               hddvd_dependency *);
+HDDVD_API size_t hddvd_application_requirement_count(const hddvd_application *);
+HDDVD_API int hddvd_application_get_requirement(const hddvd_application *, size_t,
+                                                hddvd_requirement *);
 HDDVD_API int hddvd_aca_supported(void);
 HDDVD_API int hddvd_aca_open(const char *, hddvd_aca **);
 HDDVD_API int hddvd_aca_open_stream(hddvd_stream *, hddvd_aca **);
