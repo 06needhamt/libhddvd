@@ -40,6 +40,8 @@ typedef struct hddvd_stream hddvd_stream;
 typedef struct hddvd_aca hddvd_aca;
 typedef struct hddvd_uri hddvd_uri;
 typedef struct hddvd_xmf hddvd_xmf;
+typedef struct hddvd_xmu hddvd_xmu;
+typedef struct hddvd_xmu_styles hddvd_xmu_styles;
 typedef struct hddvd_xpl hddvd_xpl;
 typedef struct hddvd_object hddvd_object;
 typedef struct hddvd_script hddvd_script;
@@ -92,6 +94,68 @@ typedef struct hddvd_xmf_region
     uint32_t width;
     uint32_t height;
 } hddvd_xmf_region;
+typedef struct hddvd_xmu_limits
+{
+    size_t max_depth;
+    size_t max_nodes;
+    size_t max_attributes;
+} hddvd_xmu_limits;
+typedef struct hddvd_xmu_node
+{
+    const char *namespace_uri;
+    const char *name;
+    const char *id;
+    const char *text;
+    size_t parent;
+    size_t first_child;
+    size_t next_sibling;
+    size_t child_count;
+    size_t attribute_count;
+} hddvd_xmu_node;
+typedef struct hddvd_xmu_attribute
+{
+    const char *namespace_uri;
+    const char *name;
+    const char *value;
+} hddvd_xmu_attribute;
+typedef enum hddvd_xmu_display
+{
+    HDDVD_XMU_DISPLAY_BLOCK = 0,
+    HDDVD_XMU_DISPLAY_NONE = 1
+} hddvd_xmu_display;
+typedef enum hddvd_xmu_style_property
+{
+    HDDVD_XMU_STYLE_X = 1u << 0,
+    HDDVD_XMU_STYLE_Y = 1u << 1,
+    HDDVD_XMU_STYLE_WIDTH = 1u << 2,
+    HDDVD_XMU_STYLE_HEIGHT = 1u << 3,
+    HDDVD_XMU_STYLE_DISPLAY = 1u << 4,
+    HDDVD_XMU_STYLE_Z_INDEX = 1u << 5,
+    HDDVD_XMU_STYLE_BACKGROUND_IMAGE = 1u << 6,
+    HDDVD_XMU_STYLE_SCALE_TO_FIT = 1u << 7,
+    HDDVD_XMU_STYLE_NAV_LEFT = 1u << 8,
+    HDDVD_XMU_STYLE_NAV_RIGHT = 1u << 9,
+    HDDVD_XMU_STYLE_NAV_UP = 1u << 10,
+    HDDVD_XMU_STYLE_NAV_DOWN = 1u << 11,
+    HDDVD_XMU_STYLE_POSITION = 1u << 12
+} hddvd_xmu_style_property;
+typedef struct hddvd_xmu_style
+{
+    uint32_t properties;
+    int32_t x;
+    int32_t y;
+    uint32_t width;
+    uint32_t height;
+    int32_t z_index;
+    hddvd_xmu_display display;
+    uint8_t position_absolute;
+    uint8_t scale_to_fit;
+    size_t nav_left;
+    size_t nav_right;
+    size_t nav_up;
+    size_t nav_down;
+    size_t background_image_count;
+} hddvd_xmu_style;
 typedef struct hddvd_xpl_limits
 {
     size_t max_nodes;
@@ -622,6 +686,31 @@ HDDVD_API const char *hddvd_uri_archive_name(const hddvd_uri *);
 HDDVD_API const char *hddvd_uri_member_name(const hddvd_uri *);
 HDDVD_API int hddvd_open_resource(const hddvd_ctx *, const char *, hddvd_stream **);
 HDDVD_API int hddvd_xmu_dump(const void *, size_t, const char *, void *);
+/* XMU models are immutable. All strings returned through getters are borrowed
+   and remain valid until hddvd_xmu_close(). SIZE_MAX denotes no node. */
+HDDVD_API void hddvd_xmu_limits_default(hddvd_xmu_limits *);
+HDDVD_API int hddvd_xmu_open(const void *, size_t, hddvd_xmu **);
+HDDVD_API int hddvd_xmu_open_with_limits(const void *, size_t, const hddvd_xmu_limits *,
+                                         hddvd_xmu **);
+HDDVD_API void hddvd_xmu_close(hddvd_xmu *);
+HDDVD_API size_t hddvd_xmu_node_count(const hddvd_xmu *);
+HDDVD_API int hddvd_xmu_get_node(const hddvd_xmu *, size_t, hddvd_xmu_node *);
+HDDVD_API int hddvd_xmu_get_attribute(const hddvd_xmu *, size_t, size_t, hddvd_xmu_attribute *);
+HDDVD_API size_t hddvd_xmu_find_id(const hddvd_xmu *, const char *);
+HDDVD_API size_t hddvd_xmu_initial_focus(const hddvd_xmu *);
+HDDVD_API const char *hddvd_xmu_clock(const hddvd_xmu *);
+/* Style models borrow the XMU model, which must outlive them. The specified
+   value contains only properties declared directly on a node; the computed
+   value includes named style references. Equal zIndex values retain document
+   order. */
+HDDVD_API int hddvd_xmu_styles_open(const hddvd_xmu *, hddvd_xmu_styles **);
+HDDVD_API void hddvd_xmu_styles_close(hddvd_xmu_styles *);
+HDDVD_API int hddvd_xmu_get_specified_style(const hddvd_xmu_styles *, size_t, hddvd_xmu_style *);
+HDDVD_API int hddvd_xmu_get_computed_style(const hddvd_xmu_styles *, size_t, hddvd_xmu_style *);
+HDDVD_API const char *hddvd_xmu_style_background_image(const hddvd_xmu_styles *, size_t, size_t,
+                                                       int);
+HDDVD_API const char *hddvd_xmu_style_image_for_state(const hddvd_xmu_styles *, size_t, int);
+HDDVD_API size_t hddvd_xmu_style_z_order(const hddvd_xmu_styles *, size_t);
 HDDVD_API int hddvd_time_from_milliseconds(uint64_t, hddvd_time *);
 HDDVD_API int hddvd_time_to_milliseconds(hddvd_time, uint64_t *);
 HDDVD_API int hddvd_time_from_seconds(uint64_t, hddvd_time *);

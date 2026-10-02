@@ -1,14 +1,14 @@
 #include "hddvd.h"
 #include <stdint.h>
-#include <stdio.h>
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    FILE *sink = tmpfile();
-    if (sink)
-    {
-        (void)hddvd_xmu_dump(data, size, "fuzz.xmu", sink);
-        fclose(sink);
-    }
+    hddvd_xmu *xmu = NULL;
+    hddvd_xmu_styles *styles = NULL;
+    (void)hddvd_xmu_open(data, size, &xmu);
+    if (xmu)
+        (void)hddvd_xmu_styles_open(xmu, &styles);
+    hddvd_xmu_styles_close(styles);
+    hddvd_xmu_close(xmu);
     return 0;
 }

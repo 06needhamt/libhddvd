@@ -188,7 +188,7 @@ foreign-namespace tests fail predictably; no libxml2 pointers escape the ABI.
 
 ### P3-02 — Implement the XMU DOM and id index
 
-**Status:** Ready; external multi-family construct inventory complete
+**Status:** Complete
 **Depends on:** P3-01 ownership conventions
 **Likely files:** `include/hddvd.h`, `src/xmu.c`, `tests/test_xmu.c`
 
@@ -201,7 +201,7 @@ forward id references work; depth/count limits are tested and fuzzed.
 
 ### P3-03 — Parse and compute styles
 
-**Status:** Blocked
+**Status:** Complete
 **Depends on:** P3-02
 **Likely files:** `src/style.c`, `tests/test_style.c`
 
@@ -215,7 +215,7 @@ image selection inputs.
 
 ### P3-04 — Add dependency and capability reporting
 
-**Status:** Blocked
+**Status:** Ready
 **Depends on:** P1-05, P3-01, P3-03
 **Likely files:** `include/hddvd.h`, `src/application.c`,
 `tools/hddvd-menuinfo.c`
