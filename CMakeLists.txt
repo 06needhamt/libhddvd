@@ -28,9 +28,11 @@ add_library(hddvd
     src/resource.c
     src/script_decode.c
     src/stream.c
+    src/style.c
     src/uri.c
     src/util.c
     src/xmf.c
+    src/xmu.c
     src/xpl.c
 )
 add_library(hddvd::hddvd ALIAS hddvd)
@@ -65,13 +67,17 @@ foreach(tool info menuinfo acainfo acaextract scriptdump)
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core io object uri resource xpl xmf aca evo script_decode display events player)
+    foreach(test core io object uri resource xpl xmf xmu style aca evo script_decode display events player)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         add_test(NAME ${test} COMMAND test-${test})
     endforeach()
 
     target_compile_definitions(test-xmf PRIVATE
+        HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+    target_compile_definitions(test-xmu PRIVATE
+        HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+    target_compile_definitions(test-style PRIVATE
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
     target_compile_definitions(test-xpl PRIVATE
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
