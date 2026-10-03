@@ -11,10 +11,17 @@ option(HDDVD_ENABLE_REFERENCE_TESTS
 option(HDDVD_ENABLE_EXTERNAL_MENU_TESTS
        "Enable inventory tests using an external menu ZIP or directory" OFF)
 option(HDDVD_BUILD_FUZZERS "Build libFuzzer harnesses (Clang only)" OFF)
+option(HDDVD_BUILD_SHARED "Build the shared libhddvd library" ON)
+option(HDDVD_BUILD_STATIC "Build the static libhddvd library" ON)
+
+if(NOT HDDVD_BUILD_SHARED AND NOT HDDVD_BUILD_STATIC)
+    message(FATAL_ERROR
+        "At least one of HDDVD_BUILD_SHARED or HDDVD_BUILD_STATIC must be enabled")
+endif()
 
 find_package(LibXml2 REQUIRED)
 
-add_library(hddvd
+set(HDDVD_SOURCES
     src/application.c
     src/aca.c
     src/disc.c
@@ -37,31 +44,57 @@ add_library(hddvd
     src/xmu.c
     src/xpl.c
 )
+
+function(hddvd_configure_library target library_type)
+    target_compile_features(${target} PUBLIC c_std_99)
+    target_include_directories(${target} PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    )
+    target_link_libraries(${target} PRIVATE LibXml2::LibXml2)
+    if(library_type STREQUAL "SHARED")
+        target_compile_definitions(${target} PRIVATE HDDVD_BUILD_SHARED)
+        target_compile_definitions(${target} INTERFACE HDDVD_USE_SHARED)
+    endif()
+    set_target_properties(${target} PROPERTIES
+        C_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN YES
+        VERSION ${PROJECT_VERSION}
+        SOVERSION ${PROJECT_VERSION_MAJOR}
+    )
+
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4)
+        target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
+    else()
+        target_compile_options(${target} PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+    endif()
+endfunction()
+
+set(hddvd_library_targets)
+if(HDDVD_BUILD_SHARED)
+    add_library(hddvd SHARED ${HDDVD_SOURCES})
+    hddvd_configure_library(hddvd SHARED)
+    list(APPEND hddvd_library_targets hddvd)
+elseif(HDDVD_BUILD_STATIC)
+    add_library(hddvd STATIC ${HDDVD_SOURCES})
+    hddvd_configure_library(hddvd STATIC)
+    list(APPEND hddvd_library_targets hddvd)
+endif()
 add_library(hddvd::hddvd ALIAS hddvd)
 
-target_compile_features(hddvd PUBLIC c_std_99)
-target_include_directories(hddvd PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-)
-target_link_libraries(hddvd PRIVATE LibXml2::LibXml2)
-if(BUILD_SHARED_LIBS)
-    target_compile_definitions(hddvd PRIVATE HDDVD_BUILD_SHARED)
-    target_compile_definitions(hddvd INTERFACE HDDVD_USE_SHARED)
-endif()
-set_target_properties(hddvd PROPERTIES
-    C_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN YES
-    VERSION ${PROJECT_VERSION}
-    SOVERSION ${PROJECT_VERSION_MAJOR}
-)
-
-if(MSVC)
-    target_compile_options(hddvd PRIVATE /W4)
-    target_compile_definitions(hddvd PRIVATE _CRT_SECURE_NO_WARNINGS)
-else()
-    target_compile_options(hddvd PRIVATE
-        -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+if(HDDVD_BUILD_STATIC AND HDDVD_BUILD_SHARED)
+    add_library(hddvd_static STATIC ${HDDVD_SOURCES})
+    hddvd_configure_library(hddvd_static STATIC)
+    # A shared library's import library also uses the .lib suffix on Windows.
+    if(NOT WIN32)
+        set_target_properties(hddvd_static PROPERTIES OUTPUT_NAME hddvd)
+    endif()
+    list(APPEND hddvd_library_targets hddvd_static)
+    add_library(hddvd::hddvd_static ALIAS hddvd_static)
+elseif(HDDVD_BUILD_STATIC)
+    add_library(hddvd::hddvd_static ALIAS hddvd)
 endif()
 
 foreach(tool info menuinfo acainfo acaextract scriptdump)
@@ -142,7 +175,8 @@ if(HDDVD_BUILD_FUZZERS)
 endif()
 
 install(TARGETS
-        hddvd hddvd-info hddvd-menuinfo hddvd-acainfo hddvd-acaextract
+        ${hddvd_library_targets}
+        hddvd-info hddvd-menuinfo hddvd-acainfo hddvd-acaextract
         hddvd-scriptdump
     EXPORT hddvdTargets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
