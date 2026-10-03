@@ -50,6 +50,13 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+Both shared and static libraries are built by default. Use
+`-DHDDVD_BUILD_SHARED=OFF` or `-DHDDVD_BUILD_STATIC=OFF` to build only one
+variant. Configuration fails if both options are disabled. The primary
+`hddvd::hddvd` target selects the shared library when it is available, while
+`hddvd::hddvd_static` explicitly selects the static library when both variants
+are enabled.
+
 All C and C++ sources use Allman braces and are formatted with the checked-in
 ClangFormat configuration. Run the following before submitting changes:
 
