@@ -8,8 +8,11 @@ set(consumer_build "${test_root}/build")
 file(REMOVE_RECURSE "${test_root}")
 
 set(config_args)
+set(ctest_config_args)
 if(NOT HDDVD_CONFIG STREQUAL "")
     list(APPEND config_args --config "${HDDVD_CONFIG}")
+    # CTest uses -C; --config is only valid for cmake --build/--install.
+    list(APPEND ctest_config_args -C "${HDDVD_CONFIG}")
 endif()
 
 execute_process(
@@ -64,7 +67,7 @@ execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env
             "PATH=${prefix}/bin${path_separator}$ENV{PATH}"
             "${CMAKE_CTEST_COMMAND}" --test-dir "${consumer_build}"
-            ${config_args} --output-on-failure
+            ${ctest_config_args} --output-on-failure
     RESULT_VARIABLE result)
 if(NOT result EQUAL 0)
     message(FATAL_ERROR "consumer tests failed: ${result}")
