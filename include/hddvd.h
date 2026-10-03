@@ -697,6 +697,10 @@ HDDVD_API size_t hddvd_xpl_media_attribute_count(const hddvd_xpl *);
 HDDVD_API int hddvd_xpl_get_media_attribute(const hddvd_xpl *, size_t, hddvd_xpl_media_attribute *);
 HDDVD_API size_t hddvd_xpl_title_count(const hddvd_xpl *);
 HDDVD_API int hddvd_xpl_get_title(const hddvd_xpl *, size_t, hddvd_xpl_title_info *);
+/* Resolve a title id, or the already-validated onEnd branch of a title, to an
+   index in the immutable title array. */
+HDDVD_API int hddvd_xpl_find_title(const hddvd_xpl *, const char *, size_t *);
+HDDVD_API int hddvd_xpl_get_on_end_target(const hddvd_xpl *, size_t, size_t *);
 HDDVD_API size_t hddvd_xpl_clip_count(const hddvd_xpl *, size_t);
 HDDVD_API int hddvd_xpl_get_clip(const hddvd_xpl *, size_t, size_t, hddvd_xpl_clip *);
 HDDVD_API size_t hddvd_xpl_chapter_count(const hddvd_xpl *, size_t);
