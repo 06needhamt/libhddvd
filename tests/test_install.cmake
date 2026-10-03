@@ -20,8 +20,21 @@ if(NOT result EQUAL 0)
     message(FATAL_ERROR "libhddvd installation failed: ${result}")
 endif()
 
+# Reuse the dependency toolchain (notably vcpkg on Windows).
+set(consumer_args)
+if(HDDVD_TOOLCHAIN_FILE)
+    list(APPEND consumer_args "-DCMAKE_TOOLCHAIN_FILE=${HDDVD_TOOLCHAIN_FILE}")
+endif()
+if(HDDVD_GENERATOR_PLATFORM)
+    list(APPEND consumer_args -A "${HDDVD_GENERATOR_PLATFORM}")
+endif()
+if(HDDVD_VCPKG_TARGET_TRIPLET)
+    list(APPEND consumer_args "-DVCPKG_TARGET_TRIPLET=${HDDVD_VCPKG_TARGET_TRIPLET}")
+endif()
+
 execute_process(
     COMMAND "${CMAKE_COMMAND}"
+            ${consumer_args}
             -S "${HDDVD_SOURCE_DIR}/tests/consumer"
             -B "${consumer_build}"
             -G "${HDDVD_GENERATOR}"

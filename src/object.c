@@ -74,7 +74,7 @@ int hddvd_object_open_with_provider(const void *input, size_t size, hddvd_decryp
     *result = NULL;
     if (size < OBJECT_HEADER_SIZE || memcmp(data, object_magic, sizeof(object_magic)))
         return HDDVD_EPARSE;
-    if (data[8] != 1 || (data[9] & (uint8_t)~OBJECT_PROTECTED))
+    if (data[8] != 1 || (data[9] & (UINT8_MAX ^ OBJECT_PROTECTED)))
         return HDDVD_ENOTSUP;
     header_size = be32(data + 12);
     payload_size = be64(data + 16);

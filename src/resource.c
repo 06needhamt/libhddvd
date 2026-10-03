@@ -1,28 +1,27 @@
 #include "internal.h"
-#include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
 static int resolve_component(const char *directory, const char *name, char **out)
 {
-    DIR *dir = opendir(directory);
-    struct dirent *entry;
+    hddvd_directory *dir = hddvd_directory_open(directory);
+    const char *entry;
     char *match = NULL;
     if (!dir)
         return HDDVD_ENOTFOUND;
-    while ((entry = readdir(dir)) != NULL)
+    while ((entry = hddvd_directory_read(dir)) != NULL)
     {
-        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+        if (!strcmp(entry, ".") || !strcmp(entry, ".."))
             continue;
-        if (hddvd_ascii_equal_ci(entry->d_name, name))
+        if (hddvd_ascii_equal_ci(entry, name))
         {
 #ifndef _WIN32
             struct stat status;
-            char *candidate = hddvd_path_join(directory, entry->d_name);
+            char *candidate = hddvd_path_join(directory, entry);
             if (!candidate)
             {
-                closedir(dir);
+                hddvd_directory_close(dir);
                 return HDDVD_ENOMEM;
             }
             if (lstat(candidate, &status) != 0 || S_ISLNK(status.st_mode))
@@ -35,18 +34,18 @@ static int resolve_component(const char *directory, const char *name, char **out
             if (match)
             {
                 free(match);
-                closedir(dir);
+                hddvd_directory_close(dir);
                 return HDDVD_EPARSE;
             }
-            match = hddvd_path_join(directory, entry->d_name);
+            match = hddvd_path_join(directory, entry);
             if (!match)
             {
-                closedir(dir);
+                hddvd_directory_close(dir);
                 return HDDVD_ENOMEM;
             }
         }
     }
-    closedir(dir);
+    hddvd_directory_close(dir);
     if (!match)
         return HDDVD_ENOTFOUND;
     *out = match;
