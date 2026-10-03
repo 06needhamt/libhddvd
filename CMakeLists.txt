@@ -72,6 +72,11 @@ if(BUILD_TESTING)
     foreach(test core io object uri resource application xpl xmf xmu style aca evo script_decode display events player)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
+        if(MSVC)
+            target_compile_options(test-${test} PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(test-${test} PRIVATE -UNDEBUG)
+        endif()
         add_test(NAME ${test} COMMAND test-${test})
     endforeach()
 
@@ -109,6 +114,8 @@ if(BUILD_TESTING)
             -DHDDVD_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
             -DHDDVD_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
             -DHDDVD_GENERATOR=${CMAKE_GENERATOR}
+            -DHDDVD_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
+            -DHDDVD_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
             -DHDDVD_CONFIG=$<CONFIG>
             "-DHDDVD_C_FLAGS=${CMAKE_C_FLAGS}"
             "-DHDDVD_EXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"

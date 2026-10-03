@@ -12,6 +12,14 @@ if(NOT HDDVD_CONFIG STREQUAL "")
     list(APPEND config_args --config "${HDDVD_CONFIG}")
 endif()
 
+set(configure_args)
+if(NOT HDDVD_GENERATOR_PLATFORM STREQUAL "")
+    list(APPEND configure_args -A "${HDDVD_GENERATOR_PLATFORM}")
+endif()
+if(NOT HDDVD_TOOLCHAIN_FILE STREQUAL "")
+    list(APPEND configure_args "-DCMAKE_TOOLCHAIN_FILE=${HDDVD_TOOLCHAIN_FILE}")
+endif()
+
 execute_process(
     COMMAND "${CMAKE_COMMAND}" --install "${HDDVD_BINARY_DIR}"
             --prefix "${prefix}" ${config_args}
@@ -25,6 +33,7 @@ execute_process(
             -S "${HDDVD_SOURCE_DIR}/tests/consumer"
             -B "${consumer_build}"
             -G "${HDDVD_GENERATOR}"
+            ${configure_args}
             "-DCMAKE_PREFIX_PATH=${prefix}"
             "-DCMAKE_C_FLAGS=${HDDVD_C_FLAGS}"
             "-DCMAKE_CXX_FLAGS=${HDDVD_C_FLAGS}"
