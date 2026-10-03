@@ -1,11 +1,47 @@
 #include "internal.h"
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dirent.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
 static int resolve_component(const char *directory, const char *name, char **out)
 {
+#ifdef _WIN32
+    WIN32_FIND_DATAA entry;
+    HANDLE search;
+    char *pattern = hddvd_path_join(directory, "*");
+    char *match = NULL;
+    if (!pattern)
+        return HDDVD_ENOMEM;
+    search = FindFirstFileA(pattern, &entry);
+    free(pattern);
+    if (search == INVALID_HANDLE_VALUE)
+        return HDDVD_ENOTFOUND;
+    do
+    {
+        if (!strcmp(entry.cFileName, ".") || !strcmp(entry.cFileName, "..") ||
+            (entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
+            !hddvd_ascii_equal_ci(entry.cFileName, name))
+            continue;
+        if (match)
+        {
+            free(match);
+            FindClose(search);
+            return HDDVD_EPARSE;
+        }
+        match = hddvd_path_join(directory, entry.cFileName);
+        if (!match)
+        {
+            FindClose(search);
+            return HDDVD_ENOMEM;
+        }
+    } while (FindNextFileA(search, &entry));
+    FindClose(search);
+#else
     DIR *dir = opendir(directory);
     struct dirent *entry;
     char *match = NULL;
@@ -47,6 +83,7 @@ static int resolve_component(const char *directory, const char *name, char **out
         }
     }
     closedir(dir);
+#endif
     if (!match)
         return HDDVD_ENOTFOUND;
     *out = match;

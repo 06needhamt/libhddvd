@@ -1,5 +1,9 @@
 #include "internal.h"
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <dirent.h>
+#endif
 #include <sys/stat.h>
 #include <string.h>
 #include <stdio.h>
@@ -31,6 +35,42 @@ const char *hddvd_file_kind_name(hddvd_file_kind k)
 }
 static int scan_dir(const char *dir, hddvd_file_cb cb, void *op)
 {
+#ifdef _WIN32
+    WIN32_FIND_DATAA entry;
+    HANDLE search;
+    char *pattern = hddvd_path_join(dir, "*");
+    if (!pattern)
+        return HDDVD_ENOMEM;
+    search = FindFirstFileA(pattern, &entry);
+    free(pattern);
+    if (search == INVALID_HANDLE_VALUE)
+        return HDDVD_ENOTFOUND;
+    do
+    {
+        char *path;
+        hddvd_file_info file;
+        if (!strcmp(entry.cFileName, ".") || !strcmp(entry.cFileName, "..") ||
+            (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+            continue;
+        path = hddvd_path_join(dir, entry.cFileName);
+        if (!path)
+        {
+            FindClose(search);
+            return HDDVD_ENOMEM;
+        }
+        memset(&file, 0, sizeof(file));
+        file.kind = kind(entry.cFileName);
+        file.size = ((uint64_t)entry.nFileSizeHigh << 32) | entry.nFileSizeLow;
+        snprintf(file.path, sizeof(file.path), "%s", path);
+        free(path);
+        if (file.kind != HDDVD_FILE_UNKNOWN && cb && cb(op, &file))
+        {
+            FindClose(search);
+            return HDDVD_OK;
+        }
+    } while (FindNextFileA(search, &entry));
+    FindClose(search);
+#else
     DIR *d = opendir(dir);
     struct dirent *e;
     if (!d)
@@ -64,6 +104,7 @@ static int scan_dir(const char *dir, hddvd_file_cb cb, void *op)
         free(p);
     }
     closedir(d);
+#endif
     return HDDVD_OK;
 }
 int hddvd_scan_files(const hddvd_ctx *c, hddvd_file_cb cb, void *op)
