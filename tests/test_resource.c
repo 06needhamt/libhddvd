@@ -11,6 +11,8 @@ int main(void)
     hddvd_error_detail detail;
     hddvd_stream *stream = NULL;
     hddvd_ctx *context;
+    hddvd_ctx *limited_context;
+    hddvd_config_limits limits;
     FILE *file;
 
     context = hddvd_open(".");
@@ -35,6 +37,13 @@ int main(void)
     assert(file != NULL);
     assert(fwrite("ok", 1, 2, file) == 2);
     assert(fclose(file) == 0);
+    hddvd_config_limits_default(&limits);
+    limits.max_resource_bytes = 1;
+    limited_context = hddvd_open_with_limits(".", &limits);
+    assert(limited_context != NULL);
+    assert(hddvd_open_resource(limited_context, present, &stream) == HDDVD_ELIMIT);
+    assert(stream == NULL);
+    hddvd_close(limited_context);
     assert(hddvd_open_resource(context, present, &stream) == HDDVD_OK);
     assert(stream != NULL);
     hddvd_stream_close(stream);

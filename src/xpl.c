@@ -716,6 +716,17 @@ int hddvd_xpl_open_with_limits(const void *input, size_t input_size, const hddvd
     return HDDVD_OK;
 }
 
+int hddvd_xpl_open_with_config(const void *data, size_t size, const hddvd_config_limits *config,
+                               hddvd_xpl **out)
+{
+    hddvd_xpl_limits limits;
+    if (!hddvd_config_limits_valid(config))
+        return HDDVD_EINVAL;
+    limits.max_nodes = config->max_xml_nodes;
+    limits.max_items = config->max_playlist_items;
+    return hddvd_xpl_open_with_limits(data, size, &limits, out);
+}
+
 int hddvd_xpl_open(const void *input, size_t input_size, hddvd_xpl **out)
 {
     hddvd_xpl_limits limits;

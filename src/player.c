@@ -85,6 +85,16 @@ int hddvd_nav_create(const hddvd_nav_limits *given, hddvd_event_fn ef, hddvd_com
     *out = n;
     return HDDVD_OK;
 }
+int hddvd_nav_create_with_config(const hddvd_config_limits *config, hddvd_event_fn ef,
+                                 hddvd_command_fn cf, void *opaque, hddvd_nav **out)
+{
+    hddvd_nav_limits limits;
+    if (!hddvd_config_limits_valid(config))
+        return HDDVD_EINVAL;
+    limits.max_events = config->max_queued_events;
+    limits.max_timers = config->max_timers;
+    return hddvd_nav_create(&limits, ef, cf, opaque, out);
+}
 void hddvd_nav_destroy(hddvd_nav *n)
 {
     if (n)

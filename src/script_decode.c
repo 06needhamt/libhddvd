@@ -160,6 +160,19 @@ fail:
     return rc;
 }
 
+int hddvd_script_open_with_config(const void *data, size_t size, const hddvd_config_limits *config,
+                                  hddvd_script **out)
+{
+    hddvd_script_limits limits;
+    if (!hddvd_config_limits_valid(config))
+        return HDDVD_EINVAL;
+    limits.max_strings = config->max_script_strings;
+    limits.max_functions = config->max_script_functions;
+    limits.max_instructions = config->max_script_instructions;
+    limits.max_bytes = config->max_script_bytes;
+    return hddvd_script_open_with_limits(data, size, &limits, out);
+}
+
 int hddvd_script_open(const void *data, size_t size, hddvd_script **out)
 {
     hddvd_script_limits limits;

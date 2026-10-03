@@ -353,6 +353,17 @@ done:
     return rc;
 }
 
+int hddvd_xmf_open_with_config(const void *data, size_t size, const hddvd_config_limits *config,
+                               hddvd_xmf **out)
+{
+    hddvd_xmf_limits limits;
+    if (!hddvd_config_limits_valid(config))
+        return HDDVD_EINVAL;
+    limits.max_nodes = config->max_xml_nodes;
+    limits.max_references = config->max_references;
+    return hddvd_xmf_open_with_limits(data, size, &limits, out);
+}
+
 int hddvd_xmf_open(const void *data, size_t size, hddvd_xmf **result)
 {
     return hddvd_xmf_open_with_limits(data, size, NULL, result);

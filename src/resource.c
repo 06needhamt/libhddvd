@@ -116,7 +116,14 @@ int hddvd_open_resource(const hddvd_ctx *ctx, const char *text, hddvd_stream **o
     if (!rc && hddvd_uri_archive_name(uri))
     {
         hddvd_aca *archive;
-        rc = hddvd_aca_open(path, &archive);
+        hddvd_stream *archive_stream = NULL;
+        hddvd_limits archive_limits;
+        archive_limits.max_aca_entries = ctx->limits.max_archive_members;
+        archive_limits.max_aca_member_size = ctx->limits.max_archive_member_bytes;
+        rc = hddvd_stream_open_file(path, &archive_stream);
+        if (!rc)
+            rc = hddvd_aca_open_stream_with_limits(archive_stream, &archive_limits, &archive);
+        hddvd_stream_close(archive_stream);
         if (!rc)
         {
             rc = hddvd_aca_open_member(archive, hddvd_uri_member_name(uri), out);
@@ -125,6 +132,12 @@ int hddvd_open_resource(const hddvd_ctx *ctx, const char *text, hddvd_stream **o
     }
     else if (!rc)
         rc = hddvd_stream_open_file(path, out);
+    if (!rc && (*out)->size > ctx->limits.max_resource_bytes)
+    {
+        hddvd_stream_close(*out);
+        *out = NULL;
+        rc = HDDVD_ELIMIT;
+    }
     free(path);
     hddvd_uri_free(uri);
     if (rc == HDDVD_OK)

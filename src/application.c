@@ -216,6 +216,7 @@ static int add_image_dependency(const hddvd_ctx *context, hddvd_application *app
 static int inspect_script(const hddvd_ctx *context, hddvd_application *application, const char *id,
                           const char *uri)
 {
+    hddvd_script_limits limits;
     hddvd_stream *stream = NULL;
     hddvd_stream *payload = NULL;
     hddvd_object *object = NULL;
@@ -240,8 +241,12 @@ static int inspect_script(const hddvd_ctx *context, hddvd_application *applicati
     }
     hddvd_stream_close(payload);
     hddvd_object_close(object);
+    limits.max_strings = context->limits.max_script_strings;
+    limits.max_functions = context->limits.max_script_functions;
+    limits.max_instructions = context->limits.max_script_instructions;
+    limits.max_bytes = context->limits.max_script_bytes;
     if (!rc)
-        rc = hddvd_script_open(data, size, &script);
+        rc = hddvd_script_open_with_limits(data, size, &limits, &script);
     hddvd_script_close(script);
     free(data);
     if (add_dependency(application, HDDVD_DEPENDENCY_SCRIPT, id, uri, rc))
@@ -252,6 +257,7 @@ static int inspect_script(const hddvd_ctx *context, hddvd_application *applicati
 static int inspect_markup(const hddvd_ctx *context, hddvd_application *application, const char *id,
                           const char *uri)
 {
+    hddvd_xmu_limits limits;
     hddvd_stream *stream = NULL;
     hddvd_xmu *xmu = NULL;
     hddvd_xmu_styles *styles = NULL;
@@ -261,8 +267,11 @@ static int inspect_markup(const hddvd_ctx *context, hddvd_application *applicati
     if (!rc)
         rc = read_stream(stream, &data, &size);
     hddvd_stream_close(stream);
+    limits.max_depth = context->limits.max_xml_depth;
+    limits.max_nodes = context->limits.max_xml_nodes;
+    limits.max_attributes = context->limits.max_xml_attributes;
     if (!rc)
-        rc = hddvd_xmu_open(data, size, &xmu);
+        rc = hddvd_xmu_open_with_limits(data, size, &limits, &xmu);
     free(data);
     if (!rc)
         rc = hddvd_xmu_styles_open(xmu, &styles);
@@ -302,6 +311,7 @@ done:
 int hddvd_application_open(const hddvd_ctx *context, const char *manifest_uri,
                            hddvd_application **result)
 {
+    hddvd_xmf_limits limits;
     hddvd_application *application;
     hddvd_stream *stream = NULL;
     void *data = NULL;
@@ -317,8 +327,10 @@ int hddvd_application_open(const hddvd_ctx *context, const char *manifest_uri,
     if (!rc)
         rc = read_stream(stream, &data, &size);
     hddvd_stream_close(stream);
+    limits.max_nodes = context->limits.max_xml_nodes;
+    limits.max_references = context->limits.max_references;
     if (!rc)
-        rc = hddvd_xmf_open(data, size, &application->manifest);
+        rc = hddvd_xmf_open_with_limits(data, size, &limits, &application->manifest);
     free(data);
     if (rc)
         goto fail;

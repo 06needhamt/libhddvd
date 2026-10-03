@@ -541,6 +541,33 @@ typedef struct hddvd_nav_limits
     size_t max_events;
     size_t max_timers;
 } hddvd_nav_limits;
+/* Unified context configuration. The subsystem-specific limit types above are
+   retained for ABI compatibility and for callers that construct objects
+   independently of a disc context. */
+typedef struct hddvd_config_limits
+{
+    size_t max_archive_members;
+    uint64_t max_archive_member_bytes;
+    uint64_t max_resource_bytes;
+    size_t max_xml_nodes;
+    size_t max_xml_depth;
+    size_t max_xml_attributes;
+    size_t max_references;
+    size_t max_playlist_items;
+    size_t max_images;
+    uint64_t max_encoded_image_bytes;
+    uint64_t max_decoded_pixels;
+    uint32_t max_image_dimension;
+    size_t max_quads;
+    size_t max_script_strings;
+    size_t max_script_functions;
+    size_t max_script_instructions;
+    uint64_t max_script_bytes;
+    uint64_t max_script_heap_bytes;
+    size_t max_script_recursion;
+    size_t max_timers;
+    size_t max_queued_events;
+} hddvd_config_limits;
 typedef void (*hddvd_event_fn)(void *, const hddvd_event *);
 typedef void (*hddvd_command_fn)(void *, const hddvd_command *);
 
@@ -580,6 +607,8 @@ HDDVD_API hddvd_features hddvd_get_features(void);
 HDDVD_API const char *hddvd_feature_name(hddvd_feature);
 HDDVD_API const char *hddvd_strerror(int);
 HDDVD_API hddvd_ctx *hddvd_open(const char *);
+HDDVD_API void hddvd_config_limits_default(hddvd_config_limits *);
+HDDVD_API hddvd_ctx *hddvd_open_with_limits(const char *, const hddvd_config_limits *);
 HDDVD_API void hddvd_close(hddvd_ctx *);
 HDDVD_API const char *hddvd_root(const hddvd_ctx *);
 HDDVD_API int hddvd_has_advanced_content(const hddvd_ctx *);
@@ -614,6 +643,8 @@ HDDVD_API void hddvd_script_limits_default(hddvd_script_limits *);
 HDDVD_API int hddvd_script_open(const void *, size_t, hddvd_script **);
 HDDVD_API int hddvd_script_open_with_limits(const void *, size_t, const hddvd_script_limits *,
                                             hddvd_script **);
+HDDVD_API int hddvd_script_open_with_config(const void *, size_t, const hddvd_config_limits *,
+                                            hddvd_script **);
 HDDVD_API void hddvd_script_close(hddvd_script *);
 HDDVD_API uint16_t hddvd_script_version(const hddvd_script *);
 HDDVD_API size_t hddvd_script_string_count(const hddvd_script *);
@@ -629,6 +660,9 @@ HDDVD_API int hddvd_script_get_instruction(const hddvd_script *, size_t,
 HDDVD_API void hddvd_display_limits_default(hddvd_display_limits *);
 HDDVD_API int hddvd_image_cache_create(hddvd_image_decode_fn, void *, const hddvd_display_limits *,
                                        hddvd_image_cache **);
+HDDVD_API int hddvd_image_cache_create_with_config(hddvd_image_decode_fn, void *,
+                                                   const hddvd_config_limits *,
+                                                   hddvd_image_cache **);
 HDDVD_API void hddvd_image_cache_destroy(hddvd_image_cache *);
 HDDVD_API int hddvd_display_build(hddvd_image_cache *, uint32_t, uint32_t, const hddvd_scene_node *,
                                   size_t, const hddvd_display_list *, hddvd_display_list **);
@@ -650,6 +684,8 @@ HDDVD_API int hddvd_xpl_find_start_ref(const char *, char **);
 HDDVD_API void hddvd_xpl_limits_default(hddvd_xpl_limits *);
 HDDVD_API int hddvd_xpl_open(const void *, size_t, hddvd_xpl **);
 HDDVD_API int hddvd_xpl_open_with_limits(const void *, size_t, const hddvd_xpl_limits *,
+                                         hddvd_xpl **);
+HDDVD_API int hddvd_xpl_open_with_config(const void *, size_t, const hddvd_config_limits *,
                                          hddvd_xpl **);
 HDDVD_API void hddvd_xpl_close(hddvd_xpl *);
 HDDVD_API const char *hddvd_xpl_namespace(const hddvd_xpl *);
@@ -682,6 +718,8 @@ HDDVD_API void hddvd_xmf_limits_default(hddvd_xmf_limits *);
 HDDVD_API int hddvd_xmf_open(const void *, size_t, hddvd_xmf **);
 HDDVD_API int hddvd_xmf_open_with_limits(const void *, size_t, const hddvd_xmf_limits *,
                                          hddvd_xmf **);
+HDDVD_API int hddvd_xmf_open_with_config(const void *, size_t, const hddvd_config_limits *,
+                                         hddvd_xmf **);
 HDDVD_API void hddvd_xmf_close(hddvd_xmf *);
 HDDVD_API const char *hddvd_xmf_application_id(const hddvd_xmf *);
 HDDVD_API int hddvd_xmf_get_region(const hddvd_xmf *, hddvd_xmf_region *);
@@ -707,6 +745,8 @@ HDDVD_API int hddvd_aca_supported(void);
 HDDVD_API int hddvd_aca_open(const char *, hddvd_aca **);
 HDDVD_API int hddvd_aca_open_stream(hddvd_stream *, hddvd_aca **);
 HDDVD_API int hddvd_aca_open_stream_with_limits(hddvd_stream *, const hddvd_limits *, hddvd_aca **);
+HDDVD_API int hddvd_aca_open_stream_with_config(hddvd_stream *, const hddvd_config_limits *,
+                                                hddvd_aca **);
 HDDVD_API void hddvd_limits_default(hddvd_limits *);
 HDDVD_API void hddvd_aca_close(hddvd_aca *);
 HDDVD_API size_t hddvd_aca_count(const hddvd_aca *);
@@ -730,6 +770,8 @@ HDDVD_API int hddvd_xmu_dump(const void *, size_t, const char *, void *);
 HDDVD_API void hddvd_xmu_limits_default(hddvd_xmu_limits *);
 HDDVD_API int hddvd_xmu_open(const void *, size_t, hddvd_xmu **);
 HDDVD_API int hddvd_xmu_open_with_limits(const void *, size_t, const hddvd_xmu_limits *,
+                                         hddvd_xmu **);
+HDDVD_API int hddvd_xmu_open_with_config(const void *, size_t, const hddvd_config_limits *,
                                          hddvd_xmu **);
 HDDVD_API void hddvd_xmu_close(hddvd_xmu *);
 HDDVD_API size_t hddvd_xmu_node_count(const hddvd_xmu *);
@@ -761,6 +803,8 @@ HDDVD_API int hddvd_time_from_seconds(uint64_t, hddvd_time *);
 HDDVD_API void hddvd_nav_limits_default(hddvd_nav_limits *);
 HDDVD_API int hddvd_nav_create(const hddvd_nav_limits *, hddvd_event_fn, hddvd_command_fn, void *,
                                hddvd_nav **);
+HDDVD_API int hddvd_nav_create_with_config(const hddvd_config_limits *, hddvd_event_fn,
+                                           hddvd_command_fn, void *, hddvd_nav **);
 HDDVD_API void hddvd_nav_destroy(hddvd_nav *);
 HDDVD_API int hddvd_nav_post(hddvd_nav *, const hddvd_event *);
 HDDVD_API int hddvd_nav_schedule_timer(hddvd_nav *, uint64_t, hddvd_time);

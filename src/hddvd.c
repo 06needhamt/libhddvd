@@ -68,6 +68,10 @@ const char *hddvd_strerror(int s)
 }
 hddvd_ctx *hddvd_open(const char *p)
 {
+    return hddvd_open_with_limits(p, NULL);
+}
+hddvd_ctx *hddvd_open_with_limits(const char *p, const hddvd_config_limits *limits)
+{
     hddvd_ctx *c;
     if (!p || !*p || !hddvd_path_is_dir(p))
         return NULL;
@@ -78,6 +82,15 @@ hddvd_ctx *hddvd_open(const char *p)
     if (!c->root)
     {
         free(c);
+        return NULL;
+    }
+    if (limits)
+        c->limits = *limits;
+    else
+        hddvd_config_limits_default(&c->limits);
+    if (!hddvd_config_limits_valid(&c->limits))
+    {
+        hddvd_close(c);
         return NULL;
     }
     return c;

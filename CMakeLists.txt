@@ -23,6 +23,7 @@ add_library(hddvd
     src/hddvd.c
     src/ifo.c
     src/io.c
+    src/limits.c
     src/map.c
     src/object.c
     src/player.c

@@ -522,7 +522,7 @@ stable status names.
 
 ### X-02 — Configurable limits
 
-**Status:** Ready after P1-01 API review
+**Status:** Complete for implemented subsystems; runtime-only enforcement awaits P4-03
 **Depends on:** P1-01 ownership conventions
 
 Define one limits object for archive members, resource bytes, XML nodes/depth,

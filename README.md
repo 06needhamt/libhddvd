@@ -83,6 +83,10 @@ Context-bound resource failures are available through
 `hddvd_get_last_error()`, which reports a stable status, subsystem, resource URI,
 optional byte offset, and explanatory message. A later successful resource
 operation clears the prior diagnostic so hosts do not display stale errors.
+Context-wide ceilings are configured with `hddvd_config_limits_default()` and
+`hddvd_open_with_limits()`. The same object can be passed to the additive
+`*_with_config` constructors; the original subsystem-specific structures and
+entry points remain available and ABI-compatible.
 
 ## Reference-menu conformance test
 

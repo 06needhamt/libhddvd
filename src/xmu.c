@@ -335,6 +335,18 @@ int hddvd_xmu_open_with_limits(const void *data, size_t size, const hddvd_xmu_li
     return rc;
 }
 
+int hddvd_xmu_open_with_config(const void *data, size_t size, const hddvd_config_limits *config,
+                               hddvd_xmu **out)
+{
+    hddvd_xmu_limits limits;
+    if (!hddvd_config_limits_valid(config))
+        return HDDVD_EINVAL;
+    limits.max_depth = config->max_xml_depth;
+    limits.max_nodes = config->max_xml_nodes;
+    limits.max_attributes = config->max_xml_attributes;
+    return hddvd_xmu_open_with_limits(data, size, &limits, out);
+}
+
 int hddvd_xmu_open(const void *data, size_t size, hddvd_xmu **result)
 {
     return hddvd_xmu_open_with_limits(data, size, NULL, result);
