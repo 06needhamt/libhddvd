@@ -56,6 +56,7 @@ set_target_properties(hddvd PROPERTIES
 )
 
 if(MSVC)
+    target_compile_definitions(hddvd PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(hddvd PRIVATE /W4)
 else()
     target_compile_options(hddvd PRIVATE
