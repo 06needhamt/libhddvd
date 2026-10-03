@@ -68,7 +68,7 @@ static int unwrap_input(const void *input, size_t input_size, unsigned char **ow
                         const void **data, size_t *size)
 {
     hddvd_object *object;
-    hddvd_stream *payload;
+    hddvd_stream *payload = NULL;
     uint64_t payload_size;
     size_t got = 0;
     int rc;

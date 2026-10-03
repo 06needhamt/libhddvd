@@ -1,5 +1,4 @@
 #include "internal.h"
-#include <dirent.h>
 #include <sys/stat.h>
 #include <string.h>
 #include <stdio.h>
@@ -31,39 +30,39 @@ const char *hddvd_file_kind_name(hddvd_file_kind k)
 }
 static int scan_dir(const char *dir, hddvd_file_cb cb, void *op)
 {
-    DIR *d = opendir(dir);
-    struct dirent *e;
+    hddvd_directory *d = hddvd_directory_open(dir);
+    const char *name;
     if (!d)
         return HDDVD_ENOTFOUND;
-    while ((e = readdir(d)))
+    while ((name = hddvd_directory_read(d)))
     {
         char *p;
-        struct stat st;
+        struct hddvd_stat st;
         hddvd_file_info fi;
-        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
+        if (!strcmp(name, ".") || !strcmp(name, ".."))
             continue;
-        p = hddvd_path_join(dir, e->d_name);
+        p = hddvd_path_join(dir, name);
         if (!p)
         {
-            closedir(d);
+            hddvd_directory_close(d);
             return HDDVD_ENOMEM;
         }
-        if (stat(p, &st) == 0 && S_ISREG(st.st_mode))
+        if (hddvd_stat(p, &st) == 0 && HDDVD_ISREG(st.st_mode))
         {
             memset(&fi, 0, sizeof(fi));
-            fi.kind = kind(e->d_name);
+            fi.kind = kind(name);
             fi.size = (uint64_t)st.st_size;
             snprintf(fi.path, sizeof(fi.path), "%s", p);
             if (fi.kind != HDDVD_FILE_UNKNOWN && cb && cb(op, &fi))
             {
                 free(p);
-                closedir(d);
+                hddvd_directory_close(d);
                 return HDDVD_OK;
             }
         }
         free(p);
     }
-    closedir(d);
+    hddvd_directory_close(d);
     return HDDVD_OK;
 }
 int hddvd_scan_files(const hddvd_ctx *c, hddvd_file_cb cb, void *op)
