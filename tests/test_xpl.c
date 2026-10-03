@@ -39,6 +39,7 @@ static void test_typed_playlist(void)
     hddvd_xpl_application_resource resource;
     hddvd_xpl_event event;
     hddvd_xpl_limits limits;
+    size_t title_index;
 
     assert(hddvd_xpl_open(bytes, size, &xpl) == HDDVD_OK);
     assert(!strcmp(hddvd_xpl_namespace(xpl), "http://www.dvdforum.org/2005/HDDVDVideo/Playlist"));
@@ -57,6 +58,9 @@ static void test_typed_playlist(void)
     assert(hddvd_xpl_get_title(xpl, 1, &title) == HDDVD_OK &&
            title.kind == HDDVD_XPL_TITLE_REGULAR && !strcmp(title.id, "feature") &&
            !strcmp(title.on_end, "menu") && title.duration.frames == 7200);
+    assert(hddvd_xpl_find_title(xpl, "menu", &title_index) == HDDVD_OK && title_index == 2);
+    assert(hddvd_xpl_get_on_end_target(xpl, 1, &title_index) == HDDVD_OK && title_index == 2);
+    assert(hddvd_xpl_get_on_end_target(xpl, 0, &title_index) == HDDVD_ENOTFOUND);
     assert(hddvd_xpl_clip_count(xpl, 1) == 2);
     assert(hddvd_xpl_get_clip(xpl, 1, 0, &clip) == HDDVD_OK && clip.has_clip_begin &&
            clip.clip_begin.frames == 180 && !strcmp(clip.data_source, "Disc"));
@@ -125,10 +129,26 @@ static void test_invalid_playlists(void)
         "<TitleSet timeBase='60fps'><FirstPlayTitle titleDuration='00:00:01:00'>"
         "<PrimaryAudioVideoClip titleTimeBegin='00:00:00:00'/></FirstPlayTitle>"
         "</TitleSet></Playlist>";
+    static const char unresolved_branch[] =
+        "<Playlist xmlns='http://www.dvdforum.org/2005/HDDVDVideo/Playlist'>"
+        "<TitleSet timeBase='60fps'><Title id='one' onEnd='missing'/></TitleSet></Playlist>";
+    static const char duplicate_title_id[] =
+        "<Playlist xmlns='http://www.dvdforum.org/2005/HDDVDVideo/Playlist'>"
+        "<TitleSet timeBase='60fps'><Title id='same'/><Title id='same'/>"
+        "</TitleSet></Playlist>";
+    static const char duplicate_title_number[] =
+        "<Playlist xmlns='http://www.dvdforum.org/2005/HDDVDVideo/Playlist'>"
+        "<TitleSet timeBase='60fps'><Title id='one' titleNumber='7'/>"
+        "<Title id='two' titleNumber='7'/></TitleSet></Playlist>";
     hddvd_xpl *xpl = NULL;
     assert(hddvd_xpl_open(wrong_namespace, sizeof(wrong_namespace) - 1, &xpl) == HDDVD_EPARSE);
     assert(hddvd_xpl_open(invalid_time, sizeof(invalid_time) - 1, &xpl) == HDDVD_EPARSE);
     assert(hddvd_xpl_open(invalid_reference, sizeof(invalid_reference) - 1, &xpl) == HDDVD_EPARSE);
+    assert(hddvd_xpl_open(unresolved_branch, sizeof(unresolved_branch) - 1, &xpl) == HDDVD_EPARSE);
+    assert(hddvd_xpl_open(duplicate_title_id, sizeof(duplicate_title_id) - 1, &xpl) ==
+           HDDVD_EPARSE);
+    assert(hddvd_xpl_open(duplicate_title_number, sizeof(duplicate_title_number) - 1, &xpl) ==
+           HDDVD_EPARSE);
 }
 
 int main(void)

@@ -21,6 +21,7 @@ struct xpl_application
 struct xpl_title
 {
     hddvd_xpl_title_info value;
+    size_t on_end_target;
     hddvd_xpl_clip *clips;
     size_t clip_count;
     hddvd_xpl_chapter *chapters;
@@ -49,6 +50,40 @@ struct hddvd_xpl
     size_t item_count;
     size_t item_limit;
 };
+
+static int find_title_id(const hddvd_xpl *xpl, const char *id, size_t *index)
+{
+    size_t i;
+    for (i = 0; i < xpl->title_count; i++)
+        if (xpl->titles[i].value.id && !strcmp(xpl->titles[i].value.id, id))
+        {
+            *index = i;
+            return HDDVD_OK;
+        }
+    return HDDVD_ENOTFOUND;
+}
+
+static int validate_title_references(hddvd_xpl *xpl)
+{
+    size_t i;
+    size_t j;
+    for (i = 0; i < xpl->title_count; i++)
+    {
+        const hddvd_xpl_title_info *title = &xpl->titles[i].value;
+        if (title->id)
+            for (j = 0; j < i; j++)
+                if (xpl->titles[j].value.id && !strcmp(xpl->titles[j].value.id, title->id))
+                    return HDDVD_EPARSE;
+        if (title->has_number)
+            for (j = 0; j < i; j++)
+                if (xpl->titles[j].value.has_number && xpl->titles[j].value.number == title->number)
+                    return HDDVD_EPARSE;
+        if (title->on_end &&
+            find_title_id(xpl, title->on_end, &xpl->titles[i].on_end_target) != HDDVD_OK)
+            return HDDVD_EPARSE;
+    }
+    return HDDVD_OK;
+}
 
 static int node_is(const xmlNode *node, const char *name)
 {
@@ -706,6 +741,8 @@ int hddvd_xpl_open_with_limits(const void *input, size_t input_size, const hddvd
     }
     if (!rc && (!xpl->frame_rate || !xpl->title_count))
         rc = HDDVD_EPARSE;
+    if (!rc)
+        rc = validate_title_references(xpl);
     xmlFreeDoc(document);
     if (rc)
     {
@@ -786,6 +823,23 @@ int hddvd_xpl_get_title(const hddvd_xpl *xpl, size_t index, hddvd_xpl_title_info
     if (!xpl || !value || index >= xpl->title_count)
         return HDDVD_EINVAL;
     *value = xpl->titles[index].value;
+    return HDDVD_OK;
+}
+
+int hddvd_xpl_find_title(const hddvd_xpl *xpl, const char *id, size_t *index)
+{
+    if (!xpl || !id || !*id || !index)
+        return HDDVD_EINVAL;
+    return find_title_id(xpl, id, index);
+}
+
+int hddvd_xpl_get_on_end_target(const hddvd_xpl *xpl, size_t title, size_t *target)
+{
+    if (!xpl || !target || title >= xpl->title_count)
+        return HDDVD_EINVAL;
+    if (!xpl->titles[title].value.on_end)
+        return HDDVD_ENOTFOUND;
+    *target = xpl->titles[title].on_end_target;
     return HDDVD_OK;
 }
 
