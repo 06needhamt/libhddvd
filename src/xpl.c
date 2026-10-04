@@ -14,15 +14,23 @@
 struct xpl_application
 {
     hddvd_xpl_application value;
+    hddvd_xpl_time loading_begin;
+    uint8_t has_loading_begin;
     hddvd_xpl_application_resource *resources;
     size_t resource_count;
+};
+
+struct xpl_clip
+{
+    hddvd_xpl_clip value;
+    hddvd_xpl_clip_kind kind;
 };
 
 struct xpl_title
 {
     hddvd_xpl_title_info value;
     size_t on_end_target;
-    hddvd_xpl_clip *clips;
+    struct xpl_clip *clips;
     size_t clip_count;
     hddvd_xpl_chapter *chapters;
     size_t chapter_count;
@@ -81,6 +89,62 @@ static int validate_title_references(hddvd_xpl *xpl)
         if (title->on_end &&
             find_title_id(xpl, title->on_end, &xpl->titles[i].on_end_target) != HDDVD_OK)
             return HDDVD_EPARSE;
+    }
+    return HDDVD_OK;
+}
+
+static int time_after(hddvd_xpl_time left, hddvd_xpl_time right)
+{
+    return left.frame_rate != right.frame_rate || left.frames > right.frames;
+}
+
+static int validate_title_times(const hddvd_xpl *xpl)
+{
+    size_t i;
+    for (i = 0; i < xpl->title_count; i++)
+    {
+        const struct xpl_title *title = &xpl->titles[i];
+        size_t j;
+        for (j = 0; j < title->clip_count; j++)
+        {
+            const hddvd_xpl_clip *clip = &title->clips[j].value;
+            if (clip->has_title_begin && clip->has_title_end &&
+                time_after(clip->title_begin, clip->title_end))
+                return HDDVD_EPARSE;
+            if (title->value.has_duration &&
+                ((clip->has_title_begin && time_after(clip->title_begin, title->value.duration)) ||
+                 (clip->has_title_end && time_after(clip->title_end, title->value.duration))))
+                return HDDVD_EPARSE;
+        }
+        for (j = 0; j < title->chapter_count; j++)
+        {
+            if ((j == 0 && title->chapters[j].begin.frames != 0) ||
+                (j > 0 &&
+                 (title->chapters[j].begin.frame_rate != title->chapters[j - 1].begin.frame_rate ||
+                  title->chapters[j].begin.frames <= title->chapters[j - 1].begin.frames)))
+                return HDDVD_EPARSE;
+            if (title->value.has_duration &&
+                time_after(title->chapters[j].begin, title->value.duration))
+                return HDDVD_EPARSE;
+        }
+        for (j = 0; j < title->application_count; j++)
+        {
+            const struct xpl_application *application = &title->applications[j];
+            if (application->value.has_title_begin && application->value.has_title_end &&
+                time_after(application->value.title_begin, application->value.title_end))
+                return HDDVD_EPARSE;
+            if (title->value.has_duration &&
+                ((application->value.has_title_begin &&
+                  time_after(application->value.title_begin, title->value.duration)) ||
+                 (application->value.has_title_end &&
+                  time_after(application->value.title_end, title->value.duration)) ||
+                 (application->has_loading_begin &&
+                  time_after(application->loading_begin, title->value.duration))))
+                return HDDVD_EPARSE;
+        }
+        for (j = 0; title->value.has_duration && j < title->event_count; j++)
+            if (time_after(title->events[j].time, title->value.duration))
+                return HDDVD_EPARSE;
     }
     return HDDVD_OK;
 }
@@ -256,8 +320,8 @@ static void free_title(struct xpl_title *title)
     free((char *)title->value.on_end);
     for (i = 0; i < title->clip_count; i++)
     {
-        free((char *)title->clips[i].src);
-        free((char *)title->clips[i].data_source);
+        free((char *)title->clips[i].value.src);
+        free((char *)title->clips[i].value.data_source);
     }
     for (i = 0; i < title->chapter_count; i++)
     {
@@ -425,30 +489,51 @@ static int parse_media(xmlNodePtr node, hddvd_xpl *xpl)
     return HDDVD_OK;
 }
 
+static hddvd_xpl_clip_kind clip_kind(xmlNodePtr node)
+{
+    if (node_is(node, "PrimaryAudioVideoClip"))
+        return HDDVD_XPL_CLIP_PRIMARY_AUDIO_VIDEO;
+    if (node_is(node, "SubstituteAudioVideoClip"))
+        return HDDVD_XPL_CLIP_SUBSTITUTE_AUDIO_VIDEO;
+    if (node_is(node, "SubstituteAudioClip"))
+        return HDDVD_XPL_CLIP_SUBSTITUTE_AUDIO;
+    if (node_is(node, "SecondaryAudioVideoClip"))
+        return HDDVD_XPL_CLIP_SECONDARY_AUDIO_VIDEO;
+    if (node_is(node, "AdvancedSubtitleSegment"))
+        return HDDVD_XPL_CLIP_ADVANCED_SUBTITLE;
+    return 0;
+}
+
 static int parse_clip(xmlNodePtr node, hddvd_xpl *xpl, struct xpl_title *title)
 {
-    hddvd_xpl_clip clip;
+    struct xpl_clip clip;
     int rc;
     memset(&clip, 0, sizeof(clip));
-    clip.src = dup_prop(node, "src");
-    clip.data_source = dup_prop(node, "dataSource");
-    if (!clip.src)
+    clip.kind = clip_kind(node);
+    clip.value.src = dup_prop(node, "src");
+    clip.value.data_source = dup_prop(node, "dataSource");
+    if (!clip.kind || !clip.value.src)
+    {
+        free((char *)clip.value.src);
+        free((char *)clip.value.data_source);
         return HDDVD_EPARSE;
-    rc = time_prop(node, "titleTimeBegin", xpl->frame_rate, &clip.title_begin,
-                   &clip.has_title_begin);
+    }
+    rc = time_prop(node, "titleTimeBegin", xpl->frame_rate, &clip.value.title_begin,
+                   &clip.value.has_title_begin);
     if (!rc)
-        rc = time_prop(node, "titleTimeEnd", xpl->frame_rate, &clip.title_end, &clip.has_title_end);
+        rc = time_prop(node, "titleTimeEnd", xpl->frame_rate, &clip.value.title_end,
+                       &clip.value.has_title_end);
     if (!rc)
-        rc = time_prop(node, "clipTimeBegin", xpl->frame_rate, &clip.clip_begin,
-                       &clip.has_clip_begin);
+        rc = time_prop(node, "clipTimeBegin", xpl->frame_rate, &clip.value.clip_begin,
+                       &clip.value.has_clip_begin);
     if (!rc)
-        rc = bool_prop(node, "seamless", &clip.seamless);
+        rc = bool_prop(node, "seamless", &clip.value.seamless);
     if (!rc)
         rc = append_item(xpl, (void **)&title->clips, &title->clip_count, sizeof(clip), &clip);
     if (rc)
     {
-        free((char *)clip.src);
-        free((char *)clip.data_source);
+        free((char *)clip.value.src);
+        free((char *)clip.value.data_source);
     }
     return rc;
 }
@@ -546,6 +631,9 @@ static int parse_application(xmlNodePtr node, hddvd_xpl *xpl, struct xpl_applica
     if (!rc)
         rc = bool_prop(node, "autorun", &application.value.autorun);
     if (!rc)
+        rc = time_prop(node, "loadingBegin", xpl->frame_rate, &application.loading_begin,
+                       &application.has_loading_begin);
+    if (!rc)
         rc = time_prop(node, "titleTimeBegin", xpl->frame_rate, &application.value.title_begin,
                        &application.value.has_title_begin);
     if (!rc)
@@ -603,7 +691,7 @@ static int walk_title_children(xmlNodePtr node, hddvd_xpl *xpl, struct xpl_title
         int rc = HDDVD_OK;
         if (child->type != XML_ELEMENT_NODE)
             continue;
-        if (node_is(child, "PrimaryAudioVideoClip"))
+        if (clip_kind(child))
         {
             xmlNodePtr stream;
             rc = parse_clip(child, xpl, title);
@@ -623,7 +711,7 @@ static int walk_title_children(xmlNodePtr node, hddvd_xpl *xpl, struct xpl_title
             rc = parse_event(child, xpl, title);
         if (rc)
             return rc;
-        if (!node_is(child, "PrimaryAudioVideoClip") && child->children)
+        if (!clip_kind(child) && child->children)
         {
             rc = walk_title_children(child, xpl, title);
             if (rc)
@@ -743,6 +831,8 @@ int hddvd_xpl_open_with_limits(const void *input, size_t input_size, const hddvd
         rc = HDDVD_EPARSE;
     if (!rc)
         rc = validate_title_references(xpl);
+    if (!rc)
+        rc = validate_title_times(xpl);
     xmlFreeDoc(document);
     if (rc)
     {
@@ -852,7 +942,16 @@ int hddvd_xpl_get_clip(const hddvd_xpl *xpl, size_t title, size_t index, hddvd_x
 {
     if (!xpl || !value || title >= xpl->title_count || index >= xpl->titles[title].clip_count)
         return HDDVD_EINVAL;
-    *value = xpl->titles[title].clips[index];
+    *value = xpl->titles[title].clips[index].value;
+    return HDDVD_OK;
+}
+
+int hddvd_xpl_get_clip_kind(const hddvd_xpl *xpl, size_t title, size_t index,
+                            hddvd_xpl_clip_kind *value)
+{
+    if (!xpl || !value || title >= xpl->title_count || index >= xpl->titles[title].clip_count)
+        return HDDVD_EINVAL;
+    *value = xpl->titles[title].clips[index].kind;
     return HDDVD_OK;
 }
 
@@ -914,6 +1013,19 @@ int hddvd_xpl_get_application(const hddvd_xpl *xpl, size_t title, size_t index,
     if (!applications || !value || index >= count)
         return HDDVD_EINVAL;
     *value = applications[index].value;
+    return HDDVD_OK;
+}
+
+int hddvd_xpl_get_application_loading_begin(const hddvd_xpl *xpl, size_t title, size_t index,
+                                            hddvd_xpl_time *value)
+{
+    size_t count = 0;
+    const struct xpl_application *applications = applications_for(xpl, title, &count);
+    if (!applications || !value || index >= count)
+        return HDDVD_EINVAL;
+    if (!applications[index].has_loading_begin)
+        return HDDVD_ENOTFOUND;
+    *value = applications[index].loading_begin;
     return HDDVD_OK;
 }
 

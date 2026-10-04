@@ -29,7 +29,10 @@
       </PrimaryAudioVideoClip>
       <PrimaryAudioVideoClip src="file:///dvddisc/HVDVD_TS/part2.MAP"
           titleTimeBegin="00:01:00:00" titleTimeEnd="00:02:00:00" seamless="true"/>
+      <SecondaryAudioVideoClip src="file:///dvddisc/HVDVD_TS/commentary.MAP"
+          titleTimeBegin="00:00:30:00" titleTimeEnd="00:01:00:00"/>
       <ApplicationSegment src="file:///dvddisc/ADV_OBJ/app.aca/segment.xmf" autorun="true"
+          loadingBegin="00:00:04:30"
           zOrder="2" titleTimeBegin="00:00:05:00" titleTimeEnd="00:01:55:00"/>
       <ChapterList>
         <Chapter id="chapter-1" displayName="One" titleTimeBegin="00:00:00:00"/>

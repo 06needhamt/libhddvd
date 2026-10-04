@@ -381,17 +381,20 @@ acknowledgement.
 
 ### P6-02 — Replace start-reference-only XPL parsing
 
-**Status:** Core typed model and title-branch resolution complete; external conformance, entry points, and less-common constructs remain
+**Status:** Core typed model, title-branch, time-range and chapter-entry validation, and application loading times complete; external conformance and less-common constructs remain
 **Depends on:** P1-01
 **Likely files:** `include/hddvd.h`, `src/xpl.c`, `tests/test_xpl.c`
 
 The immutable typed model now covers configuration, media attributes, first-play
-and numbered titles, clips, chapters, track navigation, application declarations
-and resources, scheduled events, pause points, normalized frame times, and
-configurable node/item limits. Title ids and numbers are unique, and forward
+and numbered titles, primary/substitute/secondary audio-video and advanced-subtitle
+clips, chapters, track navigation, application declarations
+and resources, application loading times, scheduled events, pause points,
+normalized frame times, and configurable node/item limits. Title ids and numbers
+are unique, title-scoped times are checked against declared durations, chapter
+entry points begin at zero and increase in document order, and forward
 `onEnd` branches are validated and exposed as title indices. The existing
 start-reference helper remains as a compatibility wrapper. Continue with
-external conformance, entry points, lifecycle details, and less-common constructs
+external conformance, lifecycle details, and less-common constructs
 recorded by the external inventory.
 
 **Acceptance:** original synthetic playlists cover forward references, time
