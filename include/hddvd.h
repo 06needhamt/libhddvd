@@ -204,6 +204,14 @@ typedef enum hddvd_xpl_title_kind
     HDDVD_XPL_TITLE_FIRST_PLAY = 1,
     HDDVD_XPL_TITLE_REGULAR
 } hddvd_xpl_title_kind;
+typedef enum hddvd_xpl_clip_kind
+{
+    HDDVD_XPL_CLIP_PRIMARY_AUDIO_VIDEO = 1,
+    HDDVD_XPL_CLIP_SUBSTITUTE_AUDIO_VIDEO,
+    HDDVD_XPL_CLIP_SUBSTITUTE_AUDIO,
+    HDDVD_XPL_CLIP_SECONDARY_AUDIO_VIDEO,
+    HDDVD_XPL_CLIP_ADVANCED_SUBTITLE
+} hddvd_xpl_clip_kind;
 typedef enum hddvd_xpl_application_kind
 {
     HDDVD_XPL_APPLICATION_SEGMENT = 1,
@@ -703,6 +711,7 @@ HDDVD_API int hddvd_xpl_find_title(const hddvd_xpl *, const char *, size_t *);
 HDDVD_API int hddvd_xpl_get_on_end_target(const hddvd_xpl *, size_t, size_t *);
 HDDVD_API size_t hddvd_xpl_clip_count(const hddvd_xpl *, size_t);
 HDDVD_API int hddvd_xpl_get_clip(const hddvd_xpl *, size_t, size_t, hddvd_xpl_clip *);
+HDDVD_API int hddvd_xpl_get_clip_kind(const hddvd_xpl *, size_t, size_t, hddvd_xpl_clip_kind *);
 HDDVD_API size_t hddvd_xpl_chapter_count(const hddvd_xpl *, size_t);
 HDDVD_API int hddvd_xpl_get_chapter(const hddvd_xpl *, size_t, size_t, hddvd_xpl_chapter *);
 HDDVD_API size_t hddvd_xpl_track_count(const hddvd_xpl *, size_t);
@@ -710,6 +719,9 @@ HDDVD_API int hddvd_xpl_get_track(const hddvd_xpl *, size_t, size_t, hddvd_xpl_t
 /* Use SIZE_MAX as the title index for playlist-wide applications. */
 HDDVD_API size_t hddvd_xpl_application_count(const hddvd_xpl *, size_t);
 HDDVD_API int hddvd_xpl_get_application(const hddvd_xpl *, size_t, size_t, hddvd_xpl_application *);
+/* Returns HDDVD_ENOTFOUND when the application has no loadingBegin time. */
+HDDVD_API int hddvd_xpl_get_application_loading_begin(const hddvd_xpl *, size_t, size_t,
+                                                      hddvd_xpl_time *);
 HDDVD_API size_t hddvd_xpl_application_resource_count(const hddvd_xpl *, size_t, size_t);
 HDDVD_API int hddvd_xpl_get_application_resource(const hddvd_xpl *, size_t, size_t, size_t,
                                                  hddvd_xpl_application_resource *);
