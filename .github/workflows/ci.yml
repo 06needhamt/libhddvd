@@ -46,10 +46,10 @@ jobs:
         run: vcpkg install libxml2:x64-windows
       - name: Configure (Unix)
         if: runner.os != 'Windows'
-        run: cmake -S . -B build -DBUILD_TESTING=ON -DBUILD_SHARED_LIBS=${{ matrix.shared }}
+        run: cmake -S . -B build -DBUILD_TESTING=ON -DHDDVD_BUILD_SHARED=${{ matrix.shared }}
       - name: Configure (Windows)
         if: runner.os == 'Windows'
-        run: cmake -S . -B build -DBUILD_TESTING=ON -DBUILD_SHARED_LIBS=${{ matrix.shared }} -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
+        run: cmake -S . -B build -DBUILD_TESTING=ON -DHDDVD_BUILD_SHARED=${{ matrix.shared }} -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Test
