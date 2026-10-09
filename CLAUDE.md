@@ -34,7 +34,8 @@ read external data from `HDDVD_REFERENCE_ACA` / `HDDVD_EXTERNAL_MENU_CORPUS` and
 skipped when unset).
 
 CI (`.github/workflows/ci.yml`) runs the format check, a Linux/macOS/Windows build+test
-matrix, and an ASan+UBSan build with Clang. The `install-consumer` CTest installs the library
+matrix (shared+static, static-only, shared-only), an ASan+UBSan build with Clang, and a
+libFuzzer job that builds every harness and replays the seeds in `tests/fixtures`. The `install-consumer` CTest installs the library
 to a temp prefix and builds `tests/consumer/` (C, C++17, and static variants) against the
 installed CMake package, so it catches header/export/packaging regressions; it is slow (up to
 600s timeout).
