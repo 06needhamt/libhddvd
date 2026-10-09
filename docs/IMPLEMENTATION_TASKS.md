@@ -231,9 +231,17 @@ style property, element kind, and unresolved dependency with no hard-coded names
 
 ### P4-01 — Inventory and document the binary script format
 
-**Status:** Structural comparison expanded; semantics blocked on specification/research access
+**Status:** Inspector complete; reference-script accounting is a maintainer run; semantics blocked on specification/research access
 **Depends on:** P2-02
 **Likely files:** `docs/formats/hdi-script.md`, `tools/hddvd-scriptinfo.c`
+
+`hddvd-scriptinfo` bounds-checks envelopes and clean-room script tables through
+the library parsers and labels every byte as `structure`, `observed`, or
+`unknown`, failing if the totals do not cover the input. CTest pins the
+accounting for original fixtures, including gaps, trailers, protected payloads,
+and the observed `AACS`/`0x11` prefix. Running it on the four reference scripts
+needs the external archive; their bytes past the prefix stay `unknown` until a
+public specification or independently generated programs exist.
 
 Create a read-only header/table inspector.  Document facts from public
 specifications or independently generated programs, marking hypotheses clearly.
@@ -381,7 +389,7 @@ acknowledgement.
 
 ### P6-02 — Replace start-reference-only XPL parsing
 
-**Status:** Core typed model, title-branch, time-range and chapter-entry validation, and application loading times complete; external conformance and less-common constructs remain
+**Status:** Complete for the synthetic corpus; the strict external conformance run needs the maintainer's corpus
 **Depends on:** P1-01
 **Likely files:** `include/hddvd.h`, `src/xpl.c`, `tests/test_xpl.c`
 
@@ -393,9 +401,16 @@ normalized frame times, and configurable node/item limits. Title ids and numbers
 are unique, title-scoped times are checked against declared durations, chapter
 entry points begin at zero and increase in document order, and forward
 `onEnd` branches are validated and exposed as title indices. The existing
-start-reference helper remains as a compatibility wrapper. Continue with
-external conformance, lifecycle details, and less-common constructs
-recorded by the external inventory.
+start-reference helper remains as a compatibility wrapper. Playlist versions,
+TitleSet `tickBase` and `defaultLanguage` are modeled, and
+`hddvd_xpl_get_application_state` derives each application's authored
+inactive/loading/active window from `loadingBegin` and its title times.
+`hddvd_xpl_get_unmodeled` reports every element or attribute that parsed but is
+not represented, so nothing is silently dropped. `hddvd-xplinfo` exposes this
+as JSON; the external inventory records it per playlist, and setting
+`HDDVD_EXTERNAL_MENU_STRICT=1` makes the external-menu-corpus test fail on any
+rejected playlist or unmodeled construct. The `xpl-inventory` CTest runs the
+same strict check on the synthetic fixtures, and `fuzz-xpl` covers the parser.
 
 **Acceptance:** original synthetic playlists cover forward references, time
 ranges, branches, malformed cycles, and limits; required reference constructs are
@@ -431,13 +446,20 @@ overlap bytes.
 
 ### P6-05 — Add the deterministic navigation scheduler
 
-**Status:** Foundation complete; full runtime integration remains blocked
+**Status:** Scheduler complete; script-task integration blocked on P4-05
 **Depends on:** P4-05, P6-01, P6-02
 **Likely files:** `src/player.c`, `tests/test_player.c`
 
 Serialize clocks, input, script tasks, timers, playback acknowledgements, seeks,
 pauses, rate changes, discontinuities, and title-end events on one navigation
 queue.
+
+Timers run on title time. `hddvd_nav_discontinuity` handles seeks in either
+direction and stream discontinuities without reordering queued events,
+`HDDVD_EVENT_RATE_CHANGE` reports rate changes, and
+`hddvd_nav_cancel_all_timers` discards a closed menu's timers. Fake-clock tests
+in `test_player.c` cover every case in the acceptance criteria. Queuing script
+tasks waits for the runtime (P4-05).
 
 **Acceptance:** fake-clock tests prove stable ordering and timer behavior across
 pause, seek, rate change, discontinuity, title end, menu close, and reopen.
@@ -511,6 +533,9 @@ Add GCC and Clang builds, ASan/UBSan, a Clang fuzzer compile check, install/cons
 tests, and Windows/macOS jobs where project infrastructure permits.  The external
 reference archive remains absent from public CI.
 
+The `fuzzers` job builds every harness and replays the synthetic seeds; the
+build matrix covers shared+static, static-only, and shared-only libraries.
+
 ## Phase 9 — actionable diagnostics
 
 ### X-01 — Error detail API
@@ -526,12 +551,17 @@ stable status names.
 
 ### X-02 — Configurable limits
 
-**Status:** Complete for implemented subsystems; runtime-only enforcement awaits P4-03
+**Status:** Complete for implemented subsystems; script heap and recursion enforcement awaits P4-03
 **Depends on:** P1-01 ownership conventions
 
 Define one limits object for archive members, resource bytes, XML nodes/depth,
 decoded pixels, script heap/instructions/recursion, timers, and queued events.
 Provide conservative defaults and tests proving every limit is enforced.
+
+`test_limits.c` lowers each field with a consumer through the unified
+`*_with_config` entry points and checks the rejection (`max_resource_bytes` is
+covered by `test_resource.c`). `max_script_heap_bytes` and
+`max_script_recursion` have no consumer until a script runtime exists.
 
 ## Milestone completion order
 

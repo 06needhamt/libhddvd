@@ -97,13 +97,13 @@ elseif(HDDVD_BUILD_STATIC)
     add_library(hddvd::hddvd_static ALIAS hddvd)
 endif()
 
-foreach(tool info menuinfo acainfo acaextract scriptdump)
+foreach(tool info menuinfo acainfo acaextract scriptdump scriptinfo xplinfo)
     add_executable(hddvd-${tool} tools/hddvd-${tool}.c)
     target_link_libraries(hddvd-${tool} PRIVATE hddvd)
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player)
+    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         # Test assertions also perform setup and must run in Release builds.
@@ -123,6 +123,8 @@ if(BUILD_TESTING)
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
     target_compile_definitions(test-xpl PRIVATE
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+    target_compile_definitions(test-limits PRIVATE
+        HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 
     if(HDDVD_ENABLE_REFERENCE_TESTS)
         find_package(Python3 3.8 REQUIRED COMPONENTS Interpreter)
@@ -140,8 +142,42 @@ if(BUILD_TESTING)
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_external_menu_corpus.py
                     ${CMAKE_CURRENT_SOURCE_DIR}/tools/inventory_external_menus.py
-                    $<TARGET_FILE:hddvd-acaextract>)
+                    $<TARGET_FILE:hddvd-acaextract>
+                    $<TARGET_FILE:hddvd-xplinfo>)
         set_tests_properties(external-menu-corpus PROPERTIES SKIP_RETURN_CODE 77)
+    endif()
+
+    # Byte accounting must cover every input byte exactly once (P4-01).
+    set(scriptinfo_cases
+        "scripts/minimal.hdis|summary: size=68 structure=68 observed=0 unknown=0"
+        "scripts/gapped.hdis|summary: size=101 structure=97 observed=0 unknown=4"
+        "scripts/observed-prefix.bin|summary: size=32 structure=0 observed=5 unknown=27"
+        "objects/hdis-script.hdo|summary: size=112 structure=104 observed=0 unknown=8"
+        "objects/protected.hdo|summary: size=60 structure=40 observed=0 unknown=20")
+    foreach(case IN LISTS scriptinfo_cases)
+        string(REPLACE "|" ";" case "${case}")
+        list(GET case 0 fixture)
+        list(GET case 1 expected)
+        get_filename_component(name "${fixture}" NAME_WE)
+        add_test(NAME scriptinfo-${name}
+            COMMAND hddvd-scriptinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/${fixture})
+        set_tests_properties(scriptinfo-${name} PROPERTIES PASS_REGULAR_EXPRESSION "${expected}")
+    endforeach()
+    add_test(NAME scriptinfo-rejects-invalid
+        COMMAND hddvd-scriptinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/objects/bad-flags.hdo)
+    set_tests_properties(scriptinfo-rejects-invalid PROPERTIES WILL_FAIL TRUE)
+
+    # The inventory's library check must pass on the original synthetic
+    # playlists before it is trusted on an external corpus.
+    find_package(Python3 3.8 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME xpl-inventory
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tools/inventory_external_menus.py
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures
+                    $<TARGET_FILE:hddvd-acaextract>
+                    --xplinfo $<TARGET_FILE:hddvd-xplinfo>
+                    --require-modeled)
     endif()
 
     add_test(NAME install-consumer
@@ -164,7 +200,7 @@ if(HDDVD_BUILD_FUZZERS)
     if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
         message(FATAL_ERROR "HDDVD_BUILD_FUZZERS requires Clang and libFuzzer")
     endif()
-    foreach(target aca object xmf xmu script)
+    foreach(target aca object xmf xmu script xpl)
         add_executable(fuzz-${target} tests/fuzz_${target}.c)
         target_link_libraries(fuzz-${target} PRIVATE hddvd)
         target_compile_options(fuzz-${target} PRIVATE
@@ -177,7 +213,7 @@ endif()
 install(TARGETS
         ${hddvd_library_targets}
         hddvd-info hddvd-menuinfo hddvd-acainfo hddvd-acaextract
-        hddvd-scriptdump
+        hddvd-scriptdump hddvd-scriptinfo hddvd-xplinfo
     EXPORT hddvdTargets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

@@ -217,6 +217,28 @@ typedef enum hddvd_xpl_application_kind
     HDDVD_XPL_APPLICATION_SEGMENT = 1,
     HDDVD_XPL_APPLICATION_PLAYLIST
 } hddvd_xpl_application_kind;
+/* Authored lifecycle window of an application at a title time. ACTIVE covers
+   [titleTimeBegin, titleTimeEnd), where a missing begin is the title start
+   and a missing end is the title duration (or unbounded without one).
+   LOADING covers [loadingBegin, titleTimeBegin). Whether an application with
+   autorun="false" actually runs is a runtime decision, not part of this
+   state. */
+typedef enum hddvd_xpl_application_state
+{
+    HDDVD_XPL_APPLICATION_INACTIVE = 0,
+    HDDVD_XPL_APPLICATION_LOADING,
+    HDDVD_XPL_APPLICATION_ACTIVE
+} hddvd_xpl_application_state;
+/* A playlist construct that parsed successfully but that the typed model does
+   not represent: an element name (attribute is NULL) or an attribute of a
+   modeled element. Names are local names; records are deduplicated in
+   document order. */
+typedef struct hddvd_xpl_unmodeled
+{
+    const char *element;
+    const char *attribute;
+    size_t occurrences;
+} hddvd_xpl_unmodeled;
 typedef enum hddvd_xpl_event_kind
 {
     HDDVD_XPL_EVENT_SCHEDULED = 1,
@@ -486,7 +508,8 @@ typedef enum hddvd_event_type
     HDDVD_EVENT_STREAM_SELECTION,
     HDDVD_EVENT_COMMAND_ACK,
     HDDVD_EVENT_TIMER,
-    HDDVD_EVENT_INPUT
+    HDDVD_EVENT_INPUT,
+    HDDVD_EVENT_RATE_CHANGE
 } hddvd_event_type;
 typedef enum hddvd_command_type
 {
@@ -531,6 +554,12 @@ typedef struct hddvd_event
             uint32_t key;
             uint8_t pressed;
         } input;
+        /* Playback rate as numerator/denominator; 1/1 is normal speed. */
+        struct
+        {
+            int32_t numerator;
+            uint32_t denominator;
+        } rate;
     } data;
 } hddvd_event;
 typedef struct hddvd_command
@@ -727,6 +756,18 @@ HDDVD_API int hddvd_xpl_get_application_resource(const hddvd_xpl *, size_t, size
                                                  hddvd_xpl_application_resource *);
 HDDVD_API size_t hddvd_xpl_event_count(const hddvd_xpl *, size_t);
 HDDVD_API int hddvd_xpl_get_event(const hddvd_xpl *, size_t, size_t, hddvd_xpl_event *);
+/* Playlist majorVersion/minorVersion; HDDVD_ENOTFOUND when majorVersion is
+   absent. A missing minorVersion reads as 0. */
+HDDVD_API int hddvd_xpl_get_version(const hddvd_xpl *, uint32_t *, uint32_t *);
+/* TitleSet tickBase in ticks per second, or 0 when absent. */
+HDDVD_API uint32_t hddvd_xpl_tick_rate(const hddvd_xpl *);
+/* TitleSet defaultLanguage, or NULL when absent. */
+HDDVD_API const char *hddvd_xpl_default_language(const hddvd_xpl *);
+/* The time must use the playlist frame rate (HDDVD_EINVAL otherwise). */
+HDDVD_API int hddvd_xpl_get_application_state(const hddvd_xpl *, size_t, size_t, hddvd_xpl_time,
+                                              hddvd_xpl_application_state *);
+HDDVD_API size_t hddvd_xpl_unmodeled_count(const hddvd_xpl *);
+HDDVD_API int hddvd_xpl_get_unmodeled(const hddvd_xpl *, size_t, hddvd_xpl_unmodeled *);
 HDDVD_API int hddvd_xmf_dump(const void *, size_t, const char *, void *);
 /* XMF objects are immutable. All returned strings are borrowed and remain
    valid until hddvd_xmf_close(). Inputs are copied by the parser. */
@@ -815,7 +856,20 @@ HDDVD_API int hddvd_time_from_seconds(uint64_t, hddvd_time *);
    with equal timestamps are delivered in posting order. The bounded queue
    rejects its newest event with HDDVD_ELIMIT and never discards old work.
    Host command callbacks run synchronously and must acknowledge later by
-   posting HDDVD_EVENT_COMMAND_ACK (including if the command is rejected). */
+   posting HDDVD_EVENT_COMMAND_ACK (including if the command is rejected).
+
+   The scheduler clock is title time. advance() only moves it forward, so it
+   stops while playback is paused and follows the title clock at any playback
+   rate; timers fire once title time reaches their due time and are stamped
+   with it. Events the host posts at time T before advancing to T precede
+   timers that fire during that advance. discontinuity() moves the clock to
+   any time (seek, stream discontinuity): queued events stamped later than the
+   new time are restamped to it without reordering, an HDDVD_EVENT_DISCONTINUITY
+   event is queued at the new time, and timers that are due by then fire after
+   it, stamped with the new time. Timers due later stay pending, including
+   after a backward seek. cancel_all_timers() discards every pending timer
+   (for example when a menu application closes) and returns how many it
+   removed; queued events are unaffected. */
 HDDVD_API void hddvd_nav_limits_default(hddvd_nav_limits *);
 HDDVD_API int hddvd_nav_create(const hddvd_nav_limits *, hddvd_event_fn, hddvd_command_fn, void *,
                                hddvd_nav **);
@@ -826,6 +880,8 @@ HDDVD_API int hddvd_nav_post(hddvd_nav *, const hddvd_event *);
 HDDVD_API int hddvd_nav_schedule_timer(hddvd_nav *, uint64_t, hddvd_time);
 HDDVD_API int hddvd_nav_cancel_timer(hddvd_nav *, uint64_t);
 HDDVD_API int hddvd_nav_advance(hddvd_nav *, hddvd_time);
+HDDVD_API int hddvd_nav_discontinuity(hddvd_nav *, hddvd_time);
+HDDVD_API size_t hddvd_nav_cancel_all_timers(hddvd_nav *);
 HDDVD_API size_t hddvd_nav_pump(hddvd_nav *, size_t);
 HDDVD_API int hddvd_nav_command(hddvd_nav *, const hddvd_command *, uint64_t *);
 /* The incremental EVO parser accepts arbitrarily split input. finish()

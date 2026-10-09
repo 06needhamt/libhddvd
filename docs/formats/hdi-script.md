@@ -28,3 +28,28 @@ Every offset, count, function range, branch target, string reference, allocation
 and reserved field is validated before the immutable representation is exposed.
 The decoder does not execute code. Runtime/backend selection and commercial HDi
 format support therefore remain separate capabilities.
+
+## Byte accounting
+
+`hddvd-scriptinfo FILE` reports every byte of a script object exactly once, in
+offset order, as one of:
+
+* `structure`: a field of a format documented in this directory and validated
+  by the library (the `HDDVDOBJ` envelope or the layout above);
+* `observed`: bytes seen in external media whose meaning is not established
+  (currently only the `AACS` prefix and the `0x11` byte after it); and
+* `unknown`: everything else, including envelope `unknown_1`, protected or
+  non-script payloads, trailers, and unreferenced gaps between tables.
+
+The final line is `summary: size=N structure=A observed=B unknown=C`, and the
+tool fails if the three totals do not add up to the input size. Tables that
+share bytes are reported as an overlap and counted once. Invalid envelopes or
+scripts are rejected by the library parsers before anything is labelled.
+
+For the external reference archive, extract the four type-`0x11` members with
+`hddvd-acaextract` to a directory outside the repository and run the tool on
+each. Until a public specification or independently generated programs exist,
+their bytes after the five-byte prefix are expected to be `unknown`; that
+result is the P4-01 inventory, not a gap in the tool. The synthetic fixtures in
+`tests/fixtures/scripts` and `tests/fixtures/objects/hdis-script.hdo` pin the
+accounting in CTest.

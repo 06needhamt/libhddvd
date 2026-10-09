@@ -242,11 +242,139 @@ static void test_invalid_playlists(void)
     assert(hddvd_xpl_open(event_after_title, sizeof(event_after_title) - 1, &xpl) == HDDVD_EPARSE);
 }
 
+static void expect_state(const hddvd_xpl *xpl, size_t title, size_t application, uint64_t frames,
+                         hddvd_xpl_application_state expected)
+{
+    hddvd_xpl_application_state state = (hddvd_xpl_application_state)-1;
+    hddvd_xpl_time at = {frames, 60};
+    assert(hddvd_xpl_get_application_state(xpl, title, application, at, &state) == HDDVD_OK);
+    assert(state == expected);
+}
+
+static void test_playlist_metadata_and_lifecycle(void)
+{
+    size_t size;
+    unsigned char *bytes = read_fixture("playlist_full.xpl", &size);
+    hddvd_xpl *xpl = NULL;
+    hddvd_xpl_application_state state;
+    uint32_t major = 0, minor = 0;
+
+    assert(hddvd_xpl_open(bytes, size, &xpl) == HDDVD_OK);
+    assert(hddvd_xpl_get_version(xpl, &major, &minor) == HDDVD_OK && major == 1 && minor == 0);
+    assert(hddvd_xpl_tick_rate(xpl) == 60);
+    assert(!strcmp(hddvd_xpl_default_language(xpl), "en"));
+    assert(hddvd_xpl_unmodeled_count(xpl) == 0);
+
+    /* loadingBegin 270, titleTimeBegin 300, titleTimeEnd 6900 (frames). */
+    expect_state(xpl, 1, 0, 0, HDDVD_XPL_APPLICATION_INACTIVE);
+    expect_state(xpl, 1, 0, 269, HDDVD_XPL_APPLICATION_INACTIVE);
+    expect_state(xpl, 1, 0, 270, HDDVD_XPL_APPLICATION_LOADING);
+    expect_state(xpl, 1, 0, 299, HDDVD_XPL_APPLICATION_LOADING);
+    expect_state(xpl, 1, 0, 300, HDDVD_XPL_APPLICATION_ACTIVE);
+    expect_state(xpl, 1, 0, 6899, HDDVD_XPL_APPLICATION_ACTIVE);
+    expect_state(xpl, 1, 0, 6900, HDDVD_XPL_APPLICATION_INACTIVE);
+    /* Playlist applications without title times are active throughout. */
+    expect_state(xpl, SIZE_MAX, 0, 0, HDDVD_XPL_APPLICATION_ACTIVE);
+    expect_state(xpl, SIZE_MAX, 0, UINT64_MAX, HDDVD_XPL_APPLICATION_ACTIVE);
+
+    assert(hddvd_xpl_get_application_state(xpl, 1, 0, (hddvd_xpl_time){300, 30}, &state) ==
+           HDDVD_EINVAL);
+    assert(hddvd_xpl_get_application_state(xpl, 1, 1, (hddvd_xpl_time){300, 60}, &state) ==
+           HDDVD_EINVAL);
+    assert(hddvd_xpl_get_application_state(xpl, 0, 0, (hddvd_xpl_time){0, 60}, &state) ==
+           HDDVD_EINVAL);
+    assert(hddvd_xpl_get_application_state(xpl, 1, 0, (hddvd_xpl_time){0, 60}, NULL) ==
+           HDDVD_EINVAL);
+    hddvd_xpl_close(xpl);
+    free(bytes);
+}
+
+static void test_open_ended_application(void)
+{
+    static const char playlist[] =
+        "<Playlist xmlns='http://www.dvdforum.org/2005/HDDVDVideo/Playlist'>"
+        "<TitleSet timeBase='60fps'><Title titleDuration='00:00:10:00'>"
+        "<ApplicationSegment src='a.xmf' titleTimeBegin='00:00:02:00'/></Title>"
+        "<Title><ApplicationSegment src='b.xmf'/></Title></TitleSet></Playlist>";
+    hddvd_xpl *xpl = NULL;
+    uint32_t major, minor;
+    assert(hddvd_xpl_open(playlist, sizeof(playlist) - 1, &xpl) == HDDVD_OK);
+    assert(hddvd_xpl_get_version(xpl, &major, &minor) == HDDVD_ENOTFOUND);
+    assert(hddvd_xpl_tick_rate(xpl) == 0 && hddvd_xpl_default_language(xpl) == NULL);
+    /* Without titleTimeEnd the window closes at the title duration. */
+    expect_state(xpl, 0, 0, 119, HDDVD_XPL_APPLICATION_INACTIVE);
+    expect_state(xpl, 0, 0, 120, HDDVD_XPL_APPLICATION_ACTIVE);
+    expect_state(xpl, 0, 0, 599, HDDVD_XPL_APPLICATION_ACTIVE);
+    expect_state(xpl, 0, 0, 600, HDDVD_XPL_APPLICATION_INACTIVE);
+    /* Without a duration either, it stays active. */
+    expect_state(xpl, 1, 0, UINT64_MAX, HDDVD_XPL_APPLICATION_ACTIVE);
+    hddvd_xpl_close(xpl);
+}
+
+static void test_unmodeled_constructs(void)
+{
+    static const char playlist[] =
+        "<Playlist xmlns='http://www.dvdforum.org/2005/HDDVDVideo/Playlist' "
+        "xmlns:x='urn:original-extension' majorVersion='1' x:note='a'>"
+        "<TitleSet timeBase='60fps'>"
+        "<Title id='one' futureAttribute='1'>"
+        "<FutureElement level='2'><Chapter titleTimeBegin='00:00:00:00'/></FutureElement>"
+        "<FutureElement/>"
+        "<ApplicationSegment src='a.xmf' futureAttribute='3'/>"
+        "</Title><Title id='two' futureAttribute='4'/></TitleSet></Playlist>";
+    static const char *const expected[][2] = {{"Playlist", "x:note"},
+                                              {"Title", "futureAttribute"},
+                                              {"FutureElement", NULL},
+                                              {"ApplicationSegment", "futureAttribute"}};
+    static const size_t occurrences[] = {1, 2, 2, 1};
+    hddvd_xpl *xpl = NULL;
+    hddvd_xpl_unmodeled record;
+    size_t i;
+    assert(hddvd_xpl_open(playlist, sizeof(playlist) - 1, &xpl) == HDDVD_OK);
+    /* Unknown containers are still searched for modeled descendants. */
+    assert(hddvd_xpl_chapter_count(xpl, 0) == 1);
+    assert(hddvd_xpl_unmodeled_count(xpl) == 4);
+    for (i = 0; i < 4; i++)
+    {
+        assert(hddvd_xpl_get_unmodeled(xpl, i, &record) == HDDVD_OK);
+        assert(!strcmp(record.element, expected[i][0]));
+        assert(expected[i][1] ? record.attribute && !strcmp(record.attribute, expected[i][1])
+                              : record.attribute == NULL);
+        assert(record.occurrences == occurrences[i]);
+    }
+    assert(hddvd_xpl_get_unmodeled(xpl, 4, &record) == HDDVD_EINVAL);
+    assert(hddvd_xpl_get_unmodeled(xpl, 0, NULL) == HDDVD_EINVAL);
+    assert(hddvd_xpl_unmodeled_count(NULL) == 0);
+    hddvd_xpl_close(xpl);
+}
+
+static void test_invalid_metadata(void)
+{
+    static const char bad_version[] =
+        "<Playlist xmlns='http://www.dvdforum.org/2005/HDDVDVideo/Playlist' majorVersion='x'>"
+        "<TitleSet timeBase='60fps'><Title/></TitleSet></Playlist>";
+    static const char bad_minor[] =
+        "<Playlist xmlns='http://www.dvdforum.org/2005/HDDVDVideo/Playlist' majorVersion='1' "
+        "minorVersion='-1'><TitleSet timeBase='60fps'><Title/></TitleSet></Playlist>";
+    static const char bad_tick_base[] =
+        "<Playlist xmlns='http://www.dvdforum.org/2005/HDDVDVideo/Playlist'>"
+        "<TitleSet timeBase='60fps' tickBase='0fps'><Title/></TitleSet></Playlist>";
+    hddvd_xpl *xpl = NULL;
+    assert(hddvd_xpl_open(bad_version, sizeof(bad_version) - 1, &xpl) == HDDVD_EPARSE);
+    assert(hddvd_xpl_open(bad_minor, sizeof(bad_minor) - 1, &xpl) == HDDVD_EPARSE);
+    assert(hddvd_xpl_open(bad_tick_base, sizeof(bad_tick_base) - 1, &xpl) == HDDVD_EPARSE);
+    assert(xpl == NULL);
+}
+
 int main(void)
 {
     test_typed_playlist();
     test_compatibility_helper();
     test_clip_kinds();
     test_invalid_playlists();
+    test_playlist_metadata_and_lifecycle();
+    test_open_ended_application();
+    test_unmodeled_constructs();
+    test_invalid_metadata();
     return 0;
 }

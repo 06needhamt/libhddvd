@@ -29,6 +29,11 @@ hddvd-acaextract archived.aca extracted
 hddvd-menuinfo archived.aca
 ```
 
+`hddvd-xplinfo playlist.xpl` summarizes the typed playlist model as JSON and
+lists every construct it parsed but does not model. `hddvd-scriptinfo FILE`
+accounts for every byte of a script object as documented structure, observed
+but unconfirmed bytes, or unknown ranges (see `docs/formats/hdi-script.md`).
+
 The ACA implementation was validated against a genuine HD DVD archive with 40 members. The sample itself is not distributed with this source tree. Regression tests construct a small synthetic archive using the observed container structure.
 
 ## Resource APIs
@@ -118,7 +123,9 @@ Reviewable tasks, dependencies, and acceptance criteria for those phases are in
 Additional externally supplied menu corpora can be inventoried without copying
 assets into the repository. Enable `HDDVD_ENABLE_EXTERNAL_MENU_TESTS`, set
 `HDDVD_EXTERNAL_MENU_CORPUS` to a ZIP or extracted directory, and optionally set
-`HDDVD_EXTERNAL_MENU_REPORT` to a JSON output path. See
+`HDDVD_EXTERNAL_MENU_REPORT` to a JSON output path. Set
+`HDDVD_EXTERNAL_MENU_STRICT=1` to also fail when libhddvd rejects a playlist or
+leaves any of its constructs unmodeled. See
 `docs/EXTERNAL_MENU_INVENTORY.md` for the external-only data policy and report
 schema.
 
