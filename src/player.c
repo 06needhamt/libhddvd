@@ -17,6 +17,8 @@ struct hddvd_nav
     size_t timer_count, timer_cap;
     uint64_t next_sequence, next_command, next_timer_order;
     hddvd_time now;
+    /* Time of the latest discontinuity; no timer is stamped earlier. */
+    hddvd_time floor;
     hddvd_event_fn event_fn;
     hddvd_command_fn command_fn;
     void *opaque;
@@ -156,17 +158,14 @@ int hddvd_nav_cancel_timer(hddvd_nav *n, uint64_t id)
         }
     return HDDVD_ENOTFOUND;
 }
-int hddvd_nav_advance(hddvd_nav *n, hddvd_time now)
+static int fire_due_timers(hddvd_nav *n)
 {
-    if (!n || now.ticks < n->now.ticks)
-        return HDDVD_EINVAL;
-    n->now = now;
     for (;;)
     {
         size_t i, best = (size_t)-1;
         hddvd_event e;
         for (i = 0; i < n->timer_count; i++)
-            if (n->timers[i].due.ticks <= now.ticks &&
+            if (n->timers[i].due.ticks <= n->now.ticks &&
                 (best == (size_t)-1 || n->timers[i].due.ticks < n->timers[best].due.ticks ||
                  (n->timers[i].due.ticks == n->timers[best].due.ticks &&
                   n->timers[i].order < n->timers[best].order)))
@@ -178,6 +177,8 @@ int hddvd_nav_advance(hddvd_nav *n, hddvd_time now)
         memset(&e, 0, sizeof(e));
         e.type = HDDVD_EVENT_TIMER;
         e.when = n->timers[best].due;
+        if (e.when.ticks < n->floor.ticks)
+            e.when = n->floor;
         e.data.timer.timer_id = n->timers[best].id;
         if (hddvd_nav_post(n, &e) != HDDVD_OK)
             return HDDVD_ELIMIT;
@@ -185,6 +186,43 @@ int hddvd_nav_advance(hddvd_nav *n, hddvd_time now)
                 (n->timer_count - best - 1) * sizeof(*n->timers));
         n->timer_count--;
     }
+}
+int hddvd_nav_advance(hddvd_nav *n, hddvd_time now)
+{
+    if (!n || now.ticks < n->now.ticks)
+        return HDDVD_EINVAL;
+    n->now = now;
+    return fire_due_timers(n);
+}
+int hddvd_nav_discontinuity(hddvd_nav *n, hddvd_time now)
+{
+    size_t i;
+    hddvd_event e;
+    if (!n)
+        return HDDVD_EINVAL;
+    if (n->event_count == n->event_cap)
+        return HDDVD_ELIMIT;
+    /* The queue is sorted, so restamping its later suffix keeps the order. */
+    for (i = 0; i < n->event_count; i++)
+        if (n->events[i].when.ticks > now.ticks)
+            n->events[i].when = now;
+    n->now = now;
+    n->floor = now;
+    memset(&e, 0, sizeof(e));
+    e.type = HDDVD_EVENT_DISCONTINUITY;
+    e.when = now;
+    if (hddvd_nav_post(n, &e) != HDDVD_OK)
+        return HDDVD_ELIMIT;
+    return fire_due_timers(n);
+}
+size_t hddvd_nav_cancel_all_timers(hddvd_nav *n)
+{
+    size_t count;
+    if (!n)
+        return 0;
+    count = n->timer_count;
+    n->timer_count = 0;
+    return count;
 }
 size_t hddvd_nav_pump(hddvd_nav *n, size_t maximum)
 {

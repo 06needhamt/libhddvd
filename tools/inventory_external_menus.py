@@ -13,6 +13,7 @@ import json
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import sys
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
@@ -146,9 +147,27 @@ def directory_members(root):
             yield path.relative_to(root).as_posix(), path.read_bytes()
 
 
-def inventory(corpus, acaextract):
+def library_playlist(xplinfo, path, logical_name):
+    """Run hddvd-xplinfo so the report shows how libhddvd models the playlist."""
+    process = subprocess.run(
+        [str(xplinfo), str(path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    try:
+        result = json.loads(process.stdout)
+    except json.JSONDecodeError:
+        result = {"status": "error", "message": process.stderr.strip() or "no output"}
+    result["name"] = logical_name
+    return result
+
+
+def inventory(corpus, acaextract, xplinfo=None):
     source_members = safe_zip_members(corpus) if zipfile.is_zipfile(corpus) else directory_members(corpus)
     xpl_documents = []
+    library_playlists = []
     xml_by_family = defaultdict(list)
     scripts = []
     archive_count = 0
@@ -161,6 +180,10 @@ def inventory(corpus, acaextract):
                 document = analyze_xml(data, logical_name)
                 if document:
                     xpl_documents.append(document)
+                if xplinfo:
+                    playlist = temporary / f"playlist-{ordinal}.xpl"
+                    playlist.write_bytes(data)
+                    library_playlists.append(library_playlist(xplinfo, playlist, logical_name))
                 continue
             archive_count += 1
             archive = temporary / f"archive-{ordinal}.aca"
@@ -199,6 +222,18 @@ def inventory(corpus, acaextract):
         for element, families in sorted(construct_families.items())
         if len(families) > 1
     }
+    unmodeled = Counter()
+    for playlist in library_playlists:
+        for record in playlist.get("unmodeled", []):
+            key = record["element"] + ("@" + record["attribute"] if record["attribute"] else "")
+            unmodeled[key] += record["occurrences"]
+    library = None
+    if xplinfo:
+        library = {
+            "playlists": library_playlists,
+            "failed": sorted(item["name"] for item in library_playlists if item["status"] != "ok"),
+            "unmodeled": dict(sorted(unmodeled.items())),
+        }
     return {
         "schema": 1,
         "source": {
@@ -208,7 +243,11 @@ def inventory(corpus, acaextract):
         },
         "observations": {
             "archive_count": archive_count,
-            "xpl": {"documents": xpl_documents, "aggregate": merge_documents(xpl_documents)},
+            "xpl": {
+                "documents": xpl_documents,
+                "aggregate": merge_documents(xpl_documents),
+                "library": library,
+            },
             "xmf_xmu_families": xmf_xmu_families,
             "constructs_in_multiple_families": recurring,
             "type_0x11_scripts": scripts,
@@ -233,15 +272,29 @@ def main():
     parser.add_argument("corpus", type=Path, help="external ZIP or extracted directory")
     parser.add_argument("acaextract", type=Path, help="path to hddvd-acaextract")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--xplinfo", type=Path, help="path to hddvd-xplinfo")
+    parser.add_argument(
+        "--require-modeled",
+        action="store_true",
+        help="exit 1 unless libhddvd parses every playlist with no unmodeled constructs",
+    )
     args = parser.parse_args()
     if not args.corpus.exists():
         parser.error(f"corpus does not exist: {args.corpus}")
-    report = inventory(args.corpus, args.acaextract)
+    if args.require_modeled and not args.xplinfo:
+        parser.error("--require-modeled needs --xplinfo")
+    report = inventory(args.corpus, args.acaextract, args.xplinfo)
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.write_text(rendered, encoding="utf-8")
     else:
         print(rendered, end="")
+    library = report["observations"]["xpl"]["library"]
+    if args.require_modeled and (
+        not library["playlists"] or library["failed"] or library["unmodeled"]
+    ):
+        print("inventory: playlists are not fully modeled by libhddvd", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

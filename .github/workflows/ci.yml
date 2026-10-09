@@ -73,3 +73,25 @@ jobs:
         run: cmake -S . -B build -DBUILD_TESTING=ON
       - run: cmake --build build --parallel
       - run: ctest --test-dir build --output-on-failure
+
+  fuzzers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libxml2-dev
+      - name: Configure libFuzzer harnesses
+        env:
+          CC: clang
+        run: cmake -S . -B build -DHDDVD_BUILD_FUZZERS=ON -DBUILD_TESTING=OFF
+      - run: cmake --build build --parallel
+      # Replay the synthetic seeds, then a short fixed-seed run for the ACA and
+      # script harnesses, so the job stays deterministic.
+      - name: Smoke-run fuzzers
+        run: |
+          ./build/fuzz-object tests/fixtures/objects/*.hdo
+          ./build/fuzz-xmf tests/fixtures/plain_manifest.xmf
+          ./build/fuzz-xmu tests/fixtures/plain_markup.xmu
+          ./build/fuzz-xpl tests/fixtures/playlist_full.xpl
+          ./build/fuzz-script tests/fixtures/scripts/*.hdis
+          ./build/fuzz-aca -seed=1 -runs=1000
+          ./build/fuzz-script -seed=1 -runs=1000

@@ -38,8 +38,10 @@ always retained as opaque data.
 
 ## Generated corpus
 
-`tests/fixtures/generate_objects.py` emits five original valid objects: a
-manifest, markup document, PNG-signature payload, script, and an unknown type.
+`tests/fixtures/generate_objects.py` emits seven original valid objects: a
+manifest, markup document, PNG-signature payload, source-text script, clean-room
+`HDIS` script, protected script (flag bit 0), and an unknown type. It also
+writes clean-room scripts to `tests/fixtures/scripts` (see `hdi-script.md`).
 It also emits single-field corruptions for magic, version, reserved flags,
 header length, payload length, embedded-NUL name, nonzero padding, and trailing
 length.  Files are emitted in sorted order and contain no timestamps, random
