@@ -94,13 +94,13 @@ static int parse_uint_prop(xmlNodePtr node, const char *name, uint32_t *result)
 static int id_exists(const hddvd_xmf *xmf, const char *id)
 {
     size_t i;
-    if (!strcmp(xmf->id, id))
+    if (xmf->id && !strcmp(xmf->id, id))
         return 1;
     for (i = 0; i < xmf->script_count; i++)
-        if (!strcmp(xmf->scripts[i].id, id))
+        if (xmf->scripts[i].id && !strcmp(xmf->scripts[i].id, id))
             return 1;
     for (i = 0; i < xmf->markup_count; i++)
-        if (!strcmp(xmf->markups[i].id, id))
+        if (xmf->markups[i].id && !strcmp(xmf->markups[i].id, id))
             return 1;
     return 0;
 }
@@ -218,8 +218,9 @@ int hddvd_xmf_open_with_limits(const void *data, size_t size, const hddvd_xmf_li
         rc = HDDVD_ENOMEM;
         goto done;
     }
+    /* Most manifests on observed discs have no id; an empty one is invalid. */
     xmf->id = dup_prop(root, "id");
-    if (!xmf->id || !*xmf->id)
+    if (xmf->id && !*xmf->id)
         goto done;
     for (node = root->children; node; node = node->next)
     {
@@ -248,7 +249,9 @@ int hddvd_xmf_open_with_limits(const void *data, size_t size, const hddvd_xmf_li
             }
             id = dup_prop(node, "id");
             src = dup_prop(node, "src");
-            if (!id || !*id || !src || !*src || id_exists(xmf, id))
+            /* Observed manifests usually give only src; an id, when present,
+               must be non-empty and unique. */
+            if ((id && (!*id || id_exists(xmf, id))) || !src || !*src)
             {
                 free(id);
                 free(src);
@@ -374,12 +377,14 @@ int hddvd_xmf_dump(const void *data, size_t size, const char *name, void *output
     if (rc)
         return rc;
     fprintf(file, "XMF: %s\nApplication id=%s\nRegion x=%u y=%u width=%u height=%u\n",
-            name ? name : "(memory)", xmf->id, xmf->region.x, xmf->region.y, xmf->region.width,
-            xmf->region.height);
+            name ? name : "(memory)", xmf->id ? xmf->id : "(none)", xmf->region.x, xmf->region.y,
+            xmf->region.width, xmf->region.height);
     for (i = 0; i < xmf->script_count; i++)
-        fprintf(file, "Script id=%s src=%s\n", xmf->scripts[i].id, xmf->scripts[i].src);
+        fprintf(file, "Script id=%s src=%s\n", xmf->scripts[i].id ? xmf->scripts[i].id : "(none)",
+                xmf->scripts[i].src);
     for (i = 0; i < xmf->markup_count; i++)
-        fprintf(file, "Markup id=%s src=%s\n", xmf->markups[i].id, xmf->markups[i].src);
+        fprintf(file, "Markup id=%s src=%s\n", xmf->markups[i].id ? xmf->markups[i].id : "(none)",
+                xmf->markups[i].src);
     for (i = 0; i < xmf->root_count; i++)
         fprintf(file, "Resource src=%s\n", xmf->roots[i]);
     hddvd_xmf_close(xmf);

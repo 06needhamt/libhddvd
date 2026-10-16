@@ -148,7 +148,8 @@ typedef struct hddvd_xmu_attribute
 typedef enum hddvd_xmu_display
 {
     HDDVD_XMU_DISPLAY_BLOCK = 0,
-    HDDVD_XMU_DISPLAY_NONE = 1
+    HDDVD_XMU_DISPLAY_NONE = 1,
+    HDDVD_XMU_DISPLAY_AUTO = 2
 } hddvd_xmu_display;
 typedef enum hddvd_xmu_style_property
 {
@@ -164,7 +165,10 @@ typedef enum hddvd_xmu_style_property
     HDDVD_XMU_STYLE_NAV_RIGHT = 1u << 9,
     HDDVD_XMU_STYLE_NAV_UP = 1u << 10,
     HDDVD_XMU_STYLE_NAV_DOWN = 1u << 11,
-    HDDVD_XMU_STYLE_POSITION = 1u << 12
+    HDDVD_XMU_STYLE_POSITION = 1u << 12,
+    /* width or height holds a whole percentage instead of pixels. */
+    HDDVD_XMU_STYLE_WIDTH_PERCENT = 1u << 13,
+    HDDVD_XMU_STYLE_HEIGHT_PERCENT = 1u << 14
 } hddvd_xmu_style_property;
 typedef struct hddvd_xmu_style
 {
@@ -826,9 +830,11 @@ HDDVD_API int hddvd_xmf_open_with_limits(const void *, size_t, const hddvd_xmf_l
 HDDVD_API int hddvd_xmf_open_with_config(const void *, size_t, const hddvd_config_limits *,
                                          hddvd_xmf **);
 HDDVD_API void hddvd_xmf_close(hddvd_xmf *);
+/* NULL when the Application element has no id, as on most observed discs. */
 HDDVD_API const char *hddvd_xmf_application_id(const hddvd_xmf *);
 HDDVD_API int hddvd_xmf_get_region(const hddvd_xmf *, hddvd_xmf_region *);
 HDDVD_API size_t hddvd_xmf_script_count(const hddvd_xmf *);
+/* Script and markup references return (id, src); id is NULL when absent. */
 HDDVD_API int hddvd_xmf_get_script(const hddvd_xmf *, size_t, const char **, const char **);
 HDDVD_API size_t hddvd_xmf_markup_count(const hddvd_xmf *);
 HDDVD_API int hddvd_xmf_get_markup(const hddvd_xmf *, size_t, const char **, const char **);
@@ -883,12 +889,20 @@ HDDVD_API size_t hddvd_xmu_node_count(const hddvd_xmu *);
 HDDVD_API int hddvd_xmu_get_node(const hddvd_xmu *, size_t, hddvd_xmu_node *);
 HDDVD_API int hddvd_xmu_get_attribute(const hddvd_xmu *, size_t, size_t, hddvd_xmu_attribute *);
 HDDVD_API size_t hddvd_xmu_find_id(const hddvd_xmu *, const char *);
+/* The root is <root> for a document or <div> for a markup fragment. The
+   initial focus is the one element outside <head> with state:focused="true",
+   or SIZE_MAX when there is none; two such elements are rejected. */
 HDDVD_API size_t hddvd_xmu_initial_focus(const hddvd_xmu *);
 HDDVD_API const char *hddvd_xmu_clock(const hddvd_xmu *);
 /* Style models borrow the XMU model, which must outlive them. The specified
    value contains only properties declared directly on a node; the computed
    value includes named style references. Equal zIndex values retain document
-   order. */
+   order. Elements inside <timing> (animation keyframes) have no static style.
+   A nav property of "none", or one naming an id the document lacks (a
+   script may create it later), resolves to SIZE_MAX. In a <div>-rooted
+   fragment, style references to ids defined elsewhere are skipped.
+   Percentage contentWidth/contentHeight values are accepted but not modeled.
+   position is "absolute" or "relative" (position_absolute 1 or 0). */
 HDDVD_API int hddvd_xmu_styles_open(const hddvd_xmu *, hddvd_xmu_styles **);
 HDDVD_API void hddvd_xmu_styles_close(hddvd_xmu_styles *);
 HDDVD_API int hddvd_xmu_get_specified_style(const hddvd_xmu_styles *, size_t, hddvd_xmu_style *);

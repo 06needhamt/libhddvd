@@ -38,6 +38,24 @@ static int valid_model(void)
     return ok;
 }
 
+/* Observed manifests usually omit the application id and give script and
+   markup references only a src. */
+static int optional_ids(void)
+{
+    const char xml[] = "<Application xmlns=\"" NS "\"><Region x=\"0\" y=\"0\" width=\"1\" "
+                       "height=\"1\"/><Script src=\"a.js\"/><Script src=\"b.js\"/>"
+                       "<Markup src=\"m.xmu\"/><Script id=\"s\" src=\"c.js\"/></Application>";
+    hddvd_xmf *xmf = NULL;
+    const char *id = "unset", *src = NULL;
+    int ok = hddvd_xmf_open(xml, sizeof(xml) - 1, &xmf) == HDDVD_OK;
+    ok = ok && hddvd_xmf_application_id(xmf) == NULL && hddvd_xmf_script_count(xmf) == 3 &&
+         hddvd_xmf_get_script(xmf, 1, &id, &src) == HDDVD_OK && id == NULL &&
+         !strcmp(src, "b.js") && hddvd_xmf_get_script(xmf, 2, &id, &src) == HDDVD_OK &&
+         !strcmp(id, "s");
+    hddvd_xmf_close(xmf);
+    return ok;
+}
+
 static int limits_work(void)
 {
     const char xml[] = "<Application xmlns=\"" NS "\" id=\"a\"><Region x=\"0\" y=\"0\" width=\"1\" "
@@ -58,7 +76,11 @@ int main(void)
         "<Application xmlns=\"wrong\" id=\"a\"><Region x=\"0\" y=\"0\" width=\"1\" "
         "height=\"1\"/></Application>",
         "<Application xmlns=\"" NS
-        "\"><Region x=\"0\" y=\"0\" width=\"1\" height=\"1\"/></Application>",
+        "\" id=\"\"><Region x=\"0\" y=\"0\" width=\"1\" height=\"1\"/></Application>",
+        "<Application xmlns=\"" NS "\"><Region x=\"0\" y=\"0\" width=\"1\" height=\"1\"/>"
+        "<Script id=\"s\" src=\"a\"/><Markup id=\"s\" src=\"b\"/></Application>",
+        "<Application xmlns=\"" NS "\"><Region x=\"0\" y=\"0\" width=\"1\" height=\"1\"/>"
+        "<Script src=\"\"/></Application>",
         "<Application xmlns=\"" NS "\" id=\"a\"></Application>",
         "<Application xmlns=\"" NS
         "\" id=\"a\"><Region x=\"-1\" y=\"0\" width=\"1\" height=\"1\"/></Application>",
@@ -70,7 +92,7 @@ int main(void)
         "\" id=\"a\"><Region x=\"0\" y=\"0\" width=\"1\" height=\"1\"/><Script xmlns=\"wrong\" "
         "id=\"s\" src=\"x\"/></Application>"};
     size_t i;
-    if (!valid_model() || !limits_work())
+    if (!valid_model() || !optional_ids() || !limits_work())
         return 1;
     for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
         if (!expect_parse(bad[i], HDDVD_EPARSE))
