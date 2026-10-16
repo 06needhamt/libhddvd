@@ -28,7 +28,7 @@ find include src tests tools -type f \( -name '*.c' -o -name '*.h' -o -name '*.c
 ```
 
 Useful CMake options: `HDDVD_BUILD_SHARED` / `HDDVD_BUILD_STATIC` (both ON by default; at
-least one is required), `HDDVD_BUILD_FUZZERS` (Clang only; builds `fuzz-{aca,object,xmf,xmu,script,xpl}`),
+least one is required), `HDDVD_BUILD_FUZZERS` (Clang only; builds `fuzz-{aca,object,xmf,xmu,script,xpl,navigation}`),
 `HDDVD_ENABLE_REFERENCE_TESTS` and `HDDVD_ENABLE_EXTERNAL_MENU_TESTS` (opt-in Python tests that
 read external data from `HDDVD_REFERENCE_ACA` / `HDDVD_EXTERNAL_MENU_CORPUS` and exit 77 =
 skipped when unset; `HDDVD_EXTERNAL_MENU_STRICT=1` also fails on unmodeled XPL constructs).
@@ -83,9 +83,10 @@ Layered, bottom-up (see `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the full desi
    traversal, encoded separators, ambiguous matches, and (POSIX) symlinks.
 4. **ACA archives** (`aca.c`): native `HDDVDACA` reader with strict directory/CRC
    validation; path-based functions are compatibility wrappers over the handle API.
-5. **Object envelopes** (`object.c`): validates and strips the versioned `HDDVDOBJ` object
-   envelope (modelled on the `AACS` envelope observed around real archive members),
-   returning typed payloads. It never attempts decryption;
+5. **Object envelopes** (`object.c`): validates and strips both the synthetic `HDDVDOBJ`
+   envelope and the on-disc `AACS` envelope (283-byte header; clear types `0x02` image and
+   `0x12` text, everything else protected), returning typed payloads. The XML parsers unwrap
+   either via `hddvd_object_unwrap` (`internal.h`). It never attempts decryption;
    protected content goes through an explicit host `hddvd_decrypt_fn` provider or fails
    with `HDDVD_EPROTECTED`. Format notes: `docs/formats/`.
 6. **Immutable XML models** (libxml2): `xpl.c` (playlists/titles/clips/apps), `xmf.c`
@@ -99,8 +100,9 @@ Layered, bottom-up (see `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the full desi
    image decoder). Includes letterbox transforms and hit testing.
 9. **Navigation scheduler** (`player.c`): `hddvd_nav` event queue, timers on title time
    (`hddvd_time`, 90 kHz), discontinuity/seek handling, and host command callbacks.
-10. **Probes** (`evo.c`, `ifo.c`, `map.c`): EVO program-stream probing; IFO/MAP are only
-    conservative probes.
+10. **Probes** (`evo.c`, `ifo.c`, `map.c`): EVO program-stream probing. IFO/MAP headers
+    (identifier, end sector, MAP's VTI name) are validated; their tables are not decoded yet
+    (`docs/formats/ifo-map.md`).
 
 Capability negotiation: hosts call `hddvd_abi_version()` and `hddvd_get_features()`.
 Only set a feature bit when the capability is actually implemented.

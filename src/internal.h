@@ -43,4 +43,9 @@ int hddvd_stream_slice(hddvd_stream *, uint64_t, uint64_t, hddvd_stream **);
 void hddvd_stream_retain(hddvd_stream *);
 void hddvd_ctx_set_error(const hddvd_ctx *, int, hddvd_subsystem, const char *, const char *);
 int hddvd_config_limits_valid(const hddvd_config_limits *);
+/* Strips a recognized envelope whose type is `expected` or clear text.
+   Non-envelope input passes through unchanged with *owned set to NULL;
+   otherwise *owned holds the payload and must be freed by the caller. */
+int hddvd_object_unwrap(const void *, size_t, hddvd_object_type, unsigned char **, const void **,
+                        size_t *);
 #endif

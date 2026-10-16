@@ -133,7 +133,10 @@ static int parse(hddvd_stream *s, const hddvd_limits *limits, hddvd_aca **out)
             }
         pos += ACA_FIXED_ENTRY + nl;
     }
-    if (!first || pos != first)
+    /* Some archives place an unlisted block (an object envelope header in
+       observed media) before each member, so the first member may start
+       after the directory, but never inside it. */
+    if (!first || first < pos)
     {
         rc = HDDVD_EPARSE;
         goto fail;

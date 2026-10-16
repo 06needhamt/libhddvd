@@ -129,6 +129,11 @@ malformed envelopes without copying reference bytes.
 fixtures are deterministic; unknown fields remain named `unknown_N` rather than
 being assigned guessed meanings.
 
+The note now also records the on-disc `AACS` layout observed across 1,647
+objects from five discs. `hddvd_object_open` parses it and the XPL, XMF and XMU
+parsers unwrap it, so real playlists parse; protected types report
+`HDDVD_EPROTECTED`.
+
 ### P2-02 — Add a strict object-envelope parser
 
 **Status:** Complete
@@ -239,9 +244,11 @@ style property, element kind, and unresolved dependency with no hard-coded names
 the library parsers and labels every byte as `structure`, `observed`, or
 `unknown`, failing if the totals do not cover the input. CTest pins the
 accounting for original fixtures, including gaps, trailers, protected payloads,
-and the observed `AACS`/`0x11` prefix. Running it on the four reference scripts
-needs the external archive; their bytes past the prefix stay `unknown` until a
-public specification or independently generated programs exist.
+and the `AACS` envelope. Five real type-`0x11` scripts from other discs account
+as 11 bytes of envelope fields and the rest protected. Running it on the four
+reference scripts still needs the external archive; their protected bytes stay
+`unknown` until a public specification or independently generated programs
+exist.
 
 Create a read-only header/table inspector.  Document facts from public
 specifications or independently generated programs, marking hypotheses clearly.
@@ -418,7 +425,7 @@ all represented in the conformance report.
 
 ### P6-03 — Decode required IFO and MAP navigation structures
 
-**Status:** Blocked on fixture/spec inventory
+**Status:** Headers validated against real files; table decoding blocked on VTI/EVO samples or a specification
 **Depends on:** P1-01, P6-02
 **Likely files:** `src/ifo.c`, `src/map.c`, `tests/test_ifo.c`, `tests/test_map.c`
 
@@ -429,6 +436,13 @@ structure if necessary.
 **Acceptance:** synthetic binary builders exercise every field and endian
 conversion; malformed offsets/counts are rejected; no parser casts input bytes to
 C structs.
+
+First slice: `hddvd_ifo_read_header` and `hddvd_map_read_header` recognize the
+identifiers seen on 141 real files from five discs, require whole 2048-byte
+sectors and an end-sector field that matches the size, and read the VTI name
+each MAP refers to. `docs/formats/ifo-map.md` records the evidence. The supplied
+files include no VTI or EVO files, so nothing yet confirms what the time-map or
+IFO tables point to.
 
 ### P6-04 — Harden EVO packet and stream metadata parsing
 

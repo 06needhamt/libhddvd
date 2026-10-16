@@ -10,7 +10,8 @@ or extracted from the external reference menu.
 * `playlist_full.xpl` exercises every construct the typed XPL model represents.
 * `objects/` and `scripts/` are written by `generate_objects.py`: envelope
   fixtures (valid and single-field corruptions) and clean-room `HDIS` scripts,
-  plus a file carrying only the externally observed `AACS`/`0x11` prefix.
+  plus original objects in the on-disc `AACS` envelope layout (clear text,
+  clear image, and a protected script).
 
 They are seeds for the parser fuzzers and will become direct typed-model fixtures
 when the Phase 3 APIs are introduced.  `test_aca.c` independently constructs its

@@ -84,8 +84,8 @@ jobs:
           CC: clang
         run: cmake -S . -B build -DHDDVD_BUILD_FUZZERS=ON -DBUILD_TESTING=OFF
       - run: cmake --build build --parallel
-      # Replay the synthetic seeds, then a short fixed-seed run for the ACA and
-      # script harnesses, so the job stays deterministic.
+      # Replay the synthetic seeds, then a short fixed-seed run for the
+      # harnesses without seeds, so the job stays deterministic.
       - name: Smoke-run fuzzers
         run: |
           ./build/fuzz-object tests/fixtures/objects/*.hdo
@@ -95,3 +95,4 @@ jobs:
           ./build/fuzz-script tests/fixtures/scripts/*.hdis
           ./build/fuzz-aca -seed=1 -runs=1000
           ./build/fuzz-script -seed=1 -runs=1000
+          ./build/fuzz-navigation -seed=1 -runs=1000

@@ -103,7 +103,7 @@ foreach(tool info menuinfo acainfo acaextract scriptdump scriptinfo xplinfo)
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits)
+    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         # Test assertions also perform setup and must run in Release builds.
@@ -151,7 +151,8 @@ if(BUILD_TESTING)
     set(scriptinfo_cases
         "scripts/minimal.hdis|summary: size=68 structure=68 observed=0 unknown=0"
         "scripts/gapped.hdis|summary: size=101 structure=97 observed=0 unknown=4"
-        "scripts/observed-prefix.bin|summary: size=32 structure=0 observed=5 unknown=27"
+        "scripts/aacs-protected.bin|summary: size=359 structure=9 observed=2 unknown=348"
+        "objects/aacs-text.hdo|summary: size=315 structure=281 observed=6 unknown=28"
         "objects/hdis-script.hdo|summary: size=112 structure=104 observed=0 unknown=8"
         "objects/protected.hdo|summary: size=60 structure=40 observed=0 unknown=20")
     foreach(case IN LISTS scriptinfo_cases)
@@ -200,7 +201,7 @@ if(HDDVD_BUILD_FUZZERS)
     if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
         message(FATAL_ERROR "HDDVD_BUILD_FUZZERS requires Clang and libFuzzer")
     endif()
-    foreach(target aca object xmf xmu script xpl)
+    foreach(target aca object xmf xmu script xpl navigation)
         add_executable(fuzz-${target} tests/fuzz_${target}.c)
         target_link_libraries(fuzz-${target} PRIVATE hddvd)
         target_compile_options(fuzz-${target} PRIVATE

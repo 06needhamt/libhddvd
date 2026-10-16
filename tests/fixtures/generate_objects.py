@@ -29,18 +29,32 @@ def hdis(strings, functions, instructions, gap=b""):
                          instruction_offset)
     return header + string_table + gap + function_table + instruction_table
 
+def aacs(kind, payload, name=None, trailer=b"", bytes_5_6=0x16):
+    """Original envelopes in the AACS layout of docs/formats/aacs-object-envelope.md.
+    Without a name, the header area after byte 11 is filled with a pattern, as
+    protected objects have no readable name there."""
+    if name is None:
+        area = bytes((i * 7 + 1) & 0xff for i in range(11, 283))
+    else:
+        area = name.encode("ascii") + bytes(272 - len(name))
+    header = b"AACS" + bytes([kind]) + struct.pack(">HI", bytes_5_6, len(payload)) + area
+    return header + payload + trailer
+
 minimal_script = hdis([b"main"], [(0, 0, 2)], [(0x20, 0, 0), (0x10, 0, 0)])
 scripts = {
     "minimal.hdis": minimal_script,
     "gapped.hdis": hdis([b"init", b"focus"], [(0, 0, 1), (1, 1, 2)],
                         [(0x20, 0, 1), (0x7f, 0, 0), (0x11, 0, 0)], gap=bytes(4)),
-    # Only the five-byte prefix observed in external media; the rest is zero.
-    "observed-prefix.bin": b"AACS\x11" + bytes(27),
+    # Protected AACS layout: opaque header area, payload, and trailer.
+    "aacs-protected.bin": aacs(0x11, bytes(range(64)), trailer=bytes(12), bytes_5_6=1),
 }
 
 valid = {
     "hdis-script.hdo": envelope(3, minimal_script, "main.hds", b"TAIL"),
     "protected.hdo": envelope(3, b"provider-defined", "locked.hds", flags=1),
+    "aacs-text.hdo": aacs(0x12, b'<Application id="original"/>', "app.xmf.AACS",
+                          bytes(4), bytes_5_6=0),
+    "aacs-image.hdo": aacs(0x02, b"\x89PNG\r\n\x1a\n", "focus.png.AACS", bytes(16)),
     "image.hdo": envelope(4, b"\x89PNG\r\n\x1a\n", "focus.png"),
     "manifest.hdo": envelope(1, b'<Application id="original"/>', "manifest.xmf", b"META"),
     "markup.hdo": envelope(2, b"<root/>", "main.xmu"),

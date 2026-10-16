@@ -67,52 +67,7 @@ static char *copy_xml(const xmlChar *value)
 static int unwrap_input(const void *input, size_t input_size, unsigned char **owned,
                         const void **data, size_t *size)
 {
-    hddvd_object *object;
-    hddvd_stream *payload = NULL;
-    uint64_t payload_size;
-    size_t got = 0;
-    int rc;
-    *owned = NULL;
-    *data = input;
-    *size = input_size;
-    if (input_size < 8 || memcmp(input, "HDDVDOBJ", 8))
-        return HDDVD_OK;
-    rc = hddvd_object_open(input, input_size, &object);
-    if (rc)
-        return rc;
-    if (hddvd_object_get_type(object) != HDDVD_OBJECT_MARKUP)
-        rc = HDDVD_EPARSE;
-    else
-        rc = hddvd_object_open_payload(object, &payload);
-    if (rc)
-    {
-        hddvd_object_close(object);
-        return rc;
-    }
-    payload_size = hddvd_stream_size(payload);
-    if (payload_size > SIZE_MAX || payload_size > (uint64_t)INT_MAX)
-        rc = HDDVD_ELIMIT;
-    else if (payload_size && !(*owned = malloc((size_t)payload_size)))
-        rc = HDDVD_ENOMEM;
-    else
-    {
-        rc = hddvd_stream_read_at(payload, 0, *owned, (size_t)payload_size, &got);
-        if (!rc && got != (size_t)payload_size)
-            rc = HDDVD_EIO;
-        if (!rc)
-        {
-            *data = *owned;
-            *size = (size_t)payload_size;
-        }
-    }
-    hddvd_stream_close(payload);
-    hddvd_object_close(object);
-    if (rc)
-    {
-        free(*owned);
-        *owned = NULL;
-    }
-    return rc;
+    return hddvd_object_unwrap(input, input_size, HDDVD_OBJECT_MARKUP, owned, data, size);
 }
 
 void hddvd_xmu_limits_default(hddvd_xmu_limits *limits)

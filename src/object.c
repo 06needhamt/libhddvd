@@ -5,7 +5,13 @@
 
 #define OBJECT_HEADER_SIZE 32u
 #define OBJECT_PROTECTED 0x01u
+#define AACS_HEADER_SIZE 283u
+#define AACS_NAME_OFFSET 11u
+#define AACS_TYPE_IMAGE 0x02u
+#define AACS_TYPE_SCRIPT 0x11u
+#define AACS_TYPE_TEXT 0x12u
 static const unsigned char object_magic[8] = {'H', 'D', 'D', 'V', 'D', 'O', 'B', 'J'};
+static const unsigned char aacs_magic[4] = {'A', 'A', 'C', 'S'};
 
 struct hddvd_object
 {
@@ -15,6 +21,9 @@ struct hddvd_object
     unsigned char *payload;
     size_t payload_size;
     unsigned char *trailer;
+    hddvd_object_format format;
+    size_t name_offset;
+    size_t name_size;
 };
 
 static uint16_t be16(const unsigned char *p)
@@ -59,20 +68,15 @@ static int copy_bytes(unsigned char **out, const unsigned char *source, size_t s
     return HDDVD_OK;
 }
 
-int hddvd_object_open_with_provider(const void *input, size_t size, hddvd_decrypt_fn decrypt,
-                                    void *opaque, hddvd_object **result)
+/* Validates HDDVDOBJ framing (docs/formats/aacs-object-envelope.md, synthetic
+   layout) and fills the header-derived fields of a new object. */
+static int parse_hddvdobj(const unsigned char *data, size_t size, hddvd_object *object)
 {
-    const unsigned char *data = input;
-    hddvd_object *object;
     uint32_t header_size;
     uint16_t name_size, trailer_size;
     uint64_t payload_size, total;
     size_t i;
-    int rc;
-    if (!input || !result)
-        return HDDVD_EINVAL;
-    *result = NULL;
-    if (size < OBJECT_HEADER_SIZE || memcmp(data, object_magic, sizeof(object_magic)))
+    if (size < OBJECT_HEADER_SIZE)
         return HDDVD_EPARSE;
     if (data[8] != 1 || (data[9] & (UINT8_MAX ^ OBJECT_PROTECTED)))
         return HDDVD_ENOTSUP;
@@ -90,9 +94,7 @@ int hddvd_object_open_with_provider(const void *input, size_t size, hddvd_decryp
     for (i = OBJECT_HEADER_SIZE + name_size; i < header_size; i++)
         if (data[i])
             return HDDVD_EPARSE;
-    object = calloc(1, sizeof(*object));
-    if (!object)
-        return HDDVD_ENOMEM;
+    object->format = HDDVD_OBJECT_FORMAT_HDDVDOBJ;
     object->info.version = data[8];
     object->info.flags = data[9];
     object->info.raw_type = be16(data + 10);
@@ -103,18 +105,101 @@ int hddvd_object_open_with_provider(const void *input, size_t size, hddvd_decryp
     object->info.trailer_offset = (uint64_t)header_size + payload_size;
     object->info.trailer_length = trailer_size;
     object->type = public_type(object->info.raw_type);
-    if (name_size)
+    object->name_offset = OBJECT_HEADER_SIZE;
+    object->name_size = name_size;
+    return HDDVD_OK;
+}
+
+/* Validates the observed AACS layout: a 283-byte header with the type at
+   byte 4 and the big-endian payload length at byte 7, then the payload and a
+   trailer. Only the clear types have a known name area and trailer size. */
+static int parse_aacs(const unsigned char *data, size_t size, hddvd_object *object)
+{
+    const unsigned char *name_end;
+    uint32_t payload_size;
+    size_t trailer_size, i;
+    uint8_t type;
+    if (size < AACS_HEADER_SIZE)
+        return HDDVD_EPARSE;
+    type = data[4];
+    payload_size = be32(data + 7);
+    if (payload_size > size - AACS_HEADER_SIZE)
+        return HDDVD_EPARSE;
+    trailer_size = size - AACS_HEADER_SIZE - payload_size;
+    if (trailer_size > UINT32_MAX)
+        return HDDVD_ELIMIT;
+    if (type == AACS_TYPE_IMAGE || type == AACS_TYPE_TEXT)
     {
-        object->name = malloc((size_t)name_size + 1);
-        if (!object->name)
-        {
-            hddvd_object_close(object);
-            return HDDVD_ENOMEM;
-        }
-        memcpy(object->name, data + OBJECT_HEADER_SIZE, name_size);
-        object->name[name_size] = 0;
+        if (trailer_size != (type == AACS_TYPE_IMAGE ? 16u : 4u))
+            return HDDVD_EPARSE;
+        name_end = memchr(data + AACS_NAME_OFFSET, 0, AACS_HEADER_SIZE - AACS_NAME_OFFSET);
+        if (!name_end || name_end == data + AACS_NAME_OFFSET)
+            return HDDVD_EPARSE;
+        for (i = AACS_NAME_OFFSET; data + i < name_end; i++)
+            if (data[i] < 0x20 || data[i] > 0x7e)
+                return HDDVD_EPARSE;
+        for (i = (size_t)(name_end - data); i < AACS_HEADER_SIZE; i++)
+            if (data[i])
+                return HDDVD_EPARSE;
+        object->name_offset = AACS_NAME_OFFSET;
+        object->name_size = (size_t)(name_end - data) - AACS_NAME_OFFSET;
+        object->type = type == AACS_TYPE_IMAGE ? HDDVD_OBJECT_IMAGE : HDDVD_OBJECT_TEXT;
     }
-    if (data[9] & OBJECT_PROTECTED)
+    else
+    {
+        object->info.flags = OBJECT_PROTECTED;
+        object->type = type == AACS_TYPE_SCRIPT ? HDDVD_OBJECT_SCRIPT : HDDVD_OBJECT_UNKNOWN;
+    }
+    object->format = HDDVD_OBJECT_FORMAT_AACS;
+    object->info.raw_type = type;
+    object->info.unknown_1 = be16(data + 5);
+    object->info.declared_length = size;
+    object->info.payload_offset = AACS_HEADER_SIZE;
+    object->info.payload_length = payload_size;
+    object->info.trailer_offset = (uint64_t)AACS_HEADER_SIZE + payload_size;
+    object->info.trailer_length = (uint32_t)trailer_size;
+    return HDDVD_OK;
+}
+
+int hddvd_object_is_envelope(const void *input, size_t size)
+{
+    return input && ((size >= sizeof(object_magic) && !memcmp(input, object_magic, 8)) ||
+                     (size >= sizeof(aacs_magic) && !memcmp(input, aacs_magic, 4)));
+}
+
+int hddvd_object_open_with_provider(const void *input, size_t size, hddvd_decrypt_fn decrypt,
+                                    void *opaque, hddvd_object **result)
+{
+    const unsigned char *data = input;
+    hddvd_object *object;
+    int rc;
+    if (!input || !result)
+        return HDDVD_EINVAL;
+    *result = NULL;
+    if (!hddvd_object_is_envelope(input, size))
+        return HDDVD_EPARSE;
+    object = calloc(1, sizeof(*object));
+    if (!object)
+        return HDDVD_ENOMEM;
+    rc = !memcmp(data, aacs_magic, sizeof(aacs_magic)) ? parse_aacs(data, size, object)
+                                                       : parse_hddvdobj(data, size, object);
+    if (!rc && object->name_size)
+    {
+        object->name = malloc(object->name_size + 1);
+        if (!object->name)
+            rc = HDDVD_ENOMEM;
+        else
+        {
+            memcpy(object->name, data + object->name_offset, object->name_size);
+            object->name[object->name_size] = 0;
+        }
+    }
+    if (rc)
+    {
+        hddvd_object_close(object);
+        return rc;
+    }
+    if (object->info.flags & OBJECT_PROTECTED)
     {
         void *clear = NULL;
         size_t clear_size = 0;
@@ -123,8 +208,8 @@ int hddvd_object_open_with_provider(const void *input, size_t size, hddvd_decryp
             hddvd_object_close(object);
             return HDDVD_EPROTECTED;
         }
-        rc = decrypt(opaque, &object->info, data + header_size, (size_t)payload_size, &clear,
-                     &clear_size);
+        rc = decrypt(opaque, &object->info, data + object->info.payload_offset,
+                     (size_t)object->info.payload_length, &clear, &clear_size);
         if (rc || (!clear && clear_size))
         {
             free(clear);
@@ -136,15 +221,16 @@ int hddvd_object_open_with_provider(const void *input, size_t size, hddvd_decryp
     }
     else
     {
-        object->payload_size = (size_t)payload_size;
-        rc = copy_bytes(&object->payload, data + header_size, object->payload_size);
+        object->payload_size = (size_t)object->info.payload_length;
+        rc = copy_bytes(&object->payload, data + object->info.payload_offset, object->payload_size);
         if (rc)
         {
             hddvd_object_close(object);
             return rc;
         }
     }
-    rc = copy_bytes(&object->trailer, data + object->info.trailer_offset, trailer_size);
+    rc = copy_bytes(&object->trailer, data + object->info.trailer_offset,
+                    object->info.trailer_length);
     if (rc)
     {
         hddvd_object_close(object);
@@ -229,6 +315,10 @@ int hddvd_object_open_payload(const hddvd_object *object, hddvd_stream **stream)
                ? hddvd_stream_open_memory(object->payload, object->payload_size, stream)
                : HDDVD_EINVAL;
 }
+hddvd_object_format hddvd_object_get_format(const hddvd_object *object)
+{
+    return object ? object->format : HDDVD_OBJECT_FORMAT_NONE;
+}
 int hddvd_object_get_trailer(const hddvd_object *object, const void **data, size_t *size)
 {
     if (!object || !data || !size)
@@ -236,4 +326,33 @@ int hddvd_object_get_trailer(const hddvd_object *object, const void **data, size
     *data = object->trailer;
     *size = object->info.trailer_length;
     return HDDVD_OK;
+}
+
+int hddvd_object_unwrap(const void *input, size_t input_size, hddvd_object_type expected,
+                        unsigned char **owned, const void **data, size_t *size)
+{
+    hddvd_object *object = NULL;
+    int rc;
+    *owned = NULL;
+    *data = input;
+    *size = input_size;
+    if (!hddvd_object_is_envelope(input, input_size))
+        return HDDVD_OK;
+    rc = hddvd_object_open(input, input_size, &object);
+    if (rc)
+        return rc;
+    if (object->type != expected && object->type != HDDVD_OBJECT_TEXT)
+        rc = HDDVD_EPARSE;
+    else if (object->payload_size > (size_t)INT_MAX)
+        rc = HDDVD_ELIMIT;
+    else
+    {
+        /* Take ownership of the payload copy instead of copying it again. */
+        *owned = object->payload;
+        object->payload = NULL;
+        *data = *owned;
+        *size = object->payload_size;
+    }
+    hddvd_object_close(object);
+    return rc;
 }

@@ -56,6 +56,105 @@ static int decrypt(void *opaque, const hddvd_object_info *info, const void *in, 
     return HDDVD_OK;
 }
 
+/* Original AACS-layout envelope: 283-byte header (type at 4, bytes 5-6,
+   big-endian payload length at 7, name from 11), payload, then trailer. */
+static size_t make_aacs(unsigned char *b, uint8_t type, const char *name, const char *payload,
+                        size_t trailer)
+{
+    size_t length = strlen(payload), i;
+    memset(b, 0, 283 + length + trailer);
+    memcpy(b, "AACS", 4);
+    b[4] = type;
+    b[6] = 0x16;
+    put32(b + 7, (uint32_t)length);
+    if (name)
+        memcpy(b + 11, name, strlen(name));
+    else
+        for (i = 11; i < 283; i++)
+            b[i] = (unsigned char)(i * 7 + 1);
+    memcpy(b + 283, payload, length);
+    for (i = 0; i < trailer; i++)
+        b[283 + length + i] = (unsigned char)(0xa0 + i);
+    return 283 + length + trailer;
+}
+
+static int test_aacs(void)
+{
+    unsigned char bytes[400], corrupt[400];
+    size_t size, got;
+    hddvd_object *object = NULL;
+    hddvd_object_info info;
+    hddvd_stream *payload = NULL;
+    const void *trailer;
+    size_t trailer_size;
+    char text[8];
+
+    size = make_aacs(bytes, 0x12, "main.xmf.AACS", "<a/>", 4);
+    if (!hddvd_object_is_envelope(bytes, size) || hddvd_object_is_envelope("AAC", 3) ||
+        hddvd_object_open(bytes, size, &object) ||
+        hddvd_object_get_format(object) != HDDVD_OBJECT_FORMAT_AACS ||
+        hddvd_object_get_type(object) != HDDVD_OBJECT_TEXT ||
+        strcmp(hddvd_object_name(object), "main.xmf.AACS") ||
+        hddvd_object_get_info(object, &info) || info.raw_type != 0x12 || info.version != 0 ||
+        info.unknown_1 != 0x16 || info.payload_offset != 283 || info.payload_length != 4 ||
+        info.trailer_offset != 287 || info.flags != 0 ||
+        hddvd_object_get_trailer(object, &trailer, &trailer_size) || trailer_size != 4 ||
+        ((const unsigned char *)trailer)[3] != 0xa3 ||
+        hddvd_object_open_payload(object, &payload) ||
+        hddvd_stream_read_at(payload, 0, text, sizeof(text), &got) || got != 4 ||
+        memcmp(text, "<a/>", 4))
+        return 20;
+    hddvd_stream_close(payload);
+    hddvd_object_close(object);
+
+    size = make_aacs(bytes, 0x02, "focus.png.AACS", "\x89PNG", 16);
+    if (hddvd_object_open(bytes, size, &object) ||
+        hddvd_object_get_type(object) != HDDVD_OBJECT_IMAGE)
+        return 21;
+    hddvd_object_close(object);
+
+    /* Clear types have a known trailer size, name, and zero padding. */
+    size = make_aacs(bytes, 0x12, "x.AACS", "<a/>", 5);
+    if (hddvd_object_open(bytes, size, &object) != HDDVD_EPARSE)
+        return 22;
+    size = make_aacs(bytes, 0x02, "x.AACS", "\x89PNG", 4);
+    if (hddvd_object_open(bytes, size, &object) != HDDVD_EPARSE)
+        return 23;
+    size = make_aacs(bytes, 0x12, "x.AACS", "<a/>", 4);
+    memcpy(corrupt, bytes, size);
+    corrupt[200] = 1;
+    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE)
+        return 24;
+    memcpy(corrupt, bytes, size);
+    corrupt[11] = 0;
+    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE)
+        return 25;
+    memcpy(corrupt, bytes, size);
+    corrupt[12] = '\n';
+    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE)
+        return 26;
+    memcpy(corrupt, bytes, size);
+    put32(corrupt + 7, (uint32_t)size);
+    if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE)
+        return 27;
+    if (hddvd_object_open(bytes, 282, &object) != HDDVD_EPARSE)
+        return 28;
+
+    /* Other types are opaque and protected, with any trailer size. */
+    size = make_aacs(bytes, 0x11, NULL, "opaque!", 9);
+    if (hddvd_object_open(bytes, size, &object) != HDDVD_EPROTECTED)
+        return 29;
+    if (hddvd_object_open_with_provider(bytes, size, decrypt, NULL, &object) ||
+        hddvd_object_get_type(object) != HDDVD_OBJECT_SCRIPT || hddvd_object_name(object) ||
+        hddvd_object_get_info(object, &info) || !(info.flags & 1) || info.trailer_length != 9)
+        return 30;
+    hddvd_object_close(object);
+    size = make_aacs(bytes, 0x7f, NULL, "opaque!", 0);
+    if (hddvd_object_open(bytes, size, &object) != HDDVD_EPROTECTED)
+        return 31;
+    return 0;
+}
+
 int main(void)
 {
     unsigned char bytes[64], corrupt[64], data[7];
@@ -117,5 +216,7 @@ int main(void)
     if (hddvd_object_open_unwrapped(HDDVD_OBJECT_MARKUP, "x", 1, &object))
         return 6;
     hddvd_object_close(object);
-    return 0;
+    if (hddvd_object_get_format(NULL) != HDDVD_OBJECT_FORMAT_NONE)
+        return 12;
+    return test_aacs();
 }
