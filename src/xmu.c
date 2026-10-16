@@ -183,6 +183,17 @@ static int append_node(hddvd_xmu *xmu, xmlNodePtr source, size_t parent, size_t 
     return HDDVD_OK;
 }
 
+/* Elements under <head> (for example timing animation templates) describe
+   later state changes, so they do not set the initial focus. */
+static int in_head(const hddvd_xmu *xmu, size_t index)
+{
+    for (index = xmu->nodes[index].parent; index != SIZE_MAX; index = xmu->nodes[index].parent)
+        if (!strcmp(xmu->nodes[index].name, "head") && xmu->nodes[index].namespace_uri &&
+            !strcmp(xmu->nodes[index].namespace_uri, XMU_NS))
+            return 1;
+    return 0;
+}
+
 static int index_model(hddvd_xmu *xmu)
 {
     size_t i, j;
@@ -214,7 +225,7 @@ static int index_model(hddvd_xmu *xmu)
         {
             struct xmu_attribute *a = &xmu->attributes[node->first_attribute + j];
             if (a->namespace_uri && !strcmp(a->namespace_uri, XMU_STATE_NS) &&
-                !strcmp(a->name, "focused") && !strcmp(a->value, "true"))
+                !strcmp(a->name, "focused") && !strcmp(a->value, "true") && !in_head(xmu, i))
             {
                 if (xmu->initial_focus != SIZE_MAX)
                     return HDDVD_EPARSE;
@@ -260,8 +271,12 @@ int hddvd_xmu_open_with_limits(const void *data, size_t size, const hddvd_xmu_li
     if (!document)
         return HDDVD_EPARSE;
     root = xmlDocGetRootElement(document);
-    if (!root || xmlStrcmp(root->name, (const xmlChar *)"root") || !root->ns ||
-        xmlStrcmp(root->ns->href, (const xmlChar *)XMU_NS))
+    /* A complete document has <root>; markup fragments observed on disc have
+       a <div> root instead. */
+    if (!root ||
+        (xmlStrcmp(root->name, (const xmlChar *)"root") &&
+         xmlStrcmp(root->name, (const xmlChar *)"div")) ||
+        !root->ns || xmlStrcmp(root->ns->href, (const xmlChar *)XMU_NS))
     {
         xmlFreeDoc(document);
         return HDDVD_EPARSE;

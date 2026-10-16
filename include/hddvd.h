@@ -826,9 +826,11 @@ HDDVD_API int hddvd_xmf_open_with_limits(const void *, size_t, const hddvd_xmf_l
 HDDVD_API int hddvd_xmf_open_with_config(const void *, size_t, const hddvd_config_limits *,
                                          hddvd_xmf **);
 HDDVD_API void hddvd_xmf_close(hddvd_xmf *);
+/* NULL when the Application element has no id, as on most observed discs. */
 HDDVD_API const char *hddvd_xmf_application_id(const hddvd_xmf *);
 HDDVD_API int hddvd_xmf_get_region(const hddvd_xmf *, hddvd_xmf_region *);
 HDDVD_API size_t hddvd_xmf_script_count(const hddvd_xmf *);
+/* Script and markup references return (id, src); id is NULL when absent. */
 HDDVD_API int hddvd_xmf_get_script(const hddvd_xmf *, size_t, const char **, const char **);
 HDDVD_API size_t hddvd_xmf_markup_count(const hddvd_xmf *);
 HDDVD_API int hddvd_xmf_get_markup(const hddvd_xmf *, size_t, const char **, const char **);
@@ -883,6 +885,9 @@ HDDVD_API size_t hddvd_xmu_node_count(const hddvd_xmu *);
 HDDVD_API int hddvd_xmu_get_node(const hddvd_xmu *, size_t, hddvd_xmu_node *);
 HDDVD_API int hddvd_xmu_get_attribute(const hddvd_xmu *, size_t, size_t, hddvd_xmu_attribute *);
 HDDVD_API size_t hddvd_xmu_find_id(const hddvd_xmu *, const char *);
+/* The root is <root> for a document or <div> for a markup fragment. The
+   initial focus is the one element outside <head> with state:focused="true",
+   or SIZE_MAX when there is none; two such elements are rejected. */
 HDDVD_API size_t hddvd_xmu_initial_focus(const hddvd_xmu *);
 HDDVD_API const char *hddvd_xmu_clock(const hddvd_xmu *);
 /* Style models borrow the XMU model, which must outlive them. The specified

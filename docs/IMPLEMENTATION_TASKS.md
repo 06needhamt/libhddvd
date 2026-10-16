@@ -204,6 +204,13 @@ duplicate ids, excessive depth, and excessive node/attribute counts.
 **Acceptance:** the synthetic markup tree and initial focused state are queryable;
 forward id references work; depth/count limits are tested and fuzzed.
 
+Real discs showed three relaxations, each now covered by synthetic tests:
+manifests usually omit the application id and give script and markup
+references only a `src` (ids, when present, must be non-empty and unique);
+`state:focused` on timing templates under `<head>` is not the initial focus;
+and markup fragments use a `<div>` root. All 91 manifest and markup files from
+five externally supplied discs now parse.
+
 ### P3-03 — Parse and compute styles
 
 **Status:** Complete
