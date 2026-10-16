@@ -29,7 +29,25 @@ struct hddvd_xmu_styles
     struct style_value *computed;
     size_t *z_order;
     size_t count;
+    int fragment;
 };
+
+/* Animation keyframes inside <timing> are not static style declarations. */
+static int in_timing(const hddvd_xmu *xmu, size_t index)
+{
+    hddvd_xmu_node node;
+    if (hddvd_xmu_get_node(xmu, index, &node))
+        return 0;
+    while (node.parent != SIZE_MAX)
+    {
+        index = node.parent;
+        if (hddvd_xmu_get_node(xmu, index, &node))
+            return 0;
+        if (!strcmp(node.name, "timing"))
+            return 1;
+    }
+    return 0;
+}
 
 static void value_init(struct style_value *value)
 {
@@ -79,6 +97,30 @@ static int parse_signed(const char *text, int pixels, int32_t *result)
         return HDDVD_EPARSE;
     *result = (int32_t)value;
     return HDDVD_OK;
+}
+
+static int parse_unsigned_pixels(const char *text, uint32_t *result);
+
+/* A whole, non-negative percentage such as "100%". */
+static int parse_percent(const char *text, uint32_t *result)
+{
+    char *end;
+    unsigned long value;
+    if (*text < '0' || *text > '9')
+        return HDDVD_EPARSE;
+    errno = 0;
+    value = strtoul(text, &end, 10);
+    if (errno || strcmp(end, "%") || value > UINT32_MAX)
+        return HDDVD_EPARSE;
+    *result = (uint32_t)value;
+    return HDDVD_OK;
+}
+
+static int parse_length(const char *text, uint32_t *result, int *percent)
+{
+    size_t length = strlen(text);
+    *percent = length && text[length - 1] == '%';
+    return *percent ? parse_percent(text, result) : parse_unsigned_pixels(text, result);
 }
 
 static int parse_unsigned_pixels(const char *text, uint32_t *result)
@@ -136,9 +178,14 @@ static int set_nav(struct style_value *style, enum nav_direction direction, cons
     if (!*value)
         return HDDVD_EPARSE;
     free(style->nav_ids[direction]);
-    style->nav_ids[direction] = duplicate_range(value, strlen(value));
-    if (!style->nav_ids[direction])
-        return HDDVD_ENOMEM;
+    style->nav_ids[direction] = NULL;
+    /* "none" explicitly removes navigation, overriding referenced styles. */
+    if (strcmp(value, "none"))
+    {
+        style->nav_ids[direction] = duplicate_range(value, strlen(value));
+        if (!style->nav_ids[direction])
+            return HDDVD_ENOMEM;
+    }
     style->public_value.properties |= property;
     return HDDVD_OK;
 }
@@ -162,16 +209,28 @@ static int parse_property(struct style_value *style, const char *name, const cha
     }
     if (!strcmp(name, "width"))
     {
-        rc = parse_unsigned_pixels(value, &style->public_value.width);
+        int percent;
+        rc = parse_length(value, &style->public_value.width, &percent);
         if (!rc)
-            style->public_value.properties |= HDDVD_XMU_STYLE_WIDTH;
+        {
+            style->public_value.properties &=
+                ~(uint32_t)(HDDVD_XMU_STYLE_WIDTH | HDDVD_XMU_STYLE_WIDTH_PERCENT);
+            style->public_value.properties |=
+                percent ? HDDVD_XMU_STYLE_WIDTH_PERCENT : HDDVD_XMU_STYLE_WIDTH;
+        }
         return rc;
     }
     if (!strcmp(name, "height"))
     {
-        rc = parse_unsigned_pixels(value, &style->public_value.height);
+        int percent;
+        rc = parse_length(value, &style->public_value.height, &percent);
         if (!rc)
-            style->public_value.properties |= HDDVD_XMU_STYLE_HEIGHT;
+        {
+            style->public_value.properties &=
+                ~(uint32_t)(HDDVD_XMU_STYLE_HEIGHT | HDDVD_XMU_STYLE_HEIGHT_PERCENT);
+            style->public_value.properties |=
+                percent ? HDDVD_XMU_STYLE_HEIGHT_PERCENT : HDDVD_XMU_STYLE_HEIGHT;
+        }
         return rc;
     }
     if (!strcmp(name, "zIndex"))
@@ -187,6 +246,8 @@ static int parse_property(struct style_value *style, const char *name, const cha
             style->public_value.display = HDDVD_XMU_DISPLAY_NONE;
         else if (!strcmp(value, "block"))
             style->public_value.display = HDDVD_XMU_DISPLAY_BLOCK;
+        else if (!strcmp(value, "auto"))
+            style->public_value.display = HDDVD_XMU_DISPLAY_AUTO;
         else
             return HDDVD_EPARSE;
         style->public_value.properties |= HDDVD_XMU_STYLE_DISPLAY;
@@ -194,9 +255,9 @@ static int parse_property(struct style_value *style, const char *name, const cha
     }
     if (!strcmp(name, "position"))
     {
-        if (strcmp(value, "absolute"))
+        if (strcmp(value, "absolute") && strcmp(value, "relative"))
             return HDDVD_EPARSE;
-        style->public_value.position_absolute = 1;
+        style->public_value.position_absolute = !strcmp(value, "absolute");
         style->public_value.properties |= HDDVD_XMU_STYLE_POSITION;
         return HDDVD_OK;
     }
@@ -215,6 +276,9 @@ static int parse_property(struct style_value *style, const char *name, const cha
     }
     if (!strcmp(name, "contentWidth") || !strcmp(name, "contentHeight"))
     {
+        uint32_t percent;
+        if (parse_percent(value, &percent) == HDDVD_OK)
+            return HDDVD_OK;
         if (strcmp(value, "scale-to-fit"))
             return HDDVD_EPARSE;
         style->public_value.scale_to_fit = 1;
@@ -284,8 +348,19 @@ static int overlay(struct style_value *target, const struct style_value *source)
     } while (0)
     COPY_PROPERTY(HDDVD_XMU_STYLE_X, x);
     COPY_PROPERTY(HDDVD_XMU_STYLE_Y, y);
-    COPY_PROPERTY(HDDVD_XMU_STYLE_WIDTH, width);
-    COPY_PROPERTY(HDDVD_XMU_STYLE_HEIGHT, height);
+    /* Pixel and percentage lengths replace each other. */
+    if (p & (HDDVD_XMU_STYLE_WIDTH | HDDVD_XMU_STYLE_WIDTH_PERCENT))
+    {
+        target->public_value.width = source->public_value.width;
+        target->public_value.properties &=
+            ~(uint32_t)(HDDVD_XMU_STYLE_WIDTH | HDDVD_XMU_STYLE_WIDTH_PERCENT);
+    }
+    if (p & (HDDVD_XMU_STYLE_HEIGHT | HDDVD_XMU_STYLE_HEIGHT_PERCENT))
+    {
+        target->public_value.height = source->public_value.height;
+        target->public_value.properties &=
+            ~(uint32_t)(HDDVD_XMU_STYLE_HEIGHT | HDDVD_XMU_STYLE_HEIGHT_PERCENT);
+    }
     COPY_PROPERTY(HDDVD_XMU_STYLE_DISPLAY, display);
     COPY_PROPERTY(HDDVD_XMU_STYLE_Z_INDEX, z_index);
     COPY_PROPERTY(HDDVD_XMU_STYLE_SCALE_TO_FIT, scale_to_fit);
@@ -316,6 +391,9 @@ static int overlay(struct style_value *target, const struct style_value *source)
         if (!(p & bit))
             continue;
         free(target->nav_ids[i]);
+        target->nav_ids[i] = NULL;
+        if (!source->nav_ids[i])
+            continue;
         target->nav_ids[i] = duplicate_range(source->nav_ids[i], strlen(source->nav_ids[i]));
         if (!target->nav_ids[i])
             return HDDVD_ENOMEM;
@@ -354,6 +432,8 @@ static int apply_references(hddvd_xmu_styles *styles, size_t node_index, struct 
             return HDDVD_ENOMEM;
         referenced = hddvd_xmu_find_id(styles->xmu, id);
         free(id);
+        if (referenced == SIZE_MAX && styles->fragment)
+            continue;
         if (referenced == SIZE_MAX ||
             hddvd_xmu_get_node(styles->xmu, referenced, &referenced_node) ||
             strcmp(referenced_node.name, "style"))
@@ -379,8 +459,6 @@ static int resolve_navigation(hddvd_xmu_styles *styles, struct style_value *valu
         if (!value->nav_ids[i])
             continue;
         *destinations[i] = hddvd_xmu_find_id(styles->xmu, value->nav_ids[i]);
-        if (*destinations[i] == SIZE_MAX)
-            return HDDVD_EPARSE;
     }
     return HDDVD_OK;
 }
@@ -423,15 +501,23 @@ int hddvd_xmu_styles_open(const hddvd_xmu *xmu, hddvd_xmu_styles **result)
     if ((styles->count &&
          (!styles->specified || !styles->computed || !styles->z_order || !visiting)))
         rc = HDDVD_ENOMEM;
+    if (!rc && styles->count)
+    {
+        hddvd_xmu_node root;
+        styles->fragment = !hddvd_xmu_get_node(xmu, 0, &root) && !strcmp(root.name, "div");
+    }
     for (i = 0; !rc && i < styles->count; i++)
     {
         value_init(&styles->specified[i]);
         value_init(&styles->computed[i]);
-        rc = parse_direct(xmu, i, &styles->specified[i]);
+        if (!in_timing(xmu, i))
+            rc = parse_direct(xmu, i, &styles->specified[i]);
         styles->z_order[i] = i;
     }
     for (i = 0; !rc && i < styles->count; i++)
     {
+        if (in_timing(xmu, i))
+            continue;
         rc = apply_references(styles, i, &styles->computed[i], visiting);
         if (!rc)
             rc = overlay(&styles->computed[i], &styles->specified[i]);

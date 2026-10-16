@@ -100,21 +100,73 @@ static int rejected(const char *body)
     return rc == HDDVD_EPARSE;
 }
 
+/* Constructs observed on real discs: display auto, percentage sizes, relative
+   position, nav "none" and dangling nav targets, timing keyframes, and
+   fragments that reference styles defined elsewhere. */
+static int observed_constructs(void)
+{
+    char xml[2048];
+    hddvd_xmu *xmu = NULL;
+    hddvd_xmu_styles *styles = NULL;
+    hddvd_xmu_style style;
+    size_t box, button, keyframe;
+    int ok;
+    snprintf(xml, sizeof(xml),
+             "<root xmlns=\"%s\" xmlns:s=\"%s\"><head><styling>"
+             "<style id=\"base\" s:width=\"10px\" s:navLeft=\"box\"/></styling>"
+             "<timing><animate id=\"k\" s:x=\"1px;-2px\" s:display=\"auto\"/></timing></head>"
+             "<body><div id=\"box\" style=\"base\" s:width=\"100%%\" s:height=\"5px\" "
+             "s:display=\"auto\" s:contentWidth=\"100%%\"/>"
+             "<button id=\"b\" style=\"base\" s:position=\"relative\" s:navLeft=\"none\" "
+             "s:navRight=\"createdLater\"/></body></root>",
+             NS, STYLE);
+    ok = open_styles(xml, &xmu, &styles) == HDDVD_OK;
+    box = hddvd_xmu_find_id(xmu, "box");
+    button = hddvd_xmu_find_id(xmu, "b");
+    keyframe = hddvd_xmu_find_id(xmu, "k");
+    ok = ok && hddvd_xmu_get_computed_style(styles, box, &style) == HDDVD_OK &&
+         (style.properties & HDDVD_XMU_STYLE_WIDTH_PERCENT) &&
+         !(style.properties & HDDVD_XMU_STYLE_WIDTH) && style.width == 100 &&
+         (style.properties & HDDVD_XMU_STYLE_HEIGHT) && style.height == 5 &&
+         style.display == HDDVD_XMU_DISPLAY_AUTO;
+    ok = ok && hddvd_xmu_get_computed_style(styles, button, &style) == HDDVD_OK &&
+         (style.properties & HDDVD_XMU_STYLE_WIDTH) && style.width == 10 &&
+         (style.properties & HDDVD_XMU_STYLE_POSITION) && !style.position_absolute &&
+         (style.properties & HDDVD_XMU_STYLE_NAV_LEFT) && style.nav_left == SIZE_MAX &&
+         style.nav_right == SIZE_MAX;
+    ok = ok && hddvd_xmu_get_specified_style(styles, keyframe, &style) == HDDVD_OK &&
+         style.properties == 0;
+    hddvd_xmu_styles_close(styles);
+    hddvd_xmu_close(xmu);
+    styles = NULL;
+    xmu = NULL;
+    snprintf(xml, sizeof(xml),
+             "<div xmlns=\"%s\" xmlns:s=\"%s\"><div id=\"d\" style=\"definedByHost\" "
+             "s:x=\"3px\"/></div>",
+             NS, STYLE);
+    ok = ok && open_styles(xml, &xmu, &styles) == HDDVD_OK &&
+         hddvd_xmu_get_computed_style(styles, hddvd_xmu_find_id(xmu, "d"), &style) == HDDVD_OK &&
+         style.x == 3;
+    hddvd_xmu_styles_close(styles);
+    hddvd_xmu_close(xmu);
+    return ok;
+}
+
 int main(void)
 {
     const char *bad[] = {"<body><div s:x=\"1em\"/></body>",
                          "<body><div s:width=\"-1px\"/></body>",
                          "<body><div s:zIndex=\"2147483648\"/></body>",
                          "<body><div s:display=\"inline\"/></body>",
-                         "<body><div s:position=\"relative\"/></body>",
+                         "<body><div s:position=\"fixed\"/></body>",
+                         "<body><div s:width=\"50.5%\"/></body>",
                          "<body><div s:backgroundImage=\"url(no-quotes)\"/></body>",
                          "<body><div style=\"missing\"/></body>",
                          "<body><div id=\"notStyle\"/><div style=\"notStyle\"/></body>",
                          "<head><styling><style id=\"a\" style=\"b\"/><style id=\"b\" style=\"a\"/>"
-                         "</styling></head>",
-                         "<body><button id=\"a\" s:navLeft=\"missing\"/></body>"};
+                         "</styling></head>"};
     size_t i;
-    if (!model_works() || !fixture_works())
+    if (!model_works() || !fixture_works() || !observed_constructs())
         return 1;
     for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
         if (!rejected(bad[i]))
