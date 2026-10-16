@@ -129,6 +129,11 @@ malformed envelopes without copying reference bytes.
 fixtures are deterministic; unknown fields remain named `unknown_N` rather than
 being assigned guessed meanings.
 
+The note now also records the on-disc `AACS` layout observed across 1,647
+objects from five discs. `hddvd_object_open` parses it and the XPL, XMF and XMU
+parsers unwrap it, so real playlists parse; protected types report
+`HDDVD_EPROTECTED`.
+
 ### P2-02 — Add a strict object-envelope parser
 
 **Status:** Complete
@@ -239,9 +244,11 @@ style property, element kind, and unresolved dependency with no hard-coded names
 the library parsers and labels every byte as `structure`, `observed`, or
 `unknown`, failing if the totals do not cover the input. CTest pins the
 accounting for original fixtures, including gaps, trailers, protected payloads,
-and the observed `AACS`/`0x11` prefix. Running it on the four reference scripts
-needs the external archive; their bytes past the prefix stay `unknown` until a
-public specification or independently generated programs exist.
+and the `AACS` envelope. Five real type-`0x11` scripts from other discs account
+as 11 bytes of envelope fields and the rest protected. Running it on the four
+reference scripts still needs the external archive; their protected bytes stay
+`unknown` until a public specification or independently generated programs
+exist.
 
 Create a read-only header/table inspector.  Document facts from public
 specifications or independently generated programs, marking hypotheses clearly.

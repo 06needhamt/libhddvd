@@ -35,9 +35,9 @@ format support therefore remain separate capabilities.
 offset order, as one of:
 
 * `structure`: a field of a format documented in this directory and validated
-  by the library (the `HDDVDOBJ` envelope or the layout above);
-* `observed`: bytes seen in external media whose meaning is not established
-  (currently only the `AACS` prefix and the `0x11` byte after it); and
+  by the library (the `HDDVDOBJ` or `AACS` envelope, or the layout above);
+* `observed`: fields with a consistent size in external media but no
+  established meaning (`AACS` bytes 5-6 and clear-type trailers); and
 * `unknown`: everything else, including envelope `unknown_1`, protected or
   non-script payloads, trailers, and unreferenced gaps between tables.
 
@@ -48,8 +48,10 @@ scripts are rejected by the library parsers before anything is labelled.
 
 For the external reference archive, extract the four type-`0x11` members with
 `hddvd-acaextract` to a directory outside the repository and run the tool on
-each. Until a public specification or independently generated programs exist,
-their bytes after the five-byte prefix are expected to be `unknown`; that
-result is the P4-01 inventory, not a gap in the tool. The synthetic fixtures in
+each. Type `0x11` objects are protected, so everything except the magic, type,
+bytes 5-6 and length (11 bytes) is expected to be `unknown` until a public
+specification or independently generated programs exist; that result is the
+P4-01 inventory, not a gap in the tool. Five type-`0x11` scripts from other
+discs (565 to 45,525 bytes) already account this way. The synthetic fixtures in
 `tests/fixtures/scripts` and `tests/fixtures/objects/hdis-script.hdo` pin the
 accounting in CTest.

@@ -11,12 +11,19 @@
 #define XPL_MAX_NODES 32768u
 #define XPL_MAX_ITEMS 8192u
 
+struct xpl_resource
+{
+    hddvd_xpl_application_resource value;
+    /* Discs use both booleans and small integers here; see the header. */
+    uint64_t multiplexed;
+};
+
 struct xpl_application
 {
     hddvd_xpl_application value;
     hddvd_xpl_time loading_begin;
     uint8_t has_loading_begin;
-    hddvd_xpl_application_resource *resources;
+    struct xpl_resource *resources;
     size_t resource_count;
 };
 
@@ -379,7 +386,7 @@ static void free_application(struct xpl_application *application)
     free((char *)application->value.language);
     free((char *)application->value.description);
     for (i = 0; i < application->resource_count; i++)
-        free((char *)application->resources[i].src);
+        free((char *)application->resources[i].value.src);
     free(application->resources);
 }
 
@@ -674,20 +681,30 @@ static int parse_track(xmlNodePtr node, hddvd_xpl *xpl, struct xpl_title *title)
 
 static int parse_resource(xmlNodePtr node, hddvd_xpl *xpl, struct xpl_application *application)
 {
-    hddvd_xpl_application_resource resource;
+    struct xpl_resource resource;
+    char *multiplexed;
     int rc;
     memset(&resource, 0, sizeof(resource));
-    resource.src = dup_prop(node, "src");
-    if (!resource.src)
+    resource.value.src = dup_prop(node, "src");
+    if (!resource.value.src)
         return HDDVD_EPARSE;
-    rc = uint_prop(node, "size", &resource.size, &resource.has_size);
-    if (!rc)
-        rc = bool_prop(node, "multiplexed", &resource.multiplexed);
+    rc = uint_prop(node, "size", &resource.value.size, &resource.value.has_size);
+    multiplexed = dup_prop(node, "multiplexed");
+    if (!rc && multiplexed)
+    {
+        uint8_t flag = 0;
+        if (boolean_value(multiplexed, &flag) == HDDVD_OK)
+            resource.multiplexed = flag;
+        else
+            rc = parse_u64(multiplexed, &resource.multiplexed);
+        resource.value.multiplexed = resource.multiplexed != 0;
+    }
+    free(multiplexed);
     if (!rc)
         rc = append_item(xpl, (void **)&application->resources, &application->resource_count,
                          sizeof(resource), &resource);
     if (rc)
-        free((char *)resource.src);
+        free((char *)resource.value.src);
     return rc;
 }
 
@@ -974,13 +991,19 @@ int hddvd_xpl_open_with_limits(const void *input, size_t input_size, const hddvd
     xmlNodePtr child;
     size_t nodes = 0;
     int rc = HDDVD_OK;
+    unsigned char *owned = NULL;
     if (!input || !input_size || !limits || !out || !limits->max_nodes || !limits->max_items ||
         input_size > INT_MAX)
         return HDDVD_EINVAL;
     *out = NULL;
+    /* Playlists on disc are stored in a clear-text object envelope. */
+    rc = hddvd_object_unwrap(input, input_size, HDDVD_OBJECT_TEXT, &owned, &input, &input_size);
+    if (rc)
+        return rc;
     document = xmlReadMemory(input, (int)input_size, "playlist.xpl", NULL,
                              XML_PARSE_NONET | XML_PARSE_NOBLANKS | XML_PARSE_NOERROR |
                                  XML_PARSE_NOWARNING);
+    free(owned);
     if (!document)
         return HDDVD_EPARSE;
     root = xmlDocGetRootElement(document);
@@ -1230,7 +1253,7 @@ int hddvd_xpl_get_application_resource(const hddvd_xpl *xpl, size_t title, size_
     if (!applications || !value || application >= count ||
         index >= applications[application].resource_count)
         return HDDVD_EINVAL;
-    *value = applications[application].resources[index];
+    *value = applications[application].resources[index].value;
     return HDDVD_OK;
 }
 
@@ -1244,6 +1267,19 @@ int hddvd_xpl_get_event(const hddvd_xpl *xpl, size_t title, size_t index, hddvd_
     if (!xpl || !value || title >= xpl->title_count || index >= xpl->titles[title].event_count)
         return HDDVD_EINVAL;
     *value = xpl->titles[title].events[index];
+    return HDDVD_OK;
+}
+
+int hddvd_xpl_get_application_resource_multiplexed(const hddvd_xpl *xpl, size_t title,
+                                                   size_t application, size_t index,
+                                                   uint64_t *value)
+{
+    size_t count = 0;
+    const struct xpl_application *applications = applications_for(xpl, title, &count);
+    if (!applications || !value || application >= count ||
+        index >= applications[application].resource_count)
+        return HDDVD_EINVAL;
+    *value = applications[application].resources[index].multiplexed;
     return HDDVD_OK;
 }
 

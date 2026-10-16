@@ -8,7 +8,8 @@
    is reported exactly once as one of:
      structure  a field of a format this project documents and validates
                 (docs/formats/aacs-object-envelope.md, docs/formats/hdi-script.md);
-     observed   bytes seen in external media whose meaning is unconfirmed;
+     observed   fields seen consistently in external media whose meaning is
+                unconfirmed (AACS bytes 5-6 and clear-type trailers);
      unknown    everything else, including unreferenced gaps.
    Tables are bounds-checked by the library parsers before they are labelled.
    No opcode or field meaning beyond those notes is assumed. */
@@ -168,6 +169,46 @@ static int account_object(layout *l, const unsigned char *p, size_t size)
     return HDDVD_OK;
 }
 
+/* Labels the on-disc AACS envelope (docs/formats/aacs-object-envelope.md)
+   after the library has validated it. Bytes 5-6 and clear-type trailers have
+   a consistent size but no established meaning, so they are "observed". */
+static int account_aacs(layout *l, const unsigned char *p, size_t size)
+{
+    hddvd_object *object = NULL;
+    hddvd_object_info info;
+    int rc = hddvd_object_open(p, size, &object);
+    int protected_object = rc == HDDVD_EPROTECTED;
+    size_t name_length = 0;
+    if (rc != HDDVD_OK && !protected_object)
+        return rc;
+    if (object)
+        name_length = strlen(hddvd_object_name(object));
+    hddvd_object_close(object);
+    memset(&info, 0, sizeof(info));
+    info.payload_length = (uint64_t)p[7] << 24 | (uint64_t)p[8] << 16 | (uint64_t)p[9] << 8 | p[10];
+    info.trailer_offset = 283u + info.payload_length;
+    add(l, 0, 4, REGION_STRUCTURE, "aacs.magic");
+    add(l, 4, 1, REGION_STRUCTURE, "aacs.type");
+    add(l, 5, 2, REGION_OBSERVED, "aacs.bytes_5_6");
+    add(l, 7, 4, REGION_STRUCTURE, "aacs.payload_length");
+    if (protected_object)
+    {
+        add(l, 11, 283 - 11, REGION_UNKNOWN, "aacs.header (protected)");
+        add(l, 283, info.payload_length, REGION_UNKNOWN, "aacs.payload (protected)");
+        add(l, info.trailer_offset, size - info.trailer_offset, REGION_UNKNOWN, "aacs.trailer");
+        return HDDVD_OK;
+    }
+    add(l, 11, name_length, REGION_STRUCTURE, "aacs.name");
+    add(l, 11 + name_length, 283 - 11 - name_length, REGION_STRUCTURE, "aacs.padding");
+    if (info.payload_length >= 4 && !memcmp(p + 283, "HDIS", 4) &&
+        account_hdis(l, p + 283, (size_t)info.payload_length, 283, "payload.") == HDDVD_OK)
+        ;
+    else
+        add(l, 283, info.payload_length, REGION_UNKNOWN, "aacs.payload");
+    add(l, info.trailer_offset, size - info.trailer_offset, REGION_OBSERVED, "aacs.trailer");
+    return HDDVD_OK;
+}
+
 static int compare_regions(const void *a, const void *b)
 {
     const region *left = a, *right = b;
@@ -218,13 +259,10 @@ int main(int argc, char **argv)
         format = "clean-room-script";
         rc = account_hdis(&l, bytes, size, 0, "");
     }
-    else if (size >= 5 && !memcmp(bytes, "AACS", 4) && bytes[4] == 0x11)
+    else if (size >= 4 && !memcmp(bytes, "AACS", 4))
     {
-        /* docs/EXTERNAL_MENU_INVENTORY.md: script members in external media
-           begin with this prefix. Its meaning is not established. */
-        format = "observed-aacs-type-0x11";
-        add(&l, 0, 4, REGION_OBSERVED, "observed.prefix");
-        add(&l, 4, 1, REGION_OBSERVED, "observed.type_byte");
+        format = "aacs-envelope";
+        rc = account_aacs(&l, bytes, size);
     }
     free(bytes);
     if (rc != HDDVD_OK)

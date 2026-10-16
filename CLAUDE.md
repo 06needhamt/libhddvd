@@ -83,9 +83,10 @@ Layered, bottom-up (see `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the full desi
    traversal, encoded separators, ambiguous matches, and (POSIX) symlinks.
 4. **ACA archives** (`aca.c`): native `HDDVDACA` reader with strict directory/CRC
    validation; path-based functions are compatibility wrappers over the handle API.
-5. **Object envelopes** (`object.c`): validates and strips the versioned `HDDVDOBJ` object
-   envelope (modelled on the `AACS` envelope observed around real archive members),
-   returning typed payloads. It never attempts decryption;
+5. **Object envelopes** (`object.c`): validates and strips both the synthetic `HDDVDOBJ`
+   envelope and the on-disc `AACS` envelope (283-byte header; clear types `0x02` image and
+   `0x12` text, everything else protected), returning typed payloads. The XML parsers unwrap
+   either via `hddvd_object_unwrap` (`internal.h`). It never attempts decryption;
    protected content goes through an explicit host `hddvd_decrypt_fn` provider or fails
    with `HDDVD_EPROTECTED`. Format notes: `docs/formats/`.
 6. **Immutable XML models** (libxml2): `xpl.c` (playlists/titles/clips/apps), `xmf.c`

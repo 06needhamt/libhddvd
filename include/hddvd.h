@@ -426,8 +426,19 @@ typedef enum hddvd_object_type
     HDDVD_OBJECT_MANIFEST = 1,
     HDDVD_OBJECT_MARKUP = 2,
     HDDVD_OBJECT_SCRIPT = 3,
-    HDDVD_OBJECT_IMAGE = 4
+    HDDVD_OBJECT_IMAGE = 4,
+    /* Clear text whose kind (manifest, markup, playlist, script source) the
+       envelope does not distinguish. */
+    HDDVD_OBJECT_TEXT = 5
 } hddvd_object_type;
+/* HDDVDOBJ is libhddvd's documented synthetic envelope. AACS is the envelope
+   observed on disc (docs/formats/aacs-object-envelope.md). */
+typedef enum hddvd_object_format
+{
+    HDDVD_OBJECT_FORMAT_NONE = 0,
+    HDDVD_OBJECT_FORMAT_HDDVDOBJ,
+    HDDVD_OBJECT_FORMAT_AACS
+} hddvd_object_format;
 typedef struct hddvd_object_info
 {
     uint8_t version;
@@ -662,7 +673,11 @@ HDDVD_API int hddvd_stream_open_memory(const void *, size_t, hddvd_stream **);
 HDDVD_API uint64_t hddvd_stream_size(const hddvd_stream *);
 HDDVD_API int hddvd_stream_read_at(hddvd_stream *, uint64_t, void *, size_t, size_t *);
 HDDVD_API void hddvd_stream_close(hddvd_stream *);
-/* Object input is copied/retained by the returned immutable handle. */
+/* Object input is copied/retained by the returned immutable handle. Both
+   HDDVDOBJ and AACS envelopes are accepted. AACS objects other than the
+   observed clear types (0x02 image, 0x12 text) are treated as protected:
+   they have no name and need a provider, or fail with HDDVD_EPROTECTED.
+   For AACS, info.version is 0 and info.unknown_1 holds header bytes 5-6. */
 HDDVD_API int hddvd_object_open(const void *, size_t, hddvd_object **);
 HDDVD_API int hddvd_object_open_with_provider(const void *, size_t, hddvd_decrypt_fn, void *,
                                               hddvd_object **);
@@ -674,6 +689,9 @@ HDDVD_API hddvd_object_type hddvd_object_get_type(const hddvd_object *);
 HDDVD_API const char *hddvd_object_name(const hddvd_object *);
 HDDVD_API int hddvd_object_open_payload(const hddvd_object *, hddvd_stream **);
 HDDVD_API int hddvd_object_get_trailer(const hddvd_object *, const void **, size_t *);
+HDDVD_API hddvd_object_format hddvd_object_get_format(const hddvd_object *);
+/* Returns nonzero when input starts with a recognized envelope magic. */
+HDDVD_API int hddvd_object_is_envelope(const void *, size_t);
 /* The decoder exposes validated, engine-neutral script structure. Strings
    are borrowed and all indexes remain valid until hddvd_script_close(). */
 HDDVD_API void hddvd_script_limits_default(hddvd_script_limits *);
@@ -754,6 +772,12 @@ HDDVD_API int hddvd_xpl_get_application_loading_begin(const hddvd_xpl *, size_t,
 HDDVD_API size_t hddvd_xpl_application_resource_count(const hddvd_xpl *, size_t, size_t);
 HDDVD_API int hddvd_xpl_get_application_resource(const hddvd_xpl *, size_t, size_t, size_t,
                                                  hddvd_xpl_application_resource *);
+/* The resource's multiplexed attribute as a number: true/false read as 1/0,
+   and discs also use other non-negative integers (observed 9 to 13) whose
+   meaning is not established. The record's multiplexed flag is nonzero for
+   any nonzero value. */
+HDDVD_API int hddvd_xpl_get_application_resource_multiplexed(const hddvd_xpl *, size_t, size_t,
+                                                             size_t, uint64_t *);
 HDDVD_API size_t hddvd_xpl_event_count(const hddvd_xpl *, size_t);
 HDDVD_API int hddvd_xpl_get_event(const hddvd_xpl *, size_t, size_t, hddvd_xpl_event *);
 /* Playlist majorVersion/minorVersion; HDDVD_ENOTFOUND when majorVersion is

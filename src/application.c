@@ -227,7 +227,7 @@ static int inspect_script(const hddvd_ctx *context, hddvd_application *applicati
     if (!rc)
         rc = read_stream(stream, &data, &size);
     hddvd_stream_close(stream);
-    if (!rc && size >= 8 && !memcmp(data, "HDDVDOBJ", 8))
+    if (!rc && hddvd_object_is_envelope(data, size))
     {
         rc = hddvd_object_open(data, size, &object);
         if (!rc && hddvd_object_get_type(object) != HDDVD_OBJECT_SCRIPT)

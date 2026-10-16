@@ -151,7 +151,8 @@ if(BUILD_TESTING)
     set(scriptinfo_cases
         "scripts/minimal.hdis|summary: size=68 structure=68 observed=0 unknown=0"
         "scripts/gapped.hdis|summary: size=101 structure=97 observed=0 unknown=4"
-        "scripts/observed-prefix.bin|summary: size=32 structure=0 observed=5 unknown=27"
+        "scripts/aacs-protected.bin|summary: size=359 structure=9 observed=2 unknown=348"
+        "objects/aacs-text.hdo|summary: size=315 structure=281 observed=6 unknown=28"
         "objects/hdis-script.hdo|summary: size=112 structure=104 observed=0 unknown=8"
         "objects/protected.hdo|summary: size=60 structure=40 observed=0 unknown=20")
     foreach(case IN LISTS scriptinfo_cases)

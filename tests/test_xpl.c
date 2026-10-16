@@ -366,6 +366,50 @@ static void test_invalid_metadata(void)
     assert(xpl == NULL);
 }
 
+/* Real playlists are stored in an AACS clear-text envelope and use numeric
+   multiplexed values; both are exercised with original content. */
+static void test_enveloped_playlist(void)
+{
+    static const char playlist[] =
+        "<Playlist xmlns='http://www.dvdforum.org/2005/HDDVDVideo/Playlist'>"
+        "<TitleSet timeBase='60fps'><Title id='t'/>"
+        "<PlaylistApplication src='a.xmf'>"
+        "<PlaylistApplicationResource src='a.aca' multiplexed='11'/>"
+        "<PlaylistApplicationResource src='b.aca' multiplexed='false'/>"
+        "</PlaylistApplication></TitleSet></Playlist>";
+    unsigned char bytes[1024];
+    size_t length = sizeof(playlist) - 1;
+    hddvd_xpl *xpl = NULL;
+    hddvd_xpl_application_resource resource;
+    uint64_t multiplexed = 0;
+    memset(bytes, 0, sizeof(bytes));
+    memcpy(bytes, "AACS", 4);
+    bytes[4] = 0x12;
+    bytes[7] = (unsigned char)(length >> 24);
+    bytes[8] = (unsigned char)(length >> 16);
+    bytes[9] = (unsigned char)(length >> 8);
+    bytes[10] = (unsigned char)length;
+    memcpy(bytes + 11, "VPLST000.XPL.AACS", 17);
+    memcpy(bytes + 283, playlist, length);
+    assert(hddvd_xpl_open(bytes, 283 + length + 4, &xpl) == HDDVD_OK);
+    assert(hddvd_xpl_get_application_resource(xpl, SIZE_MAX, 0, 0, &resource) == HDDVD_OK &&
+           resource.multiplexed);
+    assert(hddvd_xpl_get_application_resource_multiplexed(xpl, SIZE_MAX, 0, 0, &multiplexed) ==
+               HDDVD_OK &&
+           multiplexed == 11);
+    assert(hddvd_xpl_get_application_resource(xpl, SIZE_MAX, 0, 1, &resource) == HDDVD_OK &&
+           !resource.multiplexed);
+    assert(hddvd_xpl_get_application_resource_multiplexed(xpl, SIZE_MAX, 0, 1, &multiplexed) ==
+               HDDVD_OK &&
+           multiplexed == 0);
+    assert(hddvd_xpl_get_application_resource_multiplexed(xpl, SIZE_MAX, 0, 2, &multiplexed) ==
+           HDDVD_EINVAL);
+    hddvd_xpl_close(xpl);
+    /* A wrapped object that is not clear text is not a playlist. */
+    bytes[4] = 0x02;
+    assert(hddvd_xpl_open(bytes, 283 + length + 16, &xpl) == HDDVD_EPARSE);
+}
+
 int main(void)
 {
     test_typed_playlist();
@@ -376,5 +420,6 @@ int main(void)
     test_open_ended_application();
     test_unmodeled_constructs();
     test_invalid_metadata();
+    test_enveloped_playlist();
     return 0;
 }
