@@ -425,7 +425,7 @@ all represented in the conformance report.
 
 ### P6-03 — Decode required IFO and MAP navigation structures
 
-**Status:** Blocked on fixture/spec inventory
+**Status:** Headers validated against real files; table decoding blocked on VTI/EVO samples or a specification
 **Depends on:** P1-01, P6-02
 **Likely files:** `src/ifo.c`, `src/map.c`, `tests/test_ifo.c`, `tests/test_map.c`
 
@@ -436,6 +436,13 @@ structure if necessary.
 **Acceptance:** synthetic binary builders exercise every field and endian
 conversion; malformed offsets/counts are rejected; no parser casts input bytes to
 C structs.
+
+First slice: `hddvd_ifo_read_header` and `hddvd_map_read_header` recognize the
+identifiers seen on 141 real files from five discs, require whole 2048-byte
+sectors and an end-sector field that matches the size, and read the VTI name
+each MAP refers to. `docs/formats/ifo-map.md` records the evidence. The supplied
+files include no VTI or EVO files, so nothing yet confirms what the time-map or
+IFO tables point to.
 
 ### P6-04 — Harden EVO packet and stream metadata parsing
 

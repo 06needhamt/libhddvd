@@ -103,7 +103,7 @@ foreach(tool info menuinfo acainfo acaextract scriptdump scriptinfo xplinfo)
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits)
+    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         # Test assertions also perform setup and must run in Release builds.
@@ -201,7 +201,7 @@ if(HDDVD_BUILD_FUZZERS)
     if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
         message(FATAL_ERROR "HDDVD_BUILD_FUZZERS requires Clang and libFuzzer")
     endif()
-    foreach(target aca object xmf xmu script xpl)
+    foreach(target aca object xmf xmu script xpl navigation)
         add_executable(fuzz-${target} tests/fuzz_${target}.c)
         target_link_libraries(fuzz-${target} PRIVATE hddvd)
         target_compile_options(fuzz-${target} PRIVATE

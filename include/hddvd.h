@@ -633,6 +633,30 @@ typedef struct hddvd_ifo_info
     int recognized_identifier;
 } hddvd_ifo_info;
 
+/* Header facts confirmed against externally supplied discs
+   (docs/formats/ifo-map.md). Files are whole 2048-byte sectors, and
+   last_sector equals the sector count minus one in every observed file. */
+typedef enum hddvd_ifo_kind
+{
+    HDDVD_IFO_UNKNOWN = 0,
+    HDDVD_IFO_VMG,
+    HDDVD_IFO_STANDARD_VTS
+} hddvd_ifo_kind;
+typedef struct hddvd_ifo_header
+{
+    hddvd_ifo_kind kind;
+    char identifier[13];
+    uint32_t last_sector;
+    uint64_t size;
+} hddvd_ifo_header;
+typedef struct hddvd_map_header
+{
+    uint64_t size;
+    uint32_t last_sector;
+    /* The VTI file this time map names, such as "HVA00001.VTI". */
+    char vti_name[64];
+} hddvd_map_header;
+
 /* Capability bits describe independently usable library facilities, not
    complete interactive-menu conformance. Unknown bits must be ignored so
    applications built against an older header remain forward compatible. */
@@ -920,6 +944,11 @@ HDDVD_API int hddvd_evo_probe(const char *, hddvd_stream_info *, size_t, size_t 
 HDDVD_API const char *hddvd_codec_name(hddvd_stream_codec);
 HDDVD_API int hddvd_map_probe(const char *, hddvd_map_info *);
 HDDVD_API int hddvd_ifo_probe(const char *, hddvd_ifo_info *);
+/* Validate and read IFO and MAP headers. Unrecognized identifiers return
+   HDDVD_ENOTSUP; framing that contradicts the end-sector field returns
+   HDDVD_EPARSE. Tables beyond these fields are not decoded yet. */
+HDDVD_API int hddvd_ifo_read_header(hddvd_stream *, hddvd_ifo_header *);
+HDDVD_API int hddvd_map_read_header(hddvd_stream *, hddvd_map_header *);
 HDDVD_API void hddvd_free(void *);
 #ifdef __cplusplus
 }
