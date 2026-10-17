@@ -17,8 +17,12 @@ Experimental open-source HD DVD inspection library.
 - IFO/VTI/MAP header validation, the VTI's EVOB table, and time maps; a title
   time resolves through the playlist's clips to an EVO file and the sector to
   read from (Standard Content IFO tables are not decoded yet)
-- A bounded, engine-neutral script-table decoder and disassembler for clean-room
-  structural fixtures; commercial HDi bytecode remains explicitly unsupported
+- A sandboxed script runtime (`hddvd_runtime`) that runs HDi ECMAScript source,
+  UTF-16 as on disc or UTF-8, with heap, recursion, operation and wall-clock
+  budgets, in an optional QuickJS engine. HDi host objects (`Player`,
+  `document`, events, timers) are not provided yet; `docs/hdi-host-api.md`
+  lists the ones disc scripts use. A bounded structural decoder covers the
+  clean-room `HDIS` fixture format only
 - Renderer-neutral, damage-tracked display lists with host-decoded premultiplied
   RGBA planes, nested clipping/layout, stable stacking, focus image selection,
   letterbox transforms, and reverse-paint-order hit testing, built directly from
@@ -47,6 +51,9 @@ but unconfirmed bytes, or unknown ranges (see `docs/formats/hdi-script.md`).
 checks each time map against them (see `docs/formats/ifo-map.md`).
 `hddvd-locate DISC_ROOT PLAYLIST.XPL TITLE_INDEX MILLISECONDS...` resolves title
 times to the EVO file, presentation time and sector that play them.
+`python3 tools/inventory_hdi_scripts.py DIR...` lists the host objects, methods
+and events that the `.js` files under each directory use, without printing any
+source (see `docs/hdi-host-api.md`).
 
 The ACA implementation was validated against a genuine HD DVD archive with 40 members. The sample itself is not distributed with this source tree. Regression tests construct a small synthetic archive using the observed container structure.
 
@@ -68,6 +75,24 @@ cmake -S . -B build -DBUILD_TESTING=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+The script runtime needs an ECMAScript engine; without one, libhddvd builds
+and reports no `HDDVD_FEATURE_SCRIPT_RUNTIME`. To build QuickJS into libhddvd,
+unpack a QuickJS release (2021-03-27 or later, from https://bellard.org/quickjs/)
+outside the source tree and point the build at it:
+
+```sh
+QUICKJS=$(tools/fetch_quickjs.sh /tmp/quickjs)   # pinned release, SHA-256 checked
+cmake -S . -B build -DBUILD_TESTING=ON -DHDDVD_SCRIPT_ENGINE=quickjs \
+      -DHDDVD_QUICKJS_SOURCE_DIR="$QUICKJS"
+```
+
+`HDDVD_SCRIPT_ENGINE` is `auto` (the default: QuickJS when available), `quickjs`
+(fail if it is not) or `none`. Without a source directory, an installed
+`libquickjs.a` is used; distribution packages are usually not built with
+`-fPIC`, so only static-only builds (`-DHDDVD_BUILD_SHARED=OFF`) can use them.
+QuickJS does not build with MSVC. The choice is recorded in
+`docs/decisions/0001-script-engine.md`.
 
 Both shared and static libraries are built by default. Use
 `-DHDDVD_BUILD_SHARED=OFF` or `-DHDDVD_BUILD_STATIC=OFF` to build only one
@@ -91,9 +116,10 @@ Installed builds provide both a `libhddvd.pc` pkg-config file and a CMake config
 package exporting the `hddvd::hddvd` target.  Consumers can query
 `hddvd_abi_version()` and `hddvd_get_features()` before enabling individual
 integration paths.  Feature bits deliberately distinguish the available script
-decoder and host-driven image display list from the not-yet-available script
-runtime and built-in image decoder; no feature bit implies complete HDi menu
-conformance.
+decoder and host-driven image display list from the not-yet-available built-in
+image decoder; `HDDVD_FEATURE_SCRIPT_RUNTIME` is set only in builds with an
+engine (`hddvd_runtime_engine()` names it). No feature bit implies complete HDi
+menu conformance.
 
 ```cmake
 find_package(hddvd 0.4 CONFIG REQUIRED)
@@ -149,4 +175,4 @@ original synthetic seeds and contain no bytes from the reference archive.
 
 ## Status
 
-This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content IFO tables and an HDi JavaScript/rendering runtime are future work.
+This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content IFO tables and the HDi host objects scripts call are future work.

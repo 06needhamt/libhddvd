@@ -27,6 +27,7 @@ struct outcome
     uint16_t evob;
     size_t events;
     size_t quads;
+    int script;
 };
 
 static const struct input *shared_input;
@@ -149,6 +150,20 @@ static void run_once(struct outcome *out)
     out->quads = hddvd_display_quad_count(list);
     hddvd_display_list_close(list);
     hddvd_image_cache_destroy(cache);
+
+    /* Separate script runtimes, when the build has an engine. */
+    if (hddvd_runtime_engine())
+    {
+        static const char source[] = "var n = 0; function work() {"
+                                     "  for (var i = 0; i < 1000; i++) n += Math.random() < 2;"
+                                     "  if (n % 1000) throw new Error('n ' + n); }";
+        hddvd_runtime *runtime = NULL;
+        assert(hddvd_runtime_create(&runtime) == HDDVD_OK);
+        assert(hddvd_runtime_evaluate(runtime, "work", source, sizeof(source) - 1) == HDDVD_OK);
+        out->script = hddvd_runtime_call(runtime, "work") == HDDVD_OK &&
+                      hddvd_runtime_call(runtime, "work") == HDDVD_OK;
+        hddvd_runtime_destroy(runtime);
+    }
 }
 
 static void *worker(void *opaque)
@@ -181,7 +196,8 @@ int main(void)
     memset(&expected, 0, sizeof(expected));
     run_once(&expected);
     assert(expected.titles == 3 && expected.unmodeled == 2 && expected.sectors == 131 &&
-           expected.evob == 1 && expected.events > 0 && expected.quads > 0);
+           expected.evob == 1 && expected.events > 0 && expected.quads > 0 &&
+           expected.script == (hddvd_runtime_engine() != NULL));
     for (i = 0; i < THREADS; i++)
     {
         results[i] = expected;

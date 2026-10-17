@@ -151,20 +151,15 @@ deterministically without scanning for magic strings.
 normal/focus image candidates for every visible node, with no fixture-specific
 filenames in library code.
 
-### 4. Decode and execute the HDi script representation
+### 4. Execute HDi scripts
 
 This is the highest-risk milestone and must not be replaced by hard-coded button
 behavior.
 
-* Document the binary script header, tables, constants, instruction encoding,
-  functions, and exception/control-flow metadata using public specifications and
-  clean-room tests.  Build a disassembler first and compare its control-flow and
-  string/constant tables with the captured behavior trace.
-* Prefer translating the standardized binary representation to a maintained,
-  sandboxable ECMAScript engine.  If semantic mismatches make that impossible,
-  implement only a spec-derived interpreter, as a separate optional component.
-  In either design, provide deterministic instruction, recursion, heap, timer,
-  and wall-clock budgets.
+* Disc scripts are ECMAScript 3 source text (`docs/formats/hdi-script.md`), so
+  no binary format has to be decoded.  Run them in a maintained, sandboxable
+  ECMAScript engine, as an optional component, with deterministic instruction,
+  recursion, heap, timer, and wall-clock budgets.
 * Implement the HDi host subset exercised by the trace: DOM lookup and style/state
   mutation, event listener registration and dispatch, focus, key events, timers,
   application lifecycle, title clock access, playlist/title/chapter control, and
@@ -302,14 +297,15 @@ Run the following at each milestone:
 The reference-menu test is a release gate when the artifact is supplied by the
 maintainer, but remains an ordinary skip for public CI.  A release is not
 "supports this menu" until the external conformance report shows zero unknown
-object types, XML properties, bytecode instructions, host calls, resources, or
+object types, XML properties, host calls, resources, or
 unacknowledged playback commands along every captured interaction path.
 
 ## Risks and deliberate non-goals
 
-* **Specification availability:** binary HDi script details may be the critical
-  path.  Keep the decoder isolated, require provenance for discoveries, and do
-  not ship guessed opcodes as stable behavior.
+* **Specification availability:** the HDi host API specification is not public,
+  so host-object behavior may be the critical path.  Base it on what disc
+  scripts use (`docs/hdi-host-api.md`) and observed player behavior, and make
+  unimplemented calls visible errors rather than guesses.
 * **Content protection:** this work must not embed keys or bypass AACS.  The
   library consumes bytes supplied through an authorized host layer and reports
   protected content distinctly.
@@ -321,5 +317,5 @@ unacknowledged playback commands along every captured interaction path.
   reference-title ids, filenames, coordinates, or scripted outcomes may appear
   in production code.
 * **VLC separation:** libhddvd will not decode VC-1/H.264/audio, own an output
-  window, or call VLC internals.  VLC will not parse HDi bytecode or duplicate the
+  window, or call VLC internals.  VLC will not run HDi scripts or duplicate the
   menu state machine.

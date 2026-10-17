@@ -12,9 +12,13 @@ uint32_t hddvd_abi_version(void)
 }
 hddvd_features hddvd_get_features(void)
 {
-    return HDDVD_FEATURE_OBJECT_ENVELOPE | HDDVD_FEATURE_MARKUP_INSPECTION |
-           HDDVD_FEATURE_SCRIPT_DECODER | HDDVD_FEATURE_DISPLAY_LIST | HDDVD_FEATURE_NAV_SCHEDULER |
-           HDDVD_FEATURE_PROTECTION_PROVIDER | HDDVD_FEATURE_TIME_MAP;
+    hddvd_features features = HDDVD_FEATURE_OBJECT_ENVELOPE | HDDVD_FEATURE_MARKUP_INSPECTION |
+                              HDDVD_FEATURE_SCRIPT_DECODER | HDDVD_FEATURE_DISPLAY_LIST |
+                              HDDVD_FEATURE_NAV_SCHEDULER | HDDVD_FEATURE_PROTECTION_PROVIDER |
+                              HDDVD_FEATURE_TIME_MAP;
+    if (hddvd_runtime_engine())
+        features |= HDDVD_FEATURE_SCRIPT_RUNTIME;
+    return features;
 }
 const char *hddvd_feature_name(hddvd_feature feature)
 {
@@ -64,6 +68,8 @@ const char *hddvd_strerror(int s)
             return "configured limit exceeded";
         case HDDVD_EPROTECTED:
             return "protected content requires a decryption provider";
+        case HDDVD_ESCRIPT:
+            return "uncaught script exception";
         default:
             return "unknown error";
     }

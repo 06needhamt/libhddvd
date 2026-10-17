@@ -266,55 +266,69 @@ of stopping at the first optional unknown.
 **Acceptance:** the reference report lists every script, markup document, image,
 style property, element kind, and unresolved dependency with no hard-coded names.
 
-## Phase 4 — HDi binary scripts and runtime
+## Phase 4 — HDi scripts and runtime
 
-### P4-01 — Inventory and document the binary script format
+HDi scripts on disc are ECMAScript 3 source text (UTF-16BE), bare or inside the
+clear `AACS` envelope; protected ones are encrypted source, not a binary format
+(`docs/formats/hdi-script.md`). The work is therefore choosing an ECMAScript
+engine and implementing the HDi host objects, not decoding bytecode.
 
-**Status:** Inspector complete; reference-script accounting is a maintainer run; semantics blocked on specification/research access
+### P4-01 — Inventory the script format and host API
+
+**Status:** Complete
 **Depends on:** P2-02
-**Likely files:** `docs/formats/hdi-script.md`, `tools/hddvd-scriptinfo.c`
+**Likely files:** `docs/formats/hdi-script.md`, `docs/hdi-host-api.md`,
+`tools/inventory_hdi_scripts.py`, `tools/hddvd-scriptinfo.c`
 
-`hddvd-scriptinfo` bounds-checks envelopes and clean-room script tables through
-the library parsers and labels every byte as `structure`, `observed`, or
-`unknown`, failing if the totals do not cover the input. CTest pins the
-accounting for original fixtures, including gaps, trailers, protected payloads,
-and the `AACS` envelope. Five real type-`0x11` scripts from other discs account
-as 11 bytes of envelope fields and the rest protected. Running it on the four
-reference scripts still needs the external archive; their protected bytes stay
-`unknown` until a public specification or independently generated programs
-exist.
+`hddvd-scriptinfo` bounds-checks envelopes and clean-room script tables and
+labels every byte as `structure`, `observed`, or `unknown`; CTest pins the
+accounting. The five protected (type `0x11`) scripts on the ripped discs account
+as 11 bytes of envelope fields and an encrypted payload.
 
-Create a read-only header/table inspector.  Document facts from public
-specifications or independently generated programs, marking hypotheses clearly.
-Do not merge guessed opcode behavior into the runtime.
+The 126 readable scripts on the ripped discs are ECMAScript source.
+`tools/inventory_hdi_scripts.py` lists the host globals, member chains, events
+and methods they use, without copying source; `docs/hdi-host-api.md` records
+the result. The `hdi-api-inventory` CTest pins the tool's report for original
+fixture scripts.
 
-**Acceptance:** the tool bounds-checks all tables and accounts for every byte in
-the four reference scripts as a known structure or explicitly unknown range.
+**Acceptance:** every byte of a script object is accounted for, and the host API
+used by every readable script on the available discs is listed.
 
 ### P4-02 — Build a script decoder and disassembler
 
-**Status:** Blocked
+**Status:** Not needed for disc content; the clean-room `HDIS` decoder stays as a fixture-only tool
 **Depends on:** P4-01
 **Likely files:** `src/script_decode.c`, `tools/hddvd-scriptdump.c`,
 `tests/test_script_decode.c`
 
-Decode constants, strings, functions, instructions, branches, and exception
-metadata into an engine-neutral intermediate representation.  Validate branch and
-table targets before exposing the IR.
-
-**Acceptance:** round-independent golden tests use original generated scripts;
-unknown opcodes produce a structured diagnostic; fuzzing cannot create invalid IR
-references or unbounded allocations.
+This task assumed discs carry compiled scripts. They carry source, which an
+ECMAScript engine parses directly, so there is no disc format to decode.
+`hddvd_script_open` and `hddvd-scriptdump` remain as a bounded structural
+decoder for the clean-room `HDIS` fixtures and keep their tests and fuzzing.
 
 ### P4-03 — Select and isolate an ECMAScript execution backend
 
-**Status:** Blocked
-**Depends on:** P4-02
+**Status:** Complete
+**Depends on:** P4-01
 **Likely files:** `cmake/`, `src/script_engine.h`, `docs/decisions/`
 
-Prototype translation to a maintained embeddable engine and compare required HDi
-semantics.  Record the decision, license/packaging impact, determinism, sandbox
-controls, and fallback plan.  Keep the dependency optional at build time.
+Choose a maintained embeddable engine that runs ECMAScript 3 source decoded from
+UTF-16BE, such as QuickJS or Duktape. Record the decision, license/packaging
+impact, determinism, sandbox controls, and fallback plan. Keep the dependency
+optional at build time.
+
+`docs/decisions/0001-script-engine.md` records the choice of QuickJS. The public
+`hddvd_runtime` API evaluates UTF-16 or UTF-8 source and calls global
+functions, with per-runtime heap and per-entry recursion, operation and
+wall-clock budgets (`hddvd_runtime_limits`, or the config's script fields).
+Results distinguish syntax errors (`HDDVD_EPARSE`), uncaught exceptions
+(`HDDVD_ESCRIPT`) and exhausted budgets (`HDDVD_ELIMIT` with the budget named).
+The engine sits behind `src/script_engine.h`, is selected by
+`HDDVD_SCRIPT_ENGINE`, and is either compiled from a QuickJS release
+(`HDDVD_QUICKJS_SOURCE_DIR`) or linked from an installed library. Without one,
+the runtime reports `HDDVD_ENOTSUP` and no `HDDVD_FEATURE_SCRIPT_RUNTIME`.
+`test_runtime.c`, `test_limits.c`, `test_threads.c` and `fuzz-runtime` cover
+both builds.
 
 **Acceptance:** a synthetic function executes with instruction, heap, recursion,
 and wall-clock budgets; the library builds and reports the missing capability when
@@ -322,26 +336,30 @@ the backend is disabled.
 
 ### P4-04 — Implement DOM, focus, and event host objects
 
-**Status:** Blocked
+**Status:** Ready
 **Depends on:** P3-03, P4-03
 **Likely files:** `src/runtime.c`, `src/runtime_dom.c`, `tests/test_runtime.c`
 
 Implement element lookup, state/style mutation, listener registration, ordered
 event dispatch, focus changes, navigation keys, activation, lifecycle events, and
-timers.  Queue host callbacks until runtime locks are released.
+timers.  Queue host callbacks until runtime locks are released.  The members to
+cover first are the `document`, element, `application`, event and timer entries
+in `docs/hdi-host-api.md`.
 
 **Acceptance:** deterministic replay tests cover listener ordering, focus cycles,
 removed nodes/listeners, timer cancellation, exceptions, and budget exhaustion.
 
 ### P4-05 — Implement player and application host objects
 
-**Status:** Blocked
+**Status:** Blocked on P4-04
 **Depends on:** P4-04, P6-01
 **Likely files:** `src/runtime_player.c`, `tests/test_runtime_player.c`
 
 Expose title-clock reads, play/seek/title/chapter selection, menu visibility, and
 application lifecycle through a mockable host-operations table.  Deny network,
-filesystem, and process access by default.
+filesystem, and process access by default.  `docs/hdi-host-api.md` lists the
+`Player` members discs use; `FileIO`, `XMLParser`, `Network` and
+`PersistentStorageManager` start as stubs that report failure.
 
 **Acceptance:** the runtime emits typed commands and consumes acknowledgements;
 unsupported calls are visible errors rather than no-ops; no callback occurs while
@@ -353,11 +371,11 @@ an internal lock is held.
 **Depends on:** P4-02 through P4-05, conforming-player trace
 **Likely files:** decoder/runtime tests and conformance report only
 
-Close remaining opcode and host-object gaps found by the reference scripts.  Add
-format-driven tests for each gap before changing runtime behavior.
+Close remaining host-object gaps found by the reference scripts.  Add tests for
+each gap before changing runtime behavior.
 
-**Acceptance:** the report contains zero unknown instructions and host calls, and
-replay produces every captured state transition without title-specific branches.
+**Acceptance:** the report contains zero unknown host calls, and replay produces
+every captured state transition without title-specific branches.
 
 ## Phase 5 — renderer-neutral display lists
 
@@ -706,7 +724,7 @@ stable status names.
 
 ### X-02 — Configurable limits
 
-**Status:** Complete for implemented subsystems; script heap and recursion enforcement awaits P4-03
+**Status:** Complete
 **Depends on:** P1-01 ownership conventions
 
 Define one limits object for archive members, resource bytes, XML nodes/depth,
@@ -715,8 +733,10 @@ Provide conservative defaults and tests proving every limit is enforced.
 
 `test_limits.c` lowers each field with a consumer through the unified
 `*_with_config` entry points and checks the rejection (`max_resource_bytes` is
-covered by `test_resource.c`). `max_script_heap_bytes` and
-`max_script_recursion` have no consumer until a script runtime exists.
+covered by `test_resource.c`). The script runtime takes `max_script_heap_bytes`,
+`max_script_recursion`, `max_script_instructions` (as its operation budget)
+and `max_script_bytes` from the config; `test_limits.c` checks each when the
+build has an engine.
 
 ## Milestone completion order
 

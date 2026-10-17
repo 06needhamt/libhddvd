@@ -49,9 +49,14 @@ jobs:
       - name: Install libxml2 (Windows)
         if: runner.os == 'Windows'
         run: vcpkg install libxml2:x64-windows
+      # Linux builds the script runtime with QuickJS; macOS and Windows build
+      # without an engine, which covers the unsupported path.
+      - name: Fetch QuickJS (Linux)
+        if: runner.os == 'Linux'
+        run: echo "ENGINE_ARGS=-DHDDVD_SCRIPT_ENGINE=quickjs -DHDDVD_QUICKJS_SOURCE_DIR=$(tools/fetch_quickjs.sh "$RUNNER_TEMP/quickjs")" >> "$GITHUB_ENV"
       - name: Configure (Unix)
         if: runner.os != 'Windows'
-        run: cmake -S . -B build -DBUILD_TESTING=ON -DHDDVD_BUILD_SHARED=${{ matrix.shared }} -DHDDVD_BUILD_STATIC=${{ matrix.static }}
+        run: cmake -S . -B build -DBUILD_TESTING=ON -DHDDVD_BUILD_SHARED=${{ matrix.shared }} -DHDDVD_BUILD_STATIC=${{ matrix.static }} ${ENGINE_ARGS:--DHDDVD_SCRIPT_ENGINE=none}
       - name: Configure (Windows)
         if: runner.os == 'Windows'
         run: cmake -S . -B build -DBUILD_TESTING=ON -DHDDVD_BUILD_SHARED=${{ matrix.shared }} -DHDDVD_BUILD_STATIC=${{ matrix.static }} -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
@@ -65,12 +70,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y libxml2-dev
+      # The script runtime's engine, built into libhddvd from a pinned,
+      # checksummed QuickJS release.
+      - name: Fetch QuickJS
+        run: echo "QUICKJS=$(tools/fetch_quickjs.sh "$RUNNER_TEMP/quickjs")" >> "$GITHUB_ENV"
       - name: Configure ASan and UBSan
         env:
           CC: clang
           CFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
           LDFLAGS: -fsanitize=address,undefined
-        run: cmake -S . -B build -DBUILD_TESTING=ON
+        run: cmake -S . -B build -DBUILD_TESTING=ON -DHDDVD_SCRIPT_ENGINE=quickjs -DHDDVD_QUICKJS_SOURCE_DIR="$QUICKJS"
       - run: cmake --build build --parallel
       - run: ctest --test-dir build --output-on-failure
 
@@ -80,12 +89,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y libxml2-dev
+      # The script runtime's engine, built into libhddvd from a pinned,
+      # checksummed QuickJS release.
+      - name: Fetch QuickJS
+        run: echo "QUICKJS=$(tools/fetch_quickjs.sh "$RUNNER_TEMP/quickjs")" >> "$GITHUB_ENV"
       - name: Configure ThreadSanitizer
         env:
           CC: clang
           CFLAGS: -fsanitize=thread -g -O1
           LDFLAGS: -fsanitize=thread
-        run: cmake -S . -B build -DBUILD_TESTING=ON
+        run: cmake -S . -B build -DBUILD_TESTING=ON -DHDDVD_SCRIPT_ENGINE=quickjs -DHDDVD_QUICKJS_SOURCE_DIR="$QUICKJS"
       - run: cmake --build build --parallel
       - run: ctest --test-dir build --output-on-failure
 
@@ -94,10 +107,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y libxml2-dev clang-18 clang-tools-18
+      # The script runtime's engine, built into libhddvd from a pinned,
+      # checksummed QuickJS release.
+      - name: Fetch QuickJS
+        run: echo "QUICKJS=$(tools/fetch_quickjs.sh "$RUNNER_TEMP/quickjs")" >> "$GITHUB_ENV"
+      # QuickJS's own sources are third-party and excluded from the report.
       - name: Clang static analyzer
         run: |
-          scan-build-18 --use-cc=clang-18 cmake -S . -B build -DBUILD_TESTING=ON
-          scan-build-18 --use-cc=clang-18 --status-bugs -o scan-report cmake --build build --parallel
+          scan-build-18 --use-cc=clang-18 cmake -S . -B build -DBUILD_TESTING=ON -DHDDVD_SCRIPT_ENGINE=quickjs -DHDDVD_QUICKJS_SOURCE_DIR="$QUICKJS"
+          scan-build-18 --use-cc=clang-18 --status-bugs --exclude "$QUICKJS" -o scan-report cmake --build build --parallel
 
   i386:
     runs-on: ubuntu-latest
@@ -108,7 +126,11 @@ jobs:
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y gcc-multilib g++-multilib libxml2-dev:i386
-      - run: cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=$PWD/cmake/toolchains/linux-i386.cmake
+      # The script runtime's engine, built into libhddvd from a pinned,
+      # checksummed QuickJS release.
+      - name: Fetch QuickJS
+        run: echo "QUICKJS=$(tools/fetch_quickjs.sh "$RUNNER_TEMP/quickjs")" >> "$GITHUB_ENV"
+      - run: cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=$PWD/cmake/toolchains/linux-i386.cmake -DHDDVD_SCRIPT_ENGINE=quickjs -DHDDVD_QUICKJS_SOURCE_DIR="$QUICKJS"
       - run: cmake --build build --parallel
       - run: ctest --test-dir build --output-on-failure
 
@@ -139,10 +161,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y libxml2-dev
+      # The script runtime's engine, built into libhddvd from a pinned,
+      # checksummed QuickJS release.
+      - name: Fetch QuickJS
+        run: echo "QUICKJS=$(tools/fetch_quickjs.sh "$RUNNER_TEMP/quickjs")" >> "$GITHUB_ENV"
       - name: Configure libFuzzer harnesses
         env:
           CC: clang
-        run: cmake -S . -B build -DHDDVD_BUILD_FUZZERS=ON -DBUILD_TESTING=OFF
+        run: cmake -S . -B build -DHDDVD_BUILD_FUZZERS=ON -DBUILD_TESTING=OFF -DHDDVD_SCRIPT_ENGINE=quickjs -DHDDVD_QUICKJS_SOURCE_DIR="$QUICKJS"
       - run: cmake --build build --parallel
       # Replay the synthetic seeds, then a short fixed-seed run for the
       # harnesses without seeds, so the job stays deterministic.
@@ -157,6 +183,7 @@ jobs:
           ./build/fuzz-uri tests/fixtures/fuzz/uri/*
           ./build/fuzz-titlemap tests/fixtures/fuzz/titlemap/*
           ./build/fuzz-display tests/fixtures/fuzz/display/*
+          ./build/fuzz-runtime tests/fixtures/fuzz/runtime/*
           ./build/fuzz-aca -seed=1 -runs=1000
           ./build/fuzz-script -seed=1 -runs=1000
           ./build/fuzz-navigation -seed=1 -runs=1000

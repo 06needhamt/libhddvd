@@ -1,0 +1,27 @@
+source hdi-api readable=2 protected=1 unrecognized=0
+global Player uses=1 sources=hdi-api
+  chain Player.playlist.titles[].jump() uses=1 sources=hdi-api
+global TIMER_APPLICATION uses=1 sources=hdi-api
+  chain TIMER_APPLICATION uses=1 sources=hdi-api
+global application uses=4 sources=hdi-api
+  chain application.addEventListener() uses=4 sources=hdi-api
+global createEvent uses=1 sources=hdi-api
+  chain createEvent() uses=1 sources=hdi-api
+global createTimer uses=1 sources=hdi-api
+  chain createTimer() uses=1 sources=hdi-api
+global dispatchEvent uses=1 sources=hdi-api
+  chain dispatchEvent() uses=1 sources=hdi-api
+global document uses=1 sources=hdi-api
+  chain document.getElementById() uses=1 sources=hdi-api
+global setMarkupLoadedHandler uses=1 sources=hdi-api
+  chain setMarkupLoadedHandler() uses=1 sources=hdi-api
+global trace uses=1 sources=hdi-api
+  chain trace() uses=1 sources=hdi-api
+event closePanel uses=1 sources=hdi-api origin=markup
+event controller_key_down uses=1 sources=hdi-api origin=other
+event never_raised uses=1 sources=hdi-api origin=other
+event openPanel uses=1 sources=hdi-api origin=script
+method initEvent uses=1 sources=hdi-api
+method preventDefault uses=1 sources=hdi-api
+method setProperty uses=1 sources=hdi-api
+summary sources=1 readable=2 protected=1 unrecognized=0 globals=9 chains=9 events=4 other-events=2 methods=3

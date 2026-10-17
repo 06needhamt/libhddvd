@@ -21,6 +21,89 @@ endif()
 
 find_package(LibXml2 REQUIRED)
 
+# The script runtime's ECMAScript engine (docs/decisions/0001-script-engine.md).
+# "auto" uses QuickJS when it is available; "none" builds without a runtime.
+# QuickJS comes either from HDDVD_QUICKJS_SOURCE_DIR, an unpacked release that
+# is compiled into libhddvd with its symbols hidden, or from an installed
+# libquickjs.a, which shared builds can only use if it was built with -fPIC.
+set(HDDVD_SCRIPT_ENGINE "auto" CACHE STRING "Script engine: auto, quickjs or none")
+set_property(CACHE HDDVD_SCRIPT_ENGINE PROPERTY STRINGS auto quickjs none)
+set(HDDVD_QUICKJS_SOURCE_DIR "" CACHE PATH "QuickJS release source to build into libhddvd")
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+set(HDDVD_SELECTED_ENGINE none)
+set(HDDVD_QUICKJS_MODE "")
+if(NOT HDDVD_SCRIPT_ENGINE MATCHES "^(auto|quickjs|none)$")
+    message(FATAL_ERROR "HDDVD_SCRIPT_ENGINE must be auto, quickjs or none")
+endif()
+if(NOT HDDVD_SCRIPT_ENGINE STREQUAL "none" AND HDDVD_QUICKJS_SOURCE_DIR)
+    if(NOT EXISTS "${HDDVD_QUICKJS_SOURCE_DIR}/quickjs.c"
+       OR NOT EXISTS "${HDDVD_QUICKJS_SOURCE_DIR}/VERSION")
+        message(FATAL_ERROR "HDDVD_QUICKJS_SOURCE_DIR has no QuickJS release source")
+    endif()
+    if(MSVC)
+        message(FATAL_ERROR "QuickJS does not build with MSVC")
+    endif()
+    file(STRINGS "${HDDVD_QUICKJS_SOURCE_DIR}/VERSION" HDDVD_QUICKJS_VERSION LIMIT_COUNT 1)
+    set(quickjs_sources)
+    # dtoa.c replaced libbf.c in 2024; libbf is only needed for BigFloat,
+    # which libhddvd does not enable.
+    foreach(file quickjs.c libregexp.c libunicode.c cutils.c dtoa.c)
+        if(EXISTS "${HDDVD_QUICKJS_SOURCE_DIR}/${file}")
+            list(APPEND quickjs_sources "${HDDVD_QUICKJS_SOURCE_DIR}/${file}")
+        endif()
+    endforeach()
+    add_library(hddvd_quickjs OBJECT ${quickjs_sources})
+    set_target_properties(hddvd_quickjs PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        C_VISIBILITY_PRESET hidden)
+    target_compile_definitions(hddvd_quickjs PRIVATE
+        _GNU_SOURCE CONFIG_VERSION="${HDDVD_QUICKJS_VERSION}")
+    # Third-party code: its warnings and sanitizer findings are not ours to
+    # fix. It is always optimized and never instrumented, because unoptimized
+    # or instrumented builds multiply its stack frames past the recursion
+    # budget (docs/decisions/0001-script-engine.md). libhddvd's own code keeps
+    # the build type and any sanitizers.
+    target_compile_options(hddvd_quickjs PRIVATE -w -fno-sanitize=all -O2)
+    find_package(Threads REQUIRED)
+    set(HDDVD_SELECTED_ENGINE quickjs)
+    set(HDDVD_QUICKJS_MODE source)
+elseif(NOT HDDVD_SCRIPT_ENGINE STREQUAL "none")
+    if(HDDVD_SCRIPT_ENGINE STREQUAL "quickjs")
+        find_package(QuickJS REQUIRED)
+    else()
+        find_package(QuickJS)
+    endif()
+    set(quickjs_usable ${QuickJS_FOUND})
+    if(QuickJS_FOUND AND HDDVD_BUILD_SHARED AND NOT APPLE AND NOT WIN32)
+        include(CheckCSourceCompiles)
+        set(CMAKE_REQUIRED_LIBRARIES QuickJS::QuickJS)
+        set(CMAKE_REQUIRED_FLAGS -fPIC)
+        set(CMAKE_REQUIRED_LINK_OPTIONS -shared)
+        check_c_source_compiles("
+            #include <quickjs.h>
+            int main(void) { JS_FreeRuntime(JS_NewRuntime()); return 0; }"
+            HDDVD_QUICKJS_LINKS_SHARED)
+        unset(CMAKE_REQUIRED_LIBRARIES)
+        unset(CMAKE_REQUIRED_FLAGS)
+        unset(CMAKE_REQUIRED_LINK_OPTIONS)
+        if(NOT HDDVD_QUICKJS_LINKS_SHARED)
+            set(quickjs_usable FALSE)
+            set(quickjs_message "${QuickJS_LIBRARY} cannot be linked into a shared "
+                "library (it was not built with -fPIC). Set HDDVD_QUICKJS_SOURCE_DIR to "
+                "a QuickJS release, or build static only (HDDVD_BUILD_SHARED=OFF).")
+            if(HDDVD_SCRIPT_ENGINE STREQUAL "quickjs")
+                message(FATAL_ERROR ${quickjs_message})
+            endif()
+            message(STATUS ${quickjs_message})
+        endif()
+    endif()
+    if(quickjs_usable)
+        set(HDDVD_SELECTED_ENGINE quickjs)
+        set(HDDVD_QUICKJS_MODE installed)
+    endif()
+endif()
+message(STATUS "libhddvd script engine: ${HDDVD_SELECTED_ENGINE}")
+
 set(HDDVD_SOURCES
     src/application.c
     src/aca.c
@@ -35,6 +118,7 @@ set(HDDVD_SOURCES
     src/object.c
     src/player.c
     src/resource.c
+    src/runtime.c
     src/scene.c
     src/script_decode.c
     src/stream.c
@@ -47,6 +131,11 @@ set(HDDVD_SOURCES
     src/xmu.c
     src/xpl.c
 )
+if(HDDVD_SELECTED_ENGINE STREQUAL "quickjs")
+    list(APPEND HDDVD_SOURCES src/script_quickjs.c)
+else()
+    list(APPEND HDDVD_SOURCES src/script_none.c)
+endif()
 
 function(hddvd_configure_library target library_type)
     target_compile_features(${target} PUBLIC c_std_99)
@@ -55,9 +144,30 @@ function(hddvd_configure_library target library_type)
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
     target_link_libraries(${target} PRIVATE LibXml2::LibXml2)
+    if(HDDVD_QUICKJS_MODE STREQUAL "source")
+        target_sources(${target} PRIVATE $<TARGET_OBJECTS:hddvd_quickjs>)
+        target_include_directories(${target} SYSTEM PRIVATE ${HDDVD_QUICKJS_SOURCE_DIR})
+        target_compile_definitions(${target} PRIVATE
+            HDDVD_QUICKJS_VERSION="${HDDVD_QUICKJS_VERSION}")
+        target_link_libraries(${target} PRIVATE Threads::Threads)
+        if(UNIX)
+            target_link_libraries(${target} PRIVATE m)
+        endif()
+    elseif(HDDVD_QUICKJS_MODE STREQUAL "installed")
+        target_link_libraries(${target} PRIVATE QuickJS::QuickJS)
+    endif()
     if(library_type STREQUAL "SHARED")
         target_compile_definitions(${target} PRIVATE HDDVD_BUILD_SHARED)
         target_compile_definitions(${target} INTERFACE HDDVD_USE_SHARED)
+        # Keep an installed engine's symbols out of the shared library's
+        # exports (a source build compiles them hidden).
+        if(HDDVD_QUICKJS_MODE STREQUAL "installed")
+            if(APPLE)
+                target_link_options(${target} PRIVATE "LINKER:-exported_symbol,_hddvd_*")
+            elseif(NOT WIN32)
+                target_link_options(${target} PRIVATE "LINKER:--exclude-libs,ALL")
+            endif()
+        endif()
     endif()
     set_target_properties(${target} PROPERTIES
         C_VISIBILITY_PRESET hidden
@@ -106,7 +216,7 @@ foreach(tool info menuinfo acainfo acaextract scriptdump scriptinfo xplinfo time
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene)
+    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         # Test assertions also perform setup and must run in Release builds.
@@ -200,6 +310,14 @@ if(BUILD_TESTING)
                     $<TARGET_FILE:hddvd-acaextract>
                     --xplinfo $<TARGET_FILE:hddvd-xplinfo>
                     --require-modeled)
+        # The script inventory must report exactly the host API the original
+        # fixture scripts use.
+        add_test(NAME hdi-api-inventory
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_hdi_api_inventory.py
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tools/inventory_hdi_scripts.py
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/hdi-api
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/hdi_api_inventory_expected.txt)
     endif()
 
     add_test(NAME install-consumer
@@ -227,7 +345,11 @@ if(HDDVD_BUILD_FUZZERS)
     add_library(hddvd_fuzz STATIC ${HDDVD_SOURCES})
     hddvd_configure_library(hddvd_fuzz STATIC)
     target_compile_options(hddvd_fuzz PRIVATE -fsanitize=fuzzer-no-link,address,undefined)
-    foreach(target aca object xmf xmu script xpl navigation timemap uri titlemap display)
+    set(fuzz_targets aca object xmf xmu script xpl navigation timemap uri titlemap display)
+    if(HDDVD_SELECTED_ENGINE STREQUAL "quickjs")
+        list(APPEND fuzz_targets runtime)
+    endif()
+    foreach(target ${fuzz_targets})
         add_executable(fuzz-${target} tests/fuzz_${target}.c)
         target_link_libraries(fuzz-${target} PRIVATE hddvd_fuzz)
         target_compile_options(fuzz-${target} PRIVATE
@@ -261,10 +383,22 @@ write_basic_package_version_file(
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion
 )
+# Static consumers link the engine themselves.
+set(HDDVD_PC_LIBS_PRIVATE "")
+if(HDDVD_QUICKJS_MODE STREQUAL "source")
+    set(HDDVD_PC_LIBS_PRIVATE "-lm -lpthread")
+elseif(HDDVD_QUICKJS_MODE STREQUAL "installed")
+    get_filename_component(quickjs_dir "${QuickJS_LIBRARY}" DIRECTORY)
+    set(HDDVD_PC_LIBS_PRIVATE "-L${quickjs_dir} -lquickjs -lm -lpthread")
+    if(CMAKE_DL_LIBS)
+        string(APPEND HDDVD_PC_LIBS_PRIVATE " -l${CMAKE_DL_LIBS}")
+    endif()
+endif()
 configure_file(libhddvd.pc.in libhddvd.pc @ONLY)
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/hddvdConfig.cmake
     ${CMAKE_CURRENT_BINARY_DIR}/hddvdConfigVersion.cmake
+    cmake/FindQuickJS.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/hddvd
 )
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libhddvd.pc
