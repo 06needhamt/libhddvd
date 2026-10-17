@@ -232,6 +232,26 @@ no target), keyframe lists on `<timing>` animations (which carry no static
 style), and fragments that reference styles defined by the including document.
 Styles now compute for all 39 markup files from five externally supplied discs.
 
+The same 39 files use about 40 style properties. `hddvd_xmu_get_style_details` now models every property they use, apart from keyword font sizes:
+
+| Group | Properties |
+|---|---|
+| Rendering | `opacity`, `visibility`, `color`, `backgroundColor`, `backgroundRepeat`, `backgroundPositionHorizontal`/`Vertical`, `backgroundFrame`, `crop` |
+| Text | `font`, `fontSize`, `fontStyle`, `textAlign`, `displayAlign`, `wrapOption`, `textAltitude`, `anchor`, `border` |
+| Padding | `padding`, `paddingBefore`/`After`/`Start`/`End` |
+| Content size | percentage `contentWidth` and `contentHeight` |
+| Navigation | `navLeftUp`, `navLeftDown`, `navRightUp`, `navRightDown`, `navIndex` |
+
+Values and parsing rules:
+- **Colors** are 0xRRGGBBAA. They are parsed from `#rrggbb`, `rgb()`, `rgba()` and the 16 basic colour names.
+- **Opacity** is stored in thousandths.
+- **`inherit`** is recorded as declared, because computed values do not inherit from parent elements.
+- **Kept as written:** `anchor`, `border` and `crop`, because their meaning is unconfirmed.
+- **Malformed numbers** fail the document, as they do for the older properties.
+- **Unrecognised keywords and unknown properties** are reported through `hddvd_xmu_styles_get_unmodeled` instead, so a new value never makes a whole menu unusable.
+
+On the real files, the only things still reported are keyword font sizes (`small`, `xx-large`). How they map to pixels is not established.
+
 ### P3-04 — Add dependency and capability reporting
 
 **Status:** Complete
@@ -410,7 +430,7 @@ acknowledgement.
 
 ### P6-02 — Replace start-reference-only XPL parsing
 
-**Status:** Complete for the synthetic corpus; the strict external conformance run needs the maintainer's corpus
+**Status:** Complete; all five externally supplied playlists pass the strict conformance check
 **Depends on:** P1-01
 **Likely files:** `include/hddvd.h`, `src/xpl.c`, `tests/test_xpl.c`
 
@@ -432,6 +452,23 @@ as JSON; the external inventory records it per playlist, and setting
 `HDDVD_EXTERNAL_MENU_STRICT=1` makes the external-menu-corpus test fail on any
 rejected playlist or unmodeled construct. The `xpl-inventory` CTest runs the
 same strict check on the synthetic fixtures, and `fuzz-xpl` covers the parser.
+
+The five playlists from the maintainer's discs left these constructs unmodelled. Each now has an accessor:
+
+| Construct | Accessor |
+|---|---|
+| `description` on the playlist | `hddvd_xpl_description` |
+| `description`, `alternativeSDDisplayMode` and `tickBaseDivisor` on titles | `hddvd_xpl_get_title_details` |
+| `description` on clips | `hddvd_xpl_get_clip_description` |
+| `description`, `angleNumber` and `forced` on tracks | `hddvd_xpl_get_track_details` |
+| `id` and `sync` on applications | `hddvd_xpl_get_application_details` |
+| `description`, `priority` and `loadingBegin` on resources | `hddvd_xpl_get_application_resource_details` |
+
+- **Raw values:** `sync` and `alternativeSDDisplayMode` are kept as authored, because only some of their values have been seen. `sync` is also given as an enum, with `OTHER` for values outside hard, soft and none.
+- **`SubAudio`:** read as an audio track. Like `SubVideo`, it is marked as a secondary stream.
+- **`xsi:` attributes:** these describe the XML document, not the playlist, and are no longer reported as unmodelled.
+
+All five real playlists now report no unmodelled constructs.
 
 **Acceptance:** original synthetic playlists cover forward references, time
 ranges, branches, malformed cycles, and limits; required reference constructs are
@@ -593,6 +630,28 @@ parsers. Before this, `fuzz-timemap` reported 3 edges; with it, 445. The first i
 run found a heap over-read in the `HDDVDOBJ` envelope parser: a payload length
 near 2^64 wrapped the length sum back to the input size. It is fixed, with a
 regression test in `test_object.c`.
+- **New harnesses:**
+  - `fuzz-uri` covers URI parsing and resource resolution against a temporary disc root.
+  - `fuzz-titlemap` fuzzes playlists against a synthetic disc that holds a time map and a VTI.
+  - `fuzz-display` builds display lists from fuzzed scene nodes and decoder output, including a decoder that reports a too-short stride.
+  - Their seeds are generated into `tests/fixtures/fuzz/`.
+- **Scheduled fuzzing:** `.github/workflows/fuzz.yml` runs every harness for ten minutes each night, and on demand. It uploads crash inputs as artifacts.
+
+### X-04 — Release checks
+
+**Status:** Complete for the checks below; Windows and macOS still depend on GitHub Actions running
+**Depends on:** X-03
+
+`ci.yml` adds four release checks:
+
+- **`tsan`:** runs the test suite under ThreadSanitizer. `test_threads.c` uses a separate set of objects in each of four threads at once: playlists, markup and styles, time maps and VTIs, navigation schedulers, and display lists. The results must match a single-threaded run. The library keeps no mutable global state, and ThreadSanitizer reports no races.
+- **`static-analysis`:** runs the Clang static analyzer over the library, tools and tests, and fails on any report. Its first run found three issues, all now fixed:
+  - in `hddvd_script_close`, a NULL dereference after a failed allocation;
+  - in `hddvd-scriptinfo`, `qsort` called on a NULL array;
+  - in a test, a dead store.
+- **`i386`:** builds and tests a 32-bit library using `cmake/toolchains/linux-i386.cmake`, including the install-consumer test. It builds with no warnings.
+- **`abi`:** runs on pull requests. It builds the shared library at the base commit and at the head, and runs `tools/abi_check.sh`, which fails unless the changes are only additions.
+  - abidiff's own "incompatible" exit bit is not enough. It stays clear when a public struct changes layout, which `abi_check.sh` catches through the changed-function count. This was verified by inserting a field into `hddvd_xmu_style`.
 
 ## Phase 9 — actionable diagnostics
 

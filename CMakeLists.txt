@@ -128,6 +128,18 @@ if(BUILD_TESTING)
     target_compile_definitions(test-limits PRIVATE
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 
+    # Concurrent use of separate objects; the CI tsan job runs it under
+    # ThreadSanitizer. POSIX threads only.
+    find_package(Threads)
+    if(CMAKE_USE_PTHREADS_INIT)
+        add_executable(test-threads tests/test_threads.c)
+        target_link_libraries(test-threads PRIVATE hddvd Threads::Threads)
+        target_compile_options(test-threads PRIVATE -UNDEBUG)
+        target_compile_definitions(test-threads PRIVATE
+            HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+        add_test(NAME threads COMMAND test-threads)
+    endif()
+
     if(HDDVD_ENABLE_REFERENCE_TESTS)
         find_package(Python3 3.8 REQUIRED COMPONENTS Interpreter)
         add_test(NAME reference-menu
@@ -214,7 +226,7 @@ if(HDDVD_BUILD_FUZZERS)
     add_library(hddvd_fuzz STATIC ${HDDVD_SOURCES})
     hddvd_configure_library(hddvd_fuzz STATIC)
     target_compile_options(hddvd_fuzz PRIVATE -fsanitize=fuzzer-no-link,address,undefined)
-    foreach(target aca object xmf xmu script xpl navigation timemap)
+    foreach(target aca object xmf xmu script xpl navigation timemap uri titlemap display)
         add_executable(fuzz-${target} tests/fuzz_${target}.c)
         target_link_libraries(fuzz-${target} PRIVATE hddvd_fuzz)
         target_compile_options(fuzz-${target} PRIVATE

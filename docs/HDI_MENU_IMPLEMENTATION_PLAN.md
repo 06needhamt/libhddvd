@@ -204,7 +204,7 @@ advanced-subtitle segments, chapters, navigation tracks, applications,
 resources, scheduled events, pause points, normalized frame times, and validated
 title branches. An external-only inventory covers four independently authored
 playlists. Chapter entry points are validated in playback order. Application
-lifecycle windows are derived from the authored times, unmodeled constructs are
+lifecycle windows are derived from the authored times, the five external playlists are fully modelled, any remaining unmodelled constructs are
 reported for the strict external conformance check, and the navigation
 scheduler handles pause, rate, seek, discontinuity, title end, and menu
 close/reopen. A title time now resolves through the playlist's clips, the time

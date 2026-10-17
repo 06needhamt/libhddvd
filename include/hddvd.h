@@ -191,6 +191,128 @@ typedef struct hddvd_xmu_style
     size_t nav_down;
     size_t background_image_count;
 } hddvd_xmu_style;
+/* Style properties beyond hddvd_xmu_style, each flagged in properties when
+   declared. "inherit" is recorded as declared (opacity_inherit, or the
+   INHERIT visibility); computed values include style references but do not
+   inherit from parent elements. */
+typedef enum hddvd_xmu_detail_property
+{
+    HDDVD_XMU_DETAIL_OPACITY = 1u << 0,
+    HDDVD_XMU_DETAIL_VISIBILITY = 1u << 1,
+    HDDVD_XMU_DETAIL_COLOR = 1u << 2,
+    HDDVD_XMU_DETAIL_BACKGROUND_COLOR = 1u << 3,
+    HDDVD_XMU_DETAIL_FONT = 1u << 4,
+    HDDVD_XMU_DETAIL_FONT_SIZE = 1u << 5,
+    HDDVD_XMU_DETAIL_FONT_STYLE = 1u << 6,
+    HDDVD_XMU_DETAIL_TEXT_ALIGN = 1u << 7,
+    HDDVD_XMU_DETAIL_DISPLAY_ALIGN = 1u << 8,
+    HDDVD_XMU_DETAIL_WRAP = 1u << 9,
+    HDDVD_XMU_DETAIL_TEXT_ALTITUDE = 1u << 10,
+    HDDVD_XMU_DETAIL_ANCHOR = 1u << 11,
+    HDDVD_XMU_DETAIL_PADDING_BEFORE = 1u << 12,
+    HDDVD_XMU_DETAIL_PADDING_AFTER = 1u << 13,
+    HDDVD_XMU_DETAIL_PADDING_START = 1u << 14,
+    HDDVD_XMU_DETAIL_PADDING_END = 1u << 15,
+    HDDVD_XMU_DETAIL_BORDER = 1u << 16,
+    HDDVD_XMU_DETAIL_BACKGROUND_X = 1u << 17,
+    HDDVD_XMU_DETAIL_BACKGROUND_Y = 1u << 18,
+    HDDVD_XMU_DETAIL_BACKGROUND_REPEAT = 1u << 19,
+    HDDVD_XMU_DETAIL_BACKGROUND_FRAME = 1u << 20,
+    HDDVD_XMU_DETAIL_CROP = 1u << 21,
+    HDDVD_XMU_DETAIL_CONTENT_WIDTH = 1u << 22,
+    HDDVD_XMU_DETAIL_CONTENT_HEIGHT = 1u << 23,
+    HDDVD_XMU_DETAIL_NAV_LEFT_UP = 1u << 24,
+    HDDVD_XMU_DETAIL_NAV_LEFT_DOWN = 1u << 25,
+    HDDVD_XMU_DETAIL_NAV_RIGHT_UP = 1u << 26,
+    HDDVD_XMU_DETAIL_NAV_RIGHT_DOWN = 1u << 27,
+    HDDVD_XMU_DETAIL_NAV_INDEX = 1u << 28
+} hddvd_xmu_detail_property;
+typedef enum hddvd_xmu_visibility
+{
+    HDDVD_XMU_VISIBILITY_VISIBLE = 0,
+    HDDVD_XMU_VISIBILITY_HIDDEN,
+    HDDVD_XMU_VISIBILITY_INHERIT
+} hddvd_xmu_visibility;
+typedef enum hddvd_xmu_font_style
+{
+    HDDVD_XMU_FONT_STYLE_NORMAL = 0,
+    HDDVD_XMU_FONT_STYLE_ITALIC,
+    HDDVD_XMU_FONT_STYLE_OBLIQUE
+} hddvd_xmu_font_style;
+/* textAlign uses START/CENTER/END/LEFT/RIGHT; displayAlign uses BEFORE
+   (START), CENTER and AFTER (END). */
+typedef enum hddvd_xmu_align
+{
+    HDDVD_XMU_ALIGN_START = 0,
+    HDDVD_XMU_ALIGN_CENTER,
+    HDDVD_XMU_ALIGN_END,
+    HDDVD_XMU_ALIGN_LEFT,
+    HDDVD_XMU_ALIGN_RIGHT
+} hddvd_xmu_align;
+/* backgroundPositionHorizontal (left/center/right) and
+   backgroundPositionVertical (top/center/bottom), or a pixel or percentage
+   offset. */
+typedef enum hddvd_xmu_background_position
+{
+    HDDVD_XMU_BACKGROUND_START = 0,
+    HDDVD_XMU_BACKGROUND_CENTER,
+    HDDVD_XMU_BACKGROUND_END,
+    HDDVD_XMU_BACKGROUND_OFFSET,
+    /* The offset field holds a whole percentage. */
+    HDDVD_XMU_BACKGROUND_PERCENT
+} hddvd_xmu_background_position;
+typedef struct hddvd_xmu_style_details
+{
+    uint32_t properties;
+    /* opacity in thousandths, 0 to 1000. */
+    uint16_t opacity;
+    uint8_t opacity_inherit;
+    hddvd_xmu_visibility visibility;
+    /* Colors are 0xRRGGBBAA. */
+    uint32_t color;
+    uint32_t background_color;
+    /* font is the declared font resource; anchor and border are kept as
+       declared. Strings are borrowed until hddvd_xmu_styles_close(). */
+    const char *font;
+    const char *anchor;
+    const char *border;
+    uint32_t font_size;
+    hddvd_xmu_font_style font_style;
+    hddvd_xmu_align text_align;
+    hddvd_xmu_align display_align;
+    uint8_t wrap;
+    uint8_t background_repeat;
+    uint32_t text_altitude_percent;
+    uint32_t padding_before;
+    uint32_t padding_after;
+    uint32_t padding_start;
+    uint32_t padding_end;
+    hddvd_xmu_background_position background_x;
+    hddvd_xmu_background_position background_y;
+    int32_t background_x_offset;
+    int32_t background_y_offset;
+    uint32_t background_frame;
+    /* crop's four integers in declared order; their meaning is unconfirmed. */
+    int32_t crop[4];
+    uint32_t content_width_percent;
+    uint32_t content_height_percent;
+    /* Diagonal navigation targets; SIZE_MAX when "none" or unresolved. */
+    size_t nav_left_up;
+    size_t nav_left_down;
+    size_t nav_right_up;
+    size_t nav_right_down;
+    /* navIndex: "none" sets the property with nav_index_none. */
+    uint32_t nav_index;
+    uint8_t nav_index_none;
+} hddvd_xmu_style_details;
+/* A style property that was declared but is not represented: an unknown
+   property (value is NULL) or a known one with an unrecognized keyword. */
+typedef struct hddvd_xmu_style_unmodeled
+{
+    const char *property;
+    const char *value;
+    size_t occurrences;
+} hddvd_xmu_style_unmodeled;
 typedef struct hddvd_xpl_limits
 {
     size_t max_nodes;
@@ -334,6 +456,53 @@ typedef struct hddvd_xpl_application_resource
     uint8_t multiplexed;
     uint8_t has_size;
 } hddvd_xpl_application_resource;
+/* Attributes recorded beside the core playlist records. Strings are
+   borrowed until hddvd_xpl_close() and NULL when absent. Enumerated values
+   are kept as authored, because only some of their spellings have been
+   observed on discs. */
+typedef struct hddvd_xpl_title_details
+{
+    const char *description;
+    /* alternativeSDDisplayMode, such as "letterbox". */
+    const char *alternative_sd_display_mode;
+    uint32_t tick_base_divisor;
+    uint8_t has_tick_base_divisor;
+} hddvd_xpl_title_details;
+typedef struct hddvd_xpl_track_details
+{
+    const char *description;
+    uint32_t angle_number;
+    uint8_t has_angle_number;
+    uint8_t forced;
+    uint8_t has_forced;
+    /* Set for SubVideo and SubAudio, the secondary (picture-in-picture)
+       streams of a clip. */
+    uint8_t secondary;
+} hddvd_xpl_track_details;
+/* ApplicationSegment/PlaylistApplication sync. OTHER means a value outside
+   hard, soft and none; the authored text is kept in the details record. */
+typedef enum hddvd_xpl_sync
+{
+    HDDVD_XPL_SYNC_UNSPECIFIED = 0,
+    HDDVD_XPL_SYNC_HARD,
+    HDDVD_XPL_SYNC_SOFT,
+    HDDVD_XPL_SYNC_NONE,
+    HDDVD_XPL_SYNC_OTHER
+} hddvd_xpl_sync;
+typedef struct hddvd_xpl_application_details
+{
+    const char *id;
+    const char *sync_text;
+    hddvd_xpl_sync sync;
+} hddvd_xpl_application_details;
+typedef struct hddvd_xpl_resource_details
+{
+    const char *description;
+    uint32_t priority;
+    hddvd_xpl_time loading_begin;
+    uint8_t has_priority;
+    uint8_t has_loading_begin;
+} hddvd_xpl_resource_details;
 typedef struct hddvd_xpl_event
 {
     hddvd_xpl_event_kind kind;
@@ -865,6 +1034,21 @@ HDDVD_API const char *hddvd_xpl_default_language(const hddvd_xpl *);
 /* The time must use the playlist frame rate (HDDVD_EINVAL otherwise). */
 HDDVD_API int hddvd_xpl_get_application_state(const hddvd_xpl *, size_t, size_t, hddvd_xpl_time,
                                               hddvd_xpl_application_state *);
+/* Playlist description, or NULL when absent. */
+HDDVD_API const char *hddvd_xpl_description(const hddvd_xpl *);
+HDDVD_API int hddvd_xpl_get_title_details(const hddvd_xpl *, size_t, hddvd_xpl_title_details *);
+/* Clip description, or NULL through the out pointer when absent. */
+HDDVD_API int hddvd_xpl_get_clip_description(const hddvd_xpl *, size_t, size_t, const char **);
+HDDVD_API int hddvd_xpl_get_track_details(const hddvd_xpl *, size_t, size_t,
+                                          hddvd_xpl_track_details *);
+/* Use SIZE_MAX as the title index for playlist-wide applications. */
+HDDVD_API int hddvd_xpl_get_application_details(const hddvd_xpl *, size_t, size_t,
+                                                hddvd_xpl_application_details *);
+HDDVD_API int hddvd_xpl_get_application_resource_details(const hddvd_xpl *, size_t, size_t, size_t,
+                                                         hddvd_xpl_resource_details *);
+/* Constructs that parsed but are not represented above. Attributes in the
+   XML Schema instance namespace (xsi:schemaLocation and the like) describe
+   the document, not the playlist, and are never reported. */
 HDDVD_API size_t hddvd_xpl_unmodeled_count(const hddvd_xpl *);
 HDDVD_API int hddvd_xpl_get_unmodeled(const hddvd_xpl *, size_t, hddvd_xpl_unmodeled *);
 HDDVD_API int hddvd_xmf_dump(const void *, size_t, const char *, void *);
@@ -948,8 +1132,12 @@ HDDVD_API const char *hddvd_xmu_clock(const hddvd_xmu *);
    A nav property of "none", or one naming an id the document lacks (a
    script may create it later), resolves to SIZE_MAX. In a <div>-rooted
    fragment, style references to ids defined elsewhere are skipped.
-   Percentage contentWidth/contentHeight values are accepted but not modeled.
-   position is "absolute" or "relative" (position_absolute 1 or 0). */
+   Percentage contentWidth/contentHeight values are in the details record.
+   position is "absolute" or "relative" (position_absolute 1 or 0).
+   Malformed numbers in any property return HDDVD_EPARSE. A keyword a detail
+   property does not recognize (including a word where a number is expected,
+   such as fontSize="small"), or an unknown property, is reported through
+   hddvd_xmu_styles_get_unmodeled instead and leaves the property unset. */
 HDDVD_API int hddvd_xmu_styles_open(const hddvd_xmu *, hddvd_xmu_styles **);
 HDDVD_API void hddvd_xmu_styles_close(hddvd_xmu_styles *);
 HDDVD_API int hddvd_xmu_get_specified_style(const hddvd_xmu_styles *, size_t, hddvd_xmu_style *);
@@ -958,6 +1146,13 @@ HDDVD_API const char *hddvd_xmu_style_background_image(const hddvd_xmu_styles *,
                                                        int);
 HDDVD_API const char *hddvd_xmu_style_image_for_state(const hddvd_xmu_styles *, size_t, int);
 HDDVD_API size_t hddvd_xmu_style_z_order(const hddvd_xmu_styles *, size_t);
+/* Pass a nonzero last argument for the computed value. */
+HDDVD_API int hddvd_xmu_get_style_details(const hddvd_xmu_styles *, size_t, int,
+                                          hddvd_xmu_style_details *);
+/* Deduplicated in document order; elements inside <timing> are skipped. */
+HDDVD_API size_t hddvd_xmu_styles_unmodeled_count(const hddvd_xmu_styles *);
+HDDVD_API int hddvd_xmu_styles_get_unmodeled(const hddvd_xmu_styles *, size_t,
+                                             hddvd_xmu_style_unmodeled *);
 HDDVD_API int hddvd_time_from_milliseconds(uint64_t, hddvd_time *);
 HDDVD_API int hddvd_time_to_milliseconds(hddvd_time, uint64_t *);
 HDDVD_API int hddvd_time_from_seconds(uint64_t, hddvd_time *);

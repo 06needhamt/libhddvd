@@ -14,6 +14,7 @@
 struct xpl_resource
 {
     hddvd_xpl_application_resource value;
+    hddvd_xpl_resource_details details;
     /* Discs use both booleans and small integers here; see the header. */
     uint64_t multiplexed;
 };
@@ -21,6 +22,7 @@ struct xpl_resource
 struct xpl_application
 {
     hddvd_xpl_application value;
+    hddvd_xpl_application_details details;
     hddvd_xpl_time loading_begin;
     uint8_t has_loading_begin;
     struct xpl_resource *resources;
@@ -31,17 +33,25 @@ struct xpl_clip
 {
     hddvd_xpl_clip value;
     hddvd_xpl_clip_kind kind;
+    const char *description;
+};
+
+struct xpl_track
+{
+    hddvd_xpl_track value;
+    hddvd_xpl_track_details details;
 };
 
 struct xpl_title
 {
     hddvd_xpl_title_info value;
+    hddvd_xpl_title_details details;
     size_t on_end_target;
     struct xpl_clip *clips;
     size_t clip_count;
     hddvd_xpl_chapter *chapters;
     size_t chapter_count;
-    hddvd_xpl_track *tracks;
+    struct xpl_track *tracks;
     size_t track_count;
     struct xpl_application *applications;
     size_t application_count;
@@ -54,6 +64,7 @@ struct hddvd_xpl
     char *namespace_uri;
     char *display_name;
     char *type;
+    char *description;
     uint32_t frame_rate;
     hddvd_xpl_configuration configuration;
     hddvd_xpl_media_attribute *media;
@@ -75,25 +86,45 @@ struct hddvd_xpl
 
 /* Attributes the typed model consumes, per element local name. */
 static const char *const no_attributes[] = {NULL};
-static const char *const playlist_attributes[] = {"displayName", "type", "majorVersion",
-                                                  "minorVersion", NULL};
+static const char *const playlist_attributes[] = {"displayName",  "type",        "majorVersion",
+                                                  "minorVersion", "description", NULL};
 static const char *const size_attributes[] = {"size", NULL};
 static const char *const color_attributes[] = {"color", NULL};
 static const char *const timeout_attributes[] = {"timeout", NULL};
 static const char *const media_item_attributes[] = {"index", "codec", "channels", NULL};
 static const char *const title_set_attributes[] = {"timeBase", "tickBase", "defaultLanguage", NULL};
-static const char *const title_attributes[] = {
-    "id", "type", "displayName", "onEnd", "titleNumber", "selectable", "titleDuration", NULL};
+static const char *const title_attributes[] = {"id",
+                                               "type",
+                                               "displayName",
+                                               "onEnd",
+                                               "titleNumber",
+                                               "selectable",
+                                               "titleDuration",
+                                               "description",
+                                               "alternativeSDDisplayMode",
+                                               "tickBaseDivisor",
+                                               NULL};
 static const char *const clip_attributes[] = {
-    "src", "dataSource", "titleTimeBegin", "titleTimeEnd", "clipTimeBegin", "seamless", NULL};
-static const char *const track_attributes[] = {"track",      "streamNumber", "mediaAttr",
-                                               "selectable", "langcode",     NULL};
+    "src",           "dataSource", "titleTimeBegin", "titleTimeEnd",
+    "clipTimeBegin", "seamless",   "description",    NULL};
+static const char *const track_attributes[] = {"track",       "streamNumber", "mediaAttr",
+                                               "selectable",  "langcode",     "description",
+                                               "angleNumber", "forced",       NULL};
 static const char *const chapter_attributes[] = {"id", "displayName", "titleTimeBegin", NULL};
 static const char *const event_attributes[] = {"id", "titleTime", NULL};
-static const char *const application_attributes[] = {
-    "src",          "language", "description", "autorun", "loadingBegin", "titleTimeBegin",
-    "titleTimeEnd", "zOrder",   NULL};
-static const char *const resource_attributes[] = {"src", "size", "multiplexed", NULL};
+static const char *const application_attributes[] = {"src",
+                                                     "language",
+                                                     "description",
+                                                     "autorun",
+                                                     "loadingBegin",
+                                                     "titleTimeBegin",
+                                                     "titleTimeEnd",
+                                                     "zOrder",
+                                                     "id",
+                                                     "sync",
+                                                     NULL};
+static const char *const resource_attributes[] = {
+    "src", "size", "multiplexed", "description", "priority", "loadingBegin", NULL};
 
 static const struct
 {
@@ -122,6 +153,7 @@ static const struct
     {"Audio", track_attributes},
     {"Subtitle", track_attributes},
     {"SubVideo", track_attributes},
+    {"SubAudio", track_attributes},
     {"VideoTrack", track_attributes},
     {"AudioTrack", track_attributes},
     {"SubpictureTrack", track_attributes},
@@ -315,6 +347,39 @@ static int bool_prop(xmlNodePtr node, const char *name, uint8_t *result)
     return rc;
 }
 
+static int u32_prop(xmlNodePtr node, const char *name, uint32_t *result, uint8_t *present)
+{
+    uint64_t value = 0;
+    int rc = uint_prop(node, name, &value, present);
+    if (!rc && *present && value > UINT32_MAX)
+        rc = HDDVD_EPARSE;
+    *result = (uint32_t)value;
+    return rc;
+}
+
+/* Like bool_prop, but also reports whether the attribute was present. */
+static int bool_prop_present(xmlNodePtr node, const char *name, uint8_t *result, uint8_t *present)
+{
+    char *value = dup_prop(node, name);
+    int rc = boolean_value(value, result);
+    *present = value != NULL;
+    free(value);
+    return rc;
+}
+
+static hddvd_xpl_sync sync_value(const char *value)
+{
+    if (!value)
+        return HDDVD_XPL_SYNC_UNSPECIFIED;
+    if (!strcmp(value, "hard"))
+        return HDDVD_XPL_SYNC_HARD;
+    if (!strcmp(value, "soft"))
+        return HDDVD_XPL_SYNC_SOFT;
+    if (!strcmp(value, "none"))
+        return HDDVD_XPL_SYNC_NONE;
+    return HDDVD_XPL_SYNC_OTHER;
+}
+
 static int frame_rate_value(const char *value, uint32_t *result)
 {
     char *end;
@@ -385,8 +450,13 @@ static void free_application(struct xpl_application *application)
     free((char *)application->value.src);
     free((char *)application->value.language);
     free((char *)application->value.description);
+    free((char *)application->details.id);
+    free((char *)application->details.sync_text);
     for (i = 0; i < application->resource_count; i++)
+    {
         free((char *)application->resources[i].value.src);
+        free((char *)application->resources[i].details.description);
+    }
     free(application->resources);
 }
 
@@ -397,10 +467,13 @@ static void free_title(struct xpl_title *title)
     free((char *)title->value.type);
     free((char *)title->value.display_name);
     free((char *)title->value.on_end);
+    free((char *)title->details.description);
+    free((char *)title->details.alternative_sd_display_mode);
     for (i = 0; i < title->clip_count; i++)
     {
         free((char *)title->clips[i].value.src);
         free((char *)title->clips[i].value.data_source);
+        free((char *)title->clips[i].description);
     }
     for (i = 0; i < title->chapter_count; i++)
     {
@@ -408,7 +481,10 @@ static void free_title(struct xpl_title *title)
         free((char *)title->chapters[i].display_name);
     }
     for (i = 0; i < title->track_count; i++)
-        free((char *)title->tracks[i].language);
+    {
+        free((char *)title->tracks[i].value.language);
+        free((char *)title->tracks[i].details.description);
+    }
     for (i = 0; i < title->application_count; i++)
         free_application(&title->applications[i]);
     for (i = 0; i < title->event_count; i++)
@@ -428,6 +504,7 @@ void hddvd_xpl_close(hddvd_xpl *xpl)
     free(xpl->namespace_uri);
     free(xpl->display_name);
     free(xpl->type);
+    free(xpl->description);
     for (i = 0; i < xpl->media_count; i++)
     {
         free((char *)xpl->media[i].codec);
@@ -532,7 +609,7 @@ static hddvd_xpl_media_kind media_kind(xmlNodePtr node)
         node_is(node, "VideoTrack") || node_is(node, "SubVideo"))
         return HDDVD_XPL_MEDIA_VIDEO;
     if (node_is(node, "AudioAttributeItem") || node_is(node, "Audio") ||
-        node_is(node, "AudioTrack"))
+        node_is(node, "AudioTrack") || node_is(node, "SubAudio"))
         return HDDVD_XPL_MEDIA_AUDIO;
     if (node_is(node, "SubpictureAttributeItem") || node_is(node, "Subtitle") ||
         node_is(node, "SubpictureTrack") || node_is(node, "SubtitleTrack"))
@@ -598,10 +675,12 @@ static int parse_clip(xmlNodePtr node, hddvd_xpl *xpl, struct xpl_title *title)
     clip.kind = clip_kind(node);
     clip.value.src = dup_prop(node, "src");
     clip.value.data_source = dup_prop(node, "dataSource");
+    clip.description = dup_prop(node, "description");
     if (!clip.kind || !clip.value.src)
     {
         free((char *)clip.value.src);
         free((char *)clip.value.data_source);
+        free((char *)clip.description);
         return HDDVD_EPARSE;
     }
     rc = time_prop(node, "titleTimeBegin", xpl->frame_rate, &clip.value.title_begin,
@@ -620,6 +699,7 @@ static int parse_clip(xmlNodePtr node, hddvd_xpl *xpl, struct xpl_title *title)
     {
         free((char *)clip.value.src);
         free((char *)clip.value.data_source);
+        free((char *)clip.description);
     }
     return rc;
 }
@@ -648,34 +728,39 @@ static int parse_chapter(xmlNodePtr node, hddvd_xpl *xpl, struct xpl_title *titl
 
 static int parse_track(xmlNodePtr node, hddvd_xpl *xpl, struct xpl_title *title)
 {
-    hddvd_xpl_track track;
+    struct xpl_track entry;
+    hddvd_xpl_track *track = &entry.value;
+    hddvd_xpl_track_details *details = &entry.details;
     uint64_t number = 0;
     uint8_t present;
     int rc;
-    memset(&track, 0, sizeof(track));
-    track.kind = media_kind(node);
-    if (!track.kind)
+    memset(&entry, 0, sizeof(entry));
+    track->kind = media_kind(node);
+    if (!track->kind)
         return HDDVD_OK;
     rc = uint_prop(node, "track", &number, &present);
     if (rc || !present || number > UINT32_MAX)
         return rc ? rc : HDDVD_EPARSE;
-    track.track = (uint32_t)number;
-    rc = uint_prop(node, "streamNumber", &number, &track.has_stream_number);
-    if (!rc && track.has_stream_number && number > UINT32_MAX)
-        rc = HDDVD_EPARSE;
-    track.stream_number = (uint32_t)number;
+    track->track = (uint32_t)number;
+    rc = u32_prop(node, "streamNumber", &track->stream_number, &track->has_stream_number);
     if (!rc)
-        rc = uint_prop(node, "mediaAttr", &number, &track.has_media_attribute);
-    if (!rc && track.has_media_attribute && number > UINT32_MAX)
-        rc = HDDVD_EPARSE;
-    track.media_attribute = (uint32_t)number;
+        rc = u32_prop(node, "mediaAttr", &track->media_attribute, &track->has_media_attribute);
     if (!rc)
-        rc = bool_prop(node, "selectable", &track.selectable);
-    track.language = dup_prop(node, "langcode");
+        rc = bool_prop(node, "selectable", &track->selectable);
     if (!rc)
-        rc = append_item(xpl, (void **)&title->tracks, &title->track_count, sizeof(track), &track);
+        rc = u32_prop(node, "angleNumber", &details->angle_number, &details->has_angle_number);
+    if (!rc)
+        rc = bool_prop_present(node, "forced", &details->forced, &details->has_forced);
+    details->secondary = (uint8_t)(node_is(node, "SubVideo") || node_is(node, "SubAudio"));
+    track->language = dup_prop(node, "langcode");
+    details->description = dup_prop(node, "description");
+    if (!rc)
+        rc = append_item(xpl, (void **)&title->tracks, &title->track_count, sizeof(entry), &entry);
     if (rc)
-        free((char *)track.language);
+    {
+        free((char *)track->language);
+        free((char *)details->description);
+    }
     return rc;
 }
 
@@ -688,7 +773,13 @@ static int parse_resource(xmlNodePtr node, hddvd_xpl *xpl, struct xpl_applicatio
     resource.value.src = dup_prop(node, "src");
     if (!resource.value.src)
         return HDDVD_EPARSE;
+    resource.details.description = dup_prop(node, "description");
     rc = uint_prop(node, "size", &resource.value.size, &resource.value.has_size);
+    if (!rc)
+        rc = u32_prop(node, "priority", &resource.details.priority, &resource.details.has_priority);
+    if (!rc)
+        rc = time_prop(node, "loadingBegin", xpl->frame_rate, &resource.details.loading_begin,
+                       &resource.details.has_loading_begin);
     multiplexed = dup_prop(node, "multiplexed");
     if (!rc && multiplexed)
     {
@@ -704,7 +795,10 @@ static int parse_resource(xmlNodePtr node, hddvd_xpl *xpl, struct xpl_applicatio
         rc = append_item(xpl, (void **)&application->resources, &application->resource_count,
                          sizeof(resource), &resource);
     if (rc)
+    {
         free((char *)resource.value.src);
+        free((char *)resource.details.description);
+    }
     return rc;
 }
 
@@ -722,6 +816,9 @@ static int parse_application(xmlNodePtr node, hddvd_xpl *xpl, struct xpl_applica
     application.value.src = dup_prop(node, "src");
     application.value.language = dup_prop(node, "language");
     application.value.description = dup_prop(node, "description");
+    application.details.id = dup_prop(node, "id");
+    application.details.sync_text = dup_prop(node, "sync");
+    application.details.sync = sync_value(application.details.sync_text);
     if (!application.value.src)
         rc = HDDVD_EPARSE;
     if (!rc)
@@ -821,7 +918,7 @@ static int parse_title(xmlNodePtr node, hddvd_xpl *xpl, hddvd_xpl_title_kind kin
 {
     struct xpl_title title;
     uint64_t number = 0;
-    uint8_t present;
+    uint8_t present = 0;
     char *duration;
     int rc;
     memset(&title, 0, sizeof(title));
@@ -830,7 +927,15 @@ static int parse_title(xmlNodePtr node, hddvd_xpl *xpl, hddvd_xpl_title_kind kin
     title.value.type = dup_prop(node, "type");
     title.value.display_name = dup_prop(node, "displayName");
     title.value.on_end = dup_prop(node, "onEnd");
-    rc = uint_prop(node, "titleNumber", &number, &present);
+    title.details.description = dup_prop(node, "description");
+    title.details.alternative_sd_display_mode = dup_prop(node, "alternativeSDDisplayMode");
+    rc = u32_prop(node, "tickBaseDivisor", &title.details.tick_base_divisor,
+                  &title.details.has_tick_base_divisor);
+    /* A divisor of zero cannot divide the tick rate. */
+    if (!rc && title.details.has_tick_base_divisor && !title.details.tick_base_divisor)
+        rc = HDDVD_EPARSE;
+    if (!rc)
+        rc = uint_prop(node, "titleNumber", &number, &present);
     if (!rc && present && number > UINT32_MAX)
         rc = HDDVD_EPARSE;
     title.value.number = (uint32_t)number;
@@ -948,6 +1053,10 @@ static int collect_unmodeled(hddvd_xpl *xpl, xmlNodePtr node)
                     name++;
             if (!attribute->ns && *name)
                 continue;
+            if (attribute->ns && attribute->ns->href &&
+                !xmlStrcmp(attribute->ns->href,
+                           (const xmlChar *)"http://www.w3.org/2001/XMLSchema-instance"))
+                continue;
             if (attribute->ns && attribute->ns->prefix)
                 snprintf(qualified, sizeof(qualified), "%s:%s", (const char *)attribute->ns->prefix,
                          (const char *)attribute->name);
@@ -1020,6 +1129,7 @@ int hddvd_xpl_open_with_limits(const void *input, size_t input_size, const hddvd
         xpl->namespace_uri = hddvd_strdup((const char *)root->ns->href);
         xpl->display_name = dup_prop(root, "displayName");
         xpl->type = dup_prop(root, "type");
+        xpl->description = dup_prop(root, "description");
         if (!xpl->namespace_uri)
             rc = HDDVD_ENOMEM;
         if (!rc)
@@ -1187,7 +1297,7 @@ int hddvd_xpl_get_track(const hddvd_xpl *xpl, size_t title, size_t index, hddvd_
 {
     if (!xpl || !value || title >= xpl->title_count || index >= xpl->titles[title].track_count)
         return HDDVD_EINVAL;
-    *value = xpl->titles[title].tracks[index];
+    *value = xpl->titles[title].tracks[index].value;
     return HDDVD_OK;
 }
 
@@ -1334,6 +1444,61 @@ int hddvd_xpl_get_application_state(const hddvd_xpl *xpl, size_t title, size_t i
         *state = HDDVD_XPL_APPLICATION_LOADING;
     else
         *state = HDDVD_XPL_APPLICATION_INACTIVE;
+    return HDDVD_OK;
+}
+
+const char *hddvd_xpl_description(const hddvd_xpl *xpl)
+{
+    return xpl ? xpl->description : NULL;
+}
+
+int hddvd_xpl_get_title_details(const hddvd_xpl *xpl, size_t title, hddvd_xpl_title_details *value)
+{
+    if (!xpl || !value || title >= xpl->title_count)
+        return HDDVD_EINVAL;
+    *value = xpl->titles[title].details;
+    return HDDVD_OK;
+}
+
+int hddvd_xpl_get_clip_description(const hddvd_xpl *xpl, size_t title, size_t index,
+                                   const char **value)
+{
+    if (!xpl || !value || title >= xpl->title_count || index >= xpl->titles[title].clip_count)
+        return HDDVD_EINVAL;
+    *value = xpl->titles[title].clips[index].description;
+    return HDDVD_OK;
+}
+
+int hddvd_xpl_get_track_details(const hddvd_xpl *xpl, size_t title, size_t index,
+                                hddvd_xpl_track_details *value)
+{
+    if (!xpl || !value || title >= xpl->title_count || index >= xpl->titles[title].track_count)
+        return HDDVD_EINVAL;
+    *value = xpl->titles[title].tracks[index].details;
+    return HDDVD_OK;
+}
+
+int hddvd_xpl_get_application_details(const hddvd_xpl *xpl, size_t title, size_t index,
+                                      hddvd_xpl_application_details *value)
+{
+    size_t count = 0;
+    const struct xpl_application *applications = applications_for(xpl, title, &count);
+    if (!applications || !value || index >= count)
+        return HDDVD_EINVAL;
+    *value = applications[index].details;
+    return HDDVD_OK;
+}
+
+int hddvd_xpl_get_application_resource_details(const hddvd_xpl *xpl, size_t title,
+                                               size_t application, size_t index,
+                                               hddvd_xpl_resource_details *value)
+{
+    size_t count = 0;
+    const struct xpl_application *applications = applications_for(xpl, title, &count);
+    if (!applications || !value || application >= count ||
+        index >= applications[application].resource_count)
+        return HDDVD_EINVAL;
+    *value = applications[application].resources[index].details;
     return HDDVD_OK;
 }
 
