@@ -334,6 +334,53 @@ typedef struct hddvd_xpl_application_resource
     uint8_t multiplexed;
     uint8_t has_size;
 } hddvd_xpl_application_resource;
+/* Attributes recorded beside the core playlist records. Strings are
+   borrowed until hddvd_xpl_close() and NULL when absent. Enumerated values
+   are kept as authored, because only some of their spellings have been
+   observed on discs. */
+typedef struct hddvd_xpl_title_details
+{
+    const char *description;
+    /* alternativeSDDisplayMode, such as "letterbox". */
+    const char *alternative_sd_display_mode;
+    uint32_t tick_base_divisor;
+    uint8_t has_tick_base_divisor;
+} hddvd_xpl_title_details;
+typedef struct hddvd_xpl_track_details
+{
+    const char *description;
+    uint32_t angle_number;
+    uint8_t has_angle_number;
+    uint8_t forced;
+    uint8_t has_forced;
+    /* Set for SubVideo and SubAudio, the secondary (picture-in-picture)
+       streams of a clip. */
+    uint8_t secondary;
+} hddvd_xpl_track_details;
+/* ApplicationSegment/PlaylistApplication sync. OTHER means a value outside
+   hard, soft and none; the authored text is kept in the details record. */
+typedef enum hddvd_xpl_sync
+{
+    HDDVD_XPL_SYNC_UNSPECIFIED = 0,
+    HDDVD_XPL_SYNC_HARD,
+    HDDVD_XPL_SYNC_SOFT,
+    HDDVD_XPL_SYNC_NONE,
+    HDDVD_XPL_SYNC_OTHER
+} hddvd_xpl_sync;
+typedef struct hddvd_xpl_application_details
+{
+    const char *id;
+    const char *sync_text;
+    hddvd_xpl_sync sync;
+} hddvd_xpl_application_details;
+typedef struct hddvd_xpl_resource_details
+{
+    const char *description;
+    uint32_t priority;
+    hddvd_xpl_time loading_begin;
+    uint8_t has_priority;
+    uint8_t has_loading_begin;
+} hddvd_xpl_resource_details;
 typedef struct hddvd_xpl_event
 {
     hddvd_xpl_event_kind kind;
@@ -865,6 +912,21 @@ HDDVD_API const char *hddvd_xpl_default_language(const hddvd_xpl *);
 /* The time must use the playlist frame rate (HDDVD_EINVAL otherwise). */
 HDDVD_API int hddvd_xpl_get_application_state(const hddvd_xpl *, size_t, size_t, hddvd_xpl_time,
                                               hddvd_xpl_application_state *);
+/* Playlist description, or NULL when absent. */
+HDDVD_API const char *hddvd_xpl_description(const hddvd_xpl *);
+HDDVD_API int hddvd_xpl_get_title_details(const hddvd_xpl *, size_t, hddvd_xpl_title_details *);
+/* Clip description, or NULL through the out pointer when absent. */
+HDDVD_API int hddvd_xpl_get_clip_description(const hddvd_xpl *, size_t, size_t, const char **);
+HDDVD_API int hddvd_xpl_get_track_details(const hddvd_xpl *, size_t, size_t,
+                                          hddvd_xpl_track_details *);
+/* Use SIZE_MAX as the title index for playlist-wide applications. */
+HDDVD_API int hddvd_xpl_get_application_details(const hddvd_xpl *, size_t, size_t,
+                                                hddvd_xpl_application_details *);
+HDDVD_API int hddvd_xpl_get_application_resource_details(const hddvd_xpl *, size_t, size_t, size_t,
+                                                         hddvd_xpl_resource_details *);
+/* Constructs that parsed but are not represented above. Attributes in the
+   XML Schema instance namespace (xsi:schemaLocation and the like) describe
+   the document, not the playlist, and are never reported. */
 HDDVD_API size_t hddvd_xpl_unmodeled_count(const hddvd_xpl *);
 HDDVD_API int hddvd_xpl_get_unmodeled(const hddvd_xpl *, size_t, hddvd_xpl_unmodeled *);
 HDDVD_API int hddvd_xmf_dump(const void *, size_t, const char *, void *);

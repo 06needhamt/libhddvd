@@ -410,7 +410,7 @@ acknowledgement.
 
 ### P6-02 — Replace start-reference-only XPL parsing
 
-**Status:** Complete for the synthetic corpus; the strict external conformance run needs the maintainer's corpus
+**Status:** Complete; all five externally supplied playlists pass the strict conformance check
 **Depends on:** P1-01
 **Likely files:** `include/hddvd.h`, `src/xpl.c`, `tests/test_xpl.c`
 
@@ -432,6 +432,23 @@ as JSON; the external inventory records it per playlist, and setting
 `HDDVD_EXTERNAL_MENU_STRICT=1` makes the external-menu-corpus test fail on any
 rejected playlist or unmodeled construct. The `xpl-inventory` CTest runs the
 same strict check on the synthetic fixtures, and `fuzz-xpl` covers the parser.
+
+The five playlists from the maintainer's discs left these constructs unmodelled. Each now has an accessor:
+
+| Construct | Accessor |
+|---|---|
+| `description` on the playlist | `hddvd_xpl_description` |
+| `description`, `alternativeSDDisplayMode` and `tickBaseDivisor` on titles | `hddvd_xpl_get_title_details` |
+| `description` on clips | `hddvd_xpl_get_clip_description` |
+| `description`, `angleNumber` and `forced` on tracks | `hddvd_xpl_get_track_details` |
+| `id` and `sync` on applications | `hddvd_xpl_get_application_details` |
+| `description`, `priority` and `loadingBegin` on resources | `hddvd_xpl_get_application_resource_details` |
+
+- **Raw values:** `sync` and `alternativeSDDisplayMode` are kept as authored, because only some of their values have been seen. `sync` is also given as an enum, with `OTHER` for values outside hard, soft and none.
+- **`SubAudio`:** read as an audio track. Like `SubVideo`, it is marked as a secondary stream.
+- **`xsi:` attributes:** these describe the XML document, not the playlist, and are no longer reported as unmodelled.
+
+All five real playlists now report no unmodelled constructs.
 
 **Acceptance:** original synthetic playlists cover forward references, time
 ranges, branches, malformed cycles, and limits; required reference constructs are

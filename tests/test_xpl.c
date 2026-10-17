@@ -73,8 +73,8 @@ static void test_typed_playlist(void)
     assert(hddvd_xpl_chapter_count(xpl, 1) == 2);
     assert(hddvd_xpl_get_chapter(xpl, 1, 1, &chapter) == HDDVD_OK &&
            !strcmp(chapter.id, "chapter-2") && chapter.begin.frames == 3600);
-    assert(hddvd_xpl_track_count(xpl, 1) == 5);
-    assert(hddvd_xpl_get_track(xpl, 1, 4, &track) == HDDVD_OK &&
+    assert(hddvd_xpl_track_count(xpl, 1) == 8);
+    assert(hddvd_xpl_get_track(xpl, 1, 6, &track) == HDDVD_OK &&
            track.kind == HDDVD_XPL_MEDIA_SUBPICTURE && !track.selectable &&
            !strcmp(track.language, "en:01"));
     assert(hddvd_xpl_application_count(xpl, 1) == 1);
@@ -289,6 +289,104 @@ static void test_playlist_metadata_and_lifecycle(void)
     free(bytes);
 }
 
+static void test_details(void)
+{
+    size_t size;
+    unsigned char *bytes = read_fixture("playlist_full.xpl", &size);
+    hddvd_xpl *xpl = NULL;
+    hddvd_xpl_title_details title;
+    hddvd_xpl_track track;
+    hddvd_xpl_track_details details;
+    hddvd_xpl_application_details application;
+    hddvd_xpl_resource_details resource;
+    const char *description;
+
+    assert(hddvd_xpl_open(bytes, size, &xpl) == HDDVD_OK);
+    assert(!strcmp(hddvd_xpl_description(xpl), "Original playlist description"));
+    assert(hddvd_xpl_get_title_details(xpl, 1, &title) == HDDVD_OK);
+    assert(!strcmp(title.description, "Original feature") &&
+           !strcmp(title.alternative_sd_display_mode, "letterbox") && title.has_tick_base_divisor &&
+           title.tick_base_divisor == 2);
+    assert(hddvd_xpl_get_title_details(xpl, 2, &title) == HDDVD_OK && !title.description &&
+           !title.alternative_sd_display_mode && !title.has_tick_base_divisor);
+    assert(hddvd_xpl_get_clip_description(xpl, 1, 0, &description) == HDDVD_OK &&
+           !strcmp(description, "Part one"));
+    assert(hddvd_xpl_get_clip_description(xpl, 1, 1, &description) == HDDVD_OK && !description);
+
+    /* Clip streams first: Video, Audio, SubVideo, SubAudio. */
+    assert(hddvd_xpl_get_track_details(xpl, 1, 0, &details) == HDDVD_OK &&
+           details.has_angle_number && details.angle_number == 1 && !details.secondary);
+    assert(hddvd_xpl_get_track_details(xpl, 1, 1, &details) == HDDVD_OK &&
+           !strcmp(details.description, "Original stereo") && !details.has_angle_number);
+    assert(hddvd_xpl_get_track_details(xpl, 1, 2, &details) == HDDVD_OK && details.secondary &&
+           !strcmp(details.description, "Inset"));
+    assert(hddvd_xpl_get_track(xpl, 1, 3, &track) == HDDVD_OK &&
+           track.kind == HDDVD_XPL_MEDIA_AUDIO && track.stream_number == 1);
+    assert(hddvd_xpl_get_track_details(xpl, 1, 3, &details) == HDDVD_OK && details.secondary);
+    assert(hddvd_xpl_get_track_details(xpl, 1, 7, &details) == HDDVD_OK && details.has_forced &&
+           details.forced);
+    assert(hddvd_xpl_get_track_details(xpl, 1, 6, &details) == HDDVD_OK && !details.has_forced);
+
+    assert(hddvd_xpl_get_application_details(xpl, 1, 0, &application) == HDDVD_OK &&
+           !strcmp(application.id, "segment") && !strcmp(application.sync_text, "hard") &&
+           application.sync == HDDVD_XPL_SYNC_HARD);
+    assert(hddvd_xpl_get_application_details(xpl, SIZE_MAX, 0, &application) == HDDVD_OK &&
+           !application.id && application.sync == HDDVD_XPL_SYNC_SOFT);
+    assert(hddvd_xpl_get_application_resource_details(xpl, SIZE_MAX, 0, 0, &resource) == HDDVD_OK &&
+           !strcmp(resource.description, "Original archive") && resource.has_priority &&
+           resource.priority == 3 && resource.has_loading_begin &&
+           resource.loading_begin.frames == 60 && resource.loading_begin.frame_rate == 60);
+
+    assert(hddvd_xpl_get_title_details(xpl, 3, &title) == HDDVD_EINVAL);
+    assert(hddvd_xpl_get_clip_description(xpl, 1, 3, &description) == HDDVD_EINVAL);
+    assert(hddvd_xpl_get_track_details(xpl, 1, 8, &details) == HDDVD_EINVAL);
+    assert(hddvd_xpl_get_application_details(xpl, 1, 1, &application) == HDDVD_EINVAL);
+    assert(hddvd_xpl_get_application_resource_details(xpl, SIZE_MAX, 0, 1, &resource) ==
+           HDDVD_EINVAL);
+    assert(hddvd_xpl_get_title_details(NULL, 0, &title) == HDDVD_EINVAL);
+    assert(hddvd_xpl_description(NULL) == NULL);
+    hddvd_xpl_close(xpl);
+    free(bytes);
+}
+
+static void test_detail_values(void)
+{
+#define PLAYLIST(title, inner)                                                                     \
+    "<Playlist xmlns='http://www.dvdforum.org/2005/HDDVDVideo/Playlist'>"                          \
+    "<TitleSet timeBase='60fps'><Title " title ">" inner "</Title></TitleSet></Playlist>"
+    static const char *const invalid[] = {
+        PLAYLIST("tickBaseDivisor='0'", ""),
+        PLAYLIST("tickBaseDivisor='x'", ""),
+        PLAYLIST("tickBaseDivisor='4294967296'", ""),
+        PLAYLIST("", "<SubtitleTrack track='1' forced='maybe'/>"),
+        PLAYLIST("", "<PrimaryAudioVideoClip src='a.MAP'><Video track='1' angleNumber='-1'/>"
+                     "</PrimaryAudioVideoClip>"),
+        PLAYLIST("", "<ApplicationSegment src='a.xmf'><ApplicationResource src='r' "
+                     "priority='4294967296'/></ApplicationSegment>"),
+        PLAYLIST("", "<ApplicationSegment src='a.xmf'><ApplicationResource src='r' "
+                     "loadingBegin='00:00:00:60'/></ApplicationSegment>"),
+    };
+    static const char other_sync[] = PLAYLIST("", "<ApplicationSegment src='a.xmf' sync='later'/>"
+                                                  "<ApplicationSegment src='b.xmf' sync='none'/>"
+                                                  "<ApplicationSegment src='c.xmf'/>");
+#undef PLAYLIST
+    hddvd_xpl *xpl = NULL;
+    hddvd_xpl_application_details application;
+    size_t i;
+    for (i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
+        assert(hddvd_xpl_open(invalid[i], strlen(invalid[i]), &xpl) == HDDVD_EPARSE && !xpl);
+    /* Unrecognized sync values are kept, not rejected. */
+    assert(hddvd_xpl_open(other_sync, sizeof(other_sync) - 1, &xpl) == HDDVD_OK);
+    assert(hddvd_xpl_get_application_details(xpl, 0, 0, &application) == HDDVD_OK &&
+           application.sync == HDDVD_XPL_SYNC_OTHER && !strcmp(application.sync_text, "later"));
+    assert(hddvd_xpl_get_application_details(xpl, 0, 1, &application) == HDDVD_OK &&
+           application.sync == HDDVD_XPL_SYNC_NONE);
+    assert(hddvd_xpl_get_application_details(xpl, 0, 2, &application) == HDDVD_OK &&
+           application.sync == HDDVD_XPL_SYNC_UNSPECIFIED && !application.sync_text);
+    assert(hddvd_xpl_unmodeled_count(xpl) == 0);
+    hddvd_xpl_close(xpl);
+}
+
 static void test_open_ended_application(void)
 {
     static const char playlist[] =
@@ -419,6 +517,8 @@ int main(void)
     test_playlist_metadata_and_lifecycle();
     test_open_ended_application();
     test_unmodeled_constructs();
+    test_details();
+    test_detail_values();
     test_invalid_metadata();
     test_enveloped_playlist();
     return 0;
