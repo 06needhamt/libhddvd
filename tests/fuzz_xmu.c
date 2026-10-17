@@ -1,5 +1,18 @@
 #include "hddvd.h"
 #include <stdint.h>
+#include <string.h>
+
+/* Supplies bytes for some image URLs and reports others as missing. */
+static int image(void *opaque, const char *url, const void **data, size_t *size)
+{
+    static const unsigned char bytes[] = {0};
+    (void)opaque;
+    if (strlen(url) % 2)
+        return HDDVD_ENOTFOUND;
+    *data = bytes;
+    *size = sizeof(bytes);
+    return HDDVD_OK;
+}
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
@@ -23,6 +36,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         }
         for (i = 0; i < hddvd_xmu_styles_unmodeled_count(styles); i++)
             (void)hddvd_xmu_styles_get_unmodeled(styles, i, &unmodeled);
+        {
+            hddvd_scene *scene = NULL;
+            if (hddvd_scene_build(xmu, styles, size % 8, image, NULL, &scene) == HDDVD_OK)
+                hddvd_scene_close(scene);
+        }
     }
     hddvd_xmu_styles_close(styles);
     hddvd_xmu_close(xmu);

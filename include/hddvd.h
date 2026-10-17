@@ -53,6 +53,7 @@ typedef struct hddvd_evo_parser hddvd_evo_parser;
 typedef struct hddvd_vti hddvd_vti;
 typedef struct hddvd_tmap hddvd_tmap;
 typedef struct hddvd_title_map hddvd_title_map;
+typedef struct hddvd_scene hddvd_scene;
 typedef void (*hddvd_log_fn)(void *, int, const char *);
 typedef enum hddvd_subsystem
 {
@@ -975,6 +976,34 @@ HDDVD_API void hddvd_video_transform_fit(uint32_t, uint32_t, uint32_t, uint32_t,
 HDDVD_API int hddvd_video_to_logical(const hddvd_video_transform *, int32_t, int32_t, int32_t *,
                                      int32_t *);
 HDDVD_API int hddvd_display_hit_test(const hddvd_display_list *, int32_t, int32_t, uint64_t *);
+/* Supplies the encoded bytes of an image that markup names, given the URL as
+   written in backgroundImage. The bytes must stay valid while any display
+   list built from the scene exists. Return HDDVD_ENOTFOUND to draw nothing
+   for that image; any other error fails the build. */
+typedef int (*hddvd_scene_image_fn)(void *, const char *, const void **, size_t *);
+/* Build display-list scene nodes from markup and its computed styles, for
+   hddvd_display_build. Elements under <body> (or every element of a <div>
+   fragment) become nodes in document order, except param and include. A
+   node's id is its markup node index, so hit tests name markup nodes.
+   - Geometry: x, y, width and height in pixels, or a percentage of the
+     parent's size. An element without a width or height fills its parent
+     (unconfirmed against a player). The parent of a top-level element is
+     the 1920x1080 logical region.
+   - visible is cleared by display "none" or visibility "hidden".
+   - opacity follows CSS: "inherit" copies the parent's value, and values
+     multiply down the tree.
+   - z_index is the computed zIndex; focused is set on the node given (pass
+     SIZE_MAX for none); buttons and inputs are hit-testable.
+   - Images are the normal and focused background images
+     (hddvd_xmu_style_image_for_state); each URL is requested once.
+   Background position, crop, colors and text are not drawn. The markup and
+   styles must outlive the scene, whose image identities borrow from them. */
+HDDVD_API int hddvd_scene_build(const hddvd_xmu *, const hddvd_xmu_styles *, size_t,
+                                hddvd_scene_image_fn, void *, hddvd_scene **);
+HDDVD_API void hddvd_scene_close(hddvd_scene *);
+HDDVD_API size_t hddvd_scene_node_count(const hddvd_scene *);
+/* The node array, valid until hddvd_scene_close(); NULL when empty. */
+HDDVD_API const hddvd_scene_node *hddvd_scene_nodes(const hddvd_scene *);
 HDDVD_API int hddvd_scan_files(const hddvd_ctx *, hddvd_file_cb, void *);
 HDDVD_API const char *hddvd_file_kind_name(hddvd_file_kind);
 HDDVD_API int hddvd_xpl_find_start_ref(const char *, char **);

@@ -21,7 +21,8 @@ Experimental open-source HD DVD inspection library.
   structural fixtures; commercial HDi bytecode remains explicitly unsupported
 - Renderer-neutral, damage-tracked display lists with host-decoded premultiplied
   RGBA planes, nested clipping/layout, stable stacking, focus image selection,
-  letterbox transforms, and reverse-paint-order hit testing
+  letterbox transforms, and reverse-paint-order hit testing, built directly from
+  markup and its computed styles with `hddvd_scene_build`
 
 ## ACA tools
 

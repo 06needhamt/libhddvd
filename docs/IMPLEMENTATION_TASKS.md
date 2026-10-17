@@ -387,6 +387,30 @@ scale-to-fit, visibility, stable stacking, and normal/focused image choice.
 overflow, hidden ancestors, equal z-index order, focus changes, and invalid image
 dimensions.
 
+`hddvd_scene_build` (`src/scene.c`) produces the scene nodes from markup and its computed styles, so hosts no longer build them by hand.
+
+| Scene field | Comes from |
+|---|---|
+| Nodes | Elements under `<body>` (or a whole `<div>` fragment), in document order, except `param` and `include` |
+| Node ids | The element's markup node index, so hit tests name markup nodes |
+| Geometry | `x`, `y`, `width`, `height` in pixels, or a percentage of the parent |
+| `visible` | Cleared by `display: none` or `visibility: hidden` |
+| Opacity | CSS rules: `inherit` copies the parent's value, and values multiply down the tree |
+| Other fields | `zIndex`; focus on the requested node; buttons and inputs are hit-testable |
+| Images | Normal and focused background images, fetched once per URL through a host callback |
+
+Three rules are not confirmed against a player:
+- An element without a declared size fills its parent. 101 containers in the real markup have no declared size; sizing them to zero would clip everything inside them.
+- A hidden element also hides its descendants, as the display list already does. CSS would still show a descendant marked `visible`.
+- `position: relative` is placed the same way as `absolute`.
+
+Background position, crop, colours and text are modelled in the style details but not drawn, because a scene node has no field for them.
+
+Results on the 39 real markup files:
+- All build scenes, and every image URL they name resolves to a member of the same archive.
+- Most content is authored hidden: panels start as `display: none` or `visibility: hidden` until a script reveals them.
+- In its initial state, the visible main page of `MainMenu.xmu` draws 6 quads.
+
 ### P5-03 — Add damage tracking, transforms, and hit testing
 
 **Status:** Complete
