@@ -11,6 +11,8 @@ int main(void)
     assert((features & HDDVD_FEATURE_DISPLAY_LIST) != 0);
     assert((features & HDDVD_FEATURE_SCRIPT_RUNTIME) == 0);
     assert((features & HDDVD_FEATURE_IMAGE_DECODER) == 0);
+    assert((features & HDDVD_FEATURE_TIME_MAP) != 0);
+    assert(strcmp(hddvd_feature_name(HDDVD_FEATURE_TIME_MAP), "time-map") == 0);
     assert(strcmp(hddvd_feature_name(HDDVD_FEATURE_NAV_SCHEDULER), "navigation-scheduler") == 0);
     assert(hddvd_feature_name((hddvd_feature)(UINT64_C(1) << 63)) == NULL);
     assert(strcmp(hddvd_strerror(HDDVD_OK), "success") == 0);

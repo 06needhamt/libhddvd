@@ -439,7 +439,7 @@ all represented in the conformance report.
 
 ### P6-03 — Decode required IFO and MAP navigation structures
 
-**Status:** Headers validated against real files; table decoding blocked on VTI/EVO samples or a specification
+**Status:** Advanced Content time maps and the VTI EVOB table decoded and verified against a real disc; Standard Content IFO tables and the VTI attribute table remain
 **Depends on:** P1-01, P6-02
 **Likely files:** `src/ifo.c`, `src/map.c`, `tests/test_ifo.c`, `tests/test_map.c`
 
@@ -457,6 +457,18 @@ sectors and an end-sector field that matches the size, and read the VTI name
 each MAP refers to. `docs/formats/ifo-map.md` records the evidence. The supplied
 files include no VTI or EVO files, so nothing yet confirms what the time-map or
 IFO tables point to.
+
+Second slice: one disc's `HVA00001.VTI` and one of its EVO files showed what the
+tables mean. `hddvd_vti_open` reads the VTI's EVOB table (file name, number,
+start and end time, sector count). `hddvd_tmap_open` decodes every MAP entry as
+one EVOBU: first-reference size, playback time in 3003/8-tick units, and size.
+Entry sizes match the EVO's navigation packs. On that disc both maps sum to
+their VTI records exactly, and all 130 MAPs from five discs open.
+`hddvd_tmap_find` maps a time within an EVOB to an EVOBU and its first sector.
+Synthetic builders in `test_ifo.c` and `test_map.c` cover every field and
+rejection, `fuzz-timemap` covers both readers, and `hddvd-timemap` checks real
+files. Still open: Standard Content IFO tables, the VTI attribute table, angle
+or interleaved maps, and whether the time unit changes at other frame rates.
 
 ### P6-04 — Harden EVO packet and stream metadata parsing
 

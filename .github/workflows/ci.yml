@@ -93,6 +93,7 @@ jobs:
           ./build/fuzz-xmu tests/fixtures/plain_markup.xmu
           ./build/fuzz-xpl tests/fixtures/playlist_full.xpl
           ./build/fuzz-script tests/fixtures/scripts/*.hdis
+          ./build/fuzz-timemap tests/fixtures/timemap/*
           ./build/fuzz-aca -seed=1 -runs=1000
           ./build/fuzz-script -seed=1 -runs=1000
           ./build/fuzz-navigation -seed=1 -runs=1000

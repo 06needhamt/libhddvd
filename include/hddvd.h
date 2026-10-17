@@ -50,6 +50,8 @@ typedef struct hddvd_image_cache hddvd_image_cache;
 typedef struct hddvd_display_list hddvd_display_list;
 typedef struct hddvd_nav hddvd_nav;
 typedef struct hddvd_evo_parser hddvd_evo_parser;
+typedef struct hddvd_vti hddvd_vti;
+typedef struct hddvd_tmap hddvd_tmap;
 typedef void (*hddvd_log_fn)(void *, int, const char *);
 typedef enum hddvd_subsystem
 {
@@ -644,7 +646,9 @@ typedef enum hddvd_ifo_kind
 {
     HDDVD_IFO_UNKNOWN = 0,
     HDDVD_IFO_VMG,
-    HDDVD_IFO_STANDARD_VTS
+    HDDVD_IFO_STANDARD_VTS,
+    /* The VTI file (HVA00001.VTI) that Advanced Content time maps name. */
+    HDDVD_IFO_ADVANCED_VTS
 } hddvd_ifo_kind;
 typedef struct hddvd_ifo_header
 {
@@ -660,6 +664,31 @@ typedef struct hddvd_map_header
     /* The VTI file this time map names, such as "HVA00001.VTI". */
     char vti_name[64];
 } hddvd_map_header;
+/* One EVOB record from a VTI file. start and end are the EVOB's first and
+   last presentation times as stored (90 kHz); sector_count is the EVO file's
+   length in 2048-byte sectors. A time map names its EVOB by number. */
+typedef struct hddvd_vti_evob
+{
+    uint16_t number;
+    uint16_t attribute_number;
+    char file_name[256];
+    hddvd_time start;
+    hddvd_time end;
+    uint32_t sector_count;
+} hddvd_vti_evob;
+/* One time-map entry, describing one EVOBU (a navigation pack and the
+   packs up to the next one). Sectors are relative to the start of the EVO
+   file; start is relative to the EVOB's start time. duration_units is the
+   stored playback time, in units of 3003/8 ticks of the 90 kHz clock. */
+typedef struct hddvd_tmap_entry
+{
+    uint32_t first_sector;
+    uint32_t sector_count;
+    uint32_t first_reference_sectors;
+    uint32_t duration_units;
+    hddvd_time start;
+    hddvd_time duration;
+} hddvd_tmap_entry;
 
 /* Capability bits describe independently usable library facilities, not
    complete interactive-menu conformance. Unknown bits must be ignored so
@@ -674,7 +703,8 @@ typedef enum hddvd_feature
     HDDVD_FEATURE_NAV_SCHEDULER = UINT64_C(1) << 4,
     HDDVD_FEATURE_PROTECTION_PROVIDER = UINT64_C(1) << 5,
     HDDVD_FEATURE_SCRIPT_RUNTIME = UINT64_C(1) << 6,
-    HDDVD_FEATURE_IMAGE_DECODER = UINT64_C(1) << 7
+    HDDVD_FEATURE_IMAGE_DECODER = UINT64_C(1) << 7,
+    HDDVD_FEATURE_TIME_MAP = UINT64_C(1) << 8
 } hddvd_feature;
 
 HDDVD_API const char *hddvd_version(void);
@@ -963,6 +993,38 @@ HDDVD_API int hddvd_ifo_probe(const char *, hddvd_ifo_info *);
    HDDVD_EPARSE. Tables beyond these fields are not decoded yet. */
 HDDVD_API int hddvd_ifo_read_header(hddvd_stream *, hddvd_ifo_header *);
 HDDVD_API int hddvd_map_read_header(hddvd_stream *, hddvd_map_header *);
+/* Read the EVOB table of an ADVANCED-VTS (VTI) file. Other identifiers
+   return HDDVD_ENOTSUP; a table outside the file, a record outside the
+   table, an empty, unprintable or path-like file name, a duplicate number,
+   an end before the start, or an empty EVOB return HDDVD_EPARSE. The
+   handle does not keep the stream. */
+HDDVD_API int hddvd_vti_open(hddvd_stream *, hddvd_vti **);
+HDDVD_API void hddvd_vti_close(hddvd_vti *);
+HDDVD_API size_t hddvd_vti_evob_count(const hddvd_vti *);
+HDDVD_API int hddvd_vti_get_evob(const hddvd_vti *, size_t, hddvd_vti_evob *);
+/* Find the record with this EVOB number; HDDVD_ENOTFOUND if none. */
+HDDVD_API int hddvd_vti_find_evob(const hddvd_vti *, uint16_t, size_t *);
+/* Read a time map (MAP file). Besides the header rules above, the entry
+   table must lie inside the file and hold at least one entry, and every
+   entry must have a non-zero size and playback time and a first reference
+   picture that is non-empty and fits in its EVOBU; anything else returns
+   HDDVD_EPARSE. The handle does not keep the stream. */
+HDDVD_API int hddvd_tmap_open(hddvd_stream *, hddvd_tmap **);
+HDDVD_API void hddvd_tmap_close(hddvd_tmap *);
+HDDVD_API int hddvd_tmap_get_header(const hddvd_tmap *, hddvd_map_header *);
+HDDVD_API uint16_t hddvd_tmap_evob_number(const hddvd_tmap *);
+HDDVD_API size_t hddvd_tmap_entry_count(const hddvd_tmap *);
+HDDVD_API int hddvd_tmap_get_entry(const hddvd_tmap *, size_t, hddvd_tmap_entry *);
+/* Total sectors and playback time of all entries. */
+HDDVD_API uint64_t hddvd_tmap_sector_count(const hddvd_tmap *);
+HDDVD_API hddvd_time hddvd_tmap_duration(const hddvd_tmap *);
+/* Index of the entry playing at this offset from the EVOB start time.
+   Offsets at or past the end return HDDVD_ENOTFOUND. */
+HDDVD_API int hddvd_tmap_find(const hddvd_tmap *, hddvd_time, size_t *);
+/* Check a time map against its VTI record: same EVOB number, sectors that
+   add up to the EVOB's sector count, and playback time that adds up to
+   end - start. Returns HDDVD_EPARSE on any disagreement. */
+HDDVD_API int hddvd_tmap_check_evob(const hddvd_tmap *, const hddvd_vti_evob *);
 HDDVD_API void hddvd_free(void *);
 #ifdef __cplusplus
 }

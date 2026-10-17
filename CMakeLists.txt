@@ -40,6 +40,7 @@ set(HDDVD_SOURCES
     src/style.c
     src/uri.c
     src/util.c
+    src/vti.c
     src/xmf.c
     src/xmu.c
     src/xpl.c
@@ -97,7 +98,7 @@ elseif(HDDVD_BUILD_STATIC)
     add_library(hddvd::hddvd_static ALIAS hddvd)
 endif()
 
-foreach(tool info menuinfo acainfo acaextract scriptdump scriptinfo xplinfo)
+foreach(tool info menuinfo acainfo acaextract scriptdump scriptinfo xplinfo timemap)
     add_executable(hddvd-${tool} tools/hddvd-${tool}.c)
     target_link_libraries(hddvd-${tool} PRIVATE hddvd)
 endforeach()
@@ -167,6 +168,12 @@ if(BUILD_TESTING)
     add_test(NAME scriptinfo-rejects-invalid
         COMMAND hddvd-scriptinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/objects/bad-flags.hdo)
     set_tests_properties(scriptinfo-rejects-invalid PROPERTIES WILL_FAIL TRUE)
+    # The generated time map must agree with its generated VTI record.
+    add_test(NAME timemap-fixture
+        COMMAND hddvd-timemap ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/timemap/original.vti
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/timemap/original.map)
+    set_tests_properties(timemap-fixture PROPERTIES PASS_REGULAR_EXPRESSION
+        "evob=1 entries=4 sectors=131 duration=1\\.877s ok")
 
     # The inventory's library check must pass on the original synthetic
     # playlists before it is trusted on an external corpus.
@@ -201,7 +208,7 @@ if(HDDVD_BUILD_FUZZERS)
     if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
         message(FATAL_ERROR "HDDVD_BUILD_FUZZERS requires Clang and libFuzzer")
     endif()
-    foreach(target aca object xmf xmu script xpl navigation)
+    foreach(target aca object xmf xmu script xpl navigation timemap)
         add_executable(fuzz-${target} tests/fuzz_${target}.c)
         target_link_libraries(fuzz-${target} PRIVATE hddvd)
         target_compile_options(fuzz-${target} PRIVATE
@@ -214,7 +221,7 @@ endif()
 install(TARGETS
         ${hddvd_library_targets}
         hddvd-info hddvd-menuinfo hddvd-acainfo hddvd-acaextract
-        hddvd-scriptdump hddvd-scriptinfo hddvd-xplinfo
+        hddvd-scriptdump hddvd-scriptinfo hddvd-xplinfo hddvd-timemap
     EXPORT hddvdTargets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
