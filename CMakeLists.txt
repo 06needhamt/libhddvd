@@ -38,6 +38,7 @@ set(HDDVD_SOURCES
     src/script_decode.c
     src/stream.c
     src/style.c
+    src/title_map.c
     src/uri.c
     src/util.c
     src/vti.c
@@ -98,13 +99,13 @@ elseif(HDDVD_BUILD_STATIC)
     add_library(hddvd::hddvd_static ALIAS hddvd)
 endif()
 
-foreach(tool info menuinfo acainfo acaextract scriptdump scriptinfo xplinfo timemap)
+foreach(tool info menuinfo acainfo acaextract scriptdump scriptinfo xplinfo timemap locate)
     add_executable(hddvd-${tool} tools/hddvd-${tool}.c)
     target_link_libraries(hddvd-${tool} PRIVATE hddvd)
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map)
+    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         # Test assertions also perform setup and must run in Release builds.
@@ -226,7 +227,7 @@ endif()
 install(TARGETS
         ${hddvd_library_targets}
         hddvd-info hddvd-menuinfo hddvd-acainfo hddvd-acaextract
-        hddvd-scriptdump hddvd-scriptinfo hddvd-xplinfo hddvd-timemap
+        hddvd-scriptdump hddvd-scriptinfo hddvd-xplinfo hddvd-timemap hddvd-locate
     EXPORT hddvdTargets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

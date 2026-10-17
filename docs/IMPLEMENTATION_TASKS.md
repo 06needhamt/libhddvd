@@ -467,8 +467,20 @@ their VTI records exactly, and all 130 MAPs from five discs open.
 `hddvd_tmap_find` maps a time within an EVOB to an EVOBU and its first sector.
 Synthetic builders in `test_ifo.c` and `test_map.c` cover every field and
 rejection, `fuzz-timemap` covers both readers, and `hddvd-timemap` checks real
-files. Still open: Standard Content IFO tables, the VTI attribute table, angle
-or interleaved maps, and whether the time unit changes at other frame rates.
+files.
+
+Third slice: `hddvd_title_map_open` connects a playlist title to its media. It
+opens the time map of each primary audio/video clip and the VTI that map names,
+and checks that the clip fits its map. `hddvd_title_map_locate` then resolves a
+title time to the EVO URI, its presentation time, and the sector of the EVOBU
+that plays it. Playlist times count `timeBase="60fps"` at 60000/1001 frames per
+second (`hddvd_xpl_time_to_ticks`). On both 300 discs, all 86 clips are exactly
+as long as their maps at that rate, and shorter at a true 60. On the South Park
+disc, `hddvd-locate` reproduces the EVOBU start times in `FBILogo.EVO`'s
+navigation packs. `test_title_map.c` covers a synthetic disc tree.
+
+Still open: Standard Content IFO tables, the VTI attribute table, angle or
+interleaved maps, and the clock for time bases other than 60fps.
 
 ### P6-04 — Harden EVO packet and stream metadata parsing
 

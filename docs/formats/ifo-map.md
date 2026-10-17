@@ -77,6 +77,19 @@ Across 83,110 entries:
 
 The time unit was observed only on 24000/1001 content with the header bytes above. Discs at another frame rate may use a different unit, and might signal it somewhere in the unknown header range.
 
+## Title time
+
+Playlists give clip times as `HH:MM:SS:FF` in the TitleSet's `timeBase`.
+- **Observed rate:** all five playlists use `timeBase="60fps"`.
+- **What a frame means:** each frame is 1001/60000 s, not 1/60 s.
+  - On both 300 discs, every one of the 86 primary clips is exactly as long as its time map at 60000/1001: the difference is 0 ticks in every case.
+  - Read as a true 60 frames per second, every clip would come out shorter than its map, by 540 to 328,642 ticks.
+  - South Park's 12-second `FBILogo` clip covers its 12.012-second map exactly.
+- **Other discs:** on the remaining discs the maps run longer than their clips, which is consistent with clips that use only part of their map. No clip at 60000/1001 exceeds its map.
+- **Other time bases:** never observed, so `hddvd_xpl_time_to_ticks` rejects them.
+
+A clip plays its map from `clipTimeBegin` (default 0). A title time `t` inside the clip's `[titleTimeBegin, titleTimeEnd)` is therefore at `clipTimeBegin + (t - titleTimeBegin)` from the EVOB start time. The EVO presentation time is that offset plus the VTI's start time.
+
 ## Library behaviour
 
 - **`hddvd_vti_open`** reads the EVOB table. It rejects:
@@ -91,10 +104,13 @@ The time unit was observed only on 24000/1001 content with the header bytes abov
 - **`hddvd_tmap_find`** turns an offset from the EVOB start time into an entry, whose `first_sector` gives the position in the EVO file.
 - **`hddvd_tmap_check_evob`** compares a map with its VTI record.
 - **`hddvd-timemap`** prints a VTI's EVOBs and checks MAP files against them. On the supplied disc both maps match. All 130 MAP files open.
+- **`hddvd_title_map_open`** opens, for one playlist title, every primary audio/video clip's time map and the VTI in the same directory. It requires each clip to fit inside its map.
+- **`hddvd_title_map_locate`** turns a title time into the EVO URI, presentation time, EVOBU and sector to read from.
+- **`hddvd-locate`** runs the lookup on a disc tree. On the supplied disc, its EVOBU start times equal those in `FBILogo.EVO`'s navigation packs.
 
 ## What remains
 
 - **IFO tables of Standard Content discs:** not decoded.
 - **The VTI attribute table:** not decoded.
 - **Angle and interleaved layouts:** none of the observed maps has them.
-- **Other frame rates:** whether the time unit changes is unconfirmed.
+- **Other frame rates:** whether the time-map unit or the playlist clock changes at time bases other than 60fps is unconfirmed.

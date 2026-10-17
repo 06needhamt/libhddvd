@@ -207,9 +207,9 @@ playlists. Chapter entry points are validated in playback order. Application
 lifecycle windows are derived from the authored times, unmodeled constructs are
 reported for the strict external conformance check, and the navigation
 scheduler handles pause, rate, seek, discontinuity, title end, and menu
-close/reopen. Advanced Content time maps now resolve a time within an EVOB to
-its EVOBU and sector, and are checked against the VTI's EVOB table; Standard
-Content IFO tables remain outstanding.
+close/reopen. A title time now resolves through the playlist's clips, the time
+maps, and the VTI's EVOB table to an EVO file and the sector to read from.
+Standard Content IFO tables remain outstanding.
 
 * Add monotonic title-clock updates, pause/rate/seek/discontinuity notifications,
   one-shot and repeating timers, and ordered event queues.  Define whether times

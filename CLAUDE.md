@@ -102,10 +102,12 @@ Layered, bottom-up (see `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the full desi
    image decoder). Includes letterbox transforms and hit testing.
 9. **Navigation scheduler** (`player.c`): `hddvd_nav` event queue, timers on title time
    (`hddvd_time`, 90 kHz), discontinuity/seek handling, and host command callbacks.
-10. **Probes and time maps** (`evo.c`, `ifo.c`, `vti.c`, `map.c`): EVO program-stream
-    probing; IFO/VTI/MAP header validation; the VTI's EVOB table (`hddvd_vti`) and MAP
-    time maps (`hddvd_tmap`), which turn a time within an EVOB into an EVOBU and sector.
-    Standard Content IFO tables are not decoded (`docs/formats/ifo-map.md`).
+10. **Probes and time maps** (`evo.c`, `ifo.c`, `vti.c`, `map.c`, `title_map.c`): EVO
+    program-stream probing; IFO/VTI/MAP header validation; the VTI's EVOB table
+    (`hddvd_vti`) and MAP time maps (`hddvd_tmap`). `hddvd_title_map` joins a playlist
+    title's primary clips to their maps and VTI, so a title time resolves to an EVO URI and
+    sector. Playlist `60fps` time counts at 60000/1001. Standard Content IFO tables are not
+    decoded (`docs/formats/ifo-map.md`).
 
 Capability negotiation: hosts call `hddvd_abi_version()` and `hddvd_get_features()`.
 Only set a feature bit when the capability is actually implemented.

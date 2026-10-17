@@ -14,9 +14,9 @@ Experimental open-source HD DVD inspection library.
 - Immutable typed XMF manifests with validated application metadata, regions,
   ordered script/markup references, resource roots, and configurable limits
 - EVO program-stream probing
-- IFO/VTI/MAP header validation, the VTI's EVOB table, and time maps that turn
-  a time within an EVOB into an EVOBU and its sector (Standard Content IFO
-  tables are not decoded yet)
+- IFO/VTI/MAP header validation, the VTI's EVOB table, and time maps; a title
+  time resolves through the playlist's clips to an EVO file and the sector to
+  read from (Standard Content IFO tables are not decoded yet)
 - A bounded, engine-neutral script-table decoder and disassembler for clean-room
   structural fixtures; commercial HDi bytecode remains explicitly unsupported
 - Renderer-neutral, damage-tracked display lists with host-decoded premultiplied
@@ -37,6 +37,8 @@ accounts for every byte of a script object as documented structure, observed
 but unconfirmed bytes, or unknown ranges (see `docs/formats/hdi-script.md`).
 `hddvd-timemap HVA00001.VTI FILE.MAP...` lists the EVOBs a VTI describes and
 checks each time map against them (see `docs/formats/ifo-map.md`).
+`hddvd-locate DISC_ROOT PLAYLIST.XPL TITLE_INDEX MILLISECONDS...` resolves title
+times to the EVO file, presentation time and sector that play them.
 
 The ACA implementation was validated against a genuine HD DVD archive with 40 members. The sample itself is not distributed with this source tree. Regression tests construct a small synthetic archive using the observed container structure.
 

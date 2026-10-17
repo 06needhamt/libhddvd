@@ -52,6 +52,7 @@ typedef struct hddvd_nav hddvd_nav;
 typedef struct hddvd_evo_parser hddvd_evo_parser;
 typedef struct hddvd_vti hddvd_vti;
 typedef struct hddvd_tmap hddvd_tmap;
+typedef struct hddvd_title_map hddvd_title_map;
 typedef void (*hddvd_log_fn)(void *, int, const char *);
 typedef enum hddvd_subsystem
 {
@@ -60,7 +61,8 @@ typedef enum hddvd_subsystem
     HDDVD_SUBSYSTEM_RESOURCE,
     HDDVD_SUBSYSTEM_URI,
     HDDVD_SUBSYSTEM_ARCHIVE,
-    HDDVD_SUBSYSTEM_STREAM
+    HDDVD_SUBSYSTEM_STREAM,
+    HDDVD_SUBSYSTEM_TIME_MAP
 } hddvd_subsystem;
 typedef struct hddvd_error_detail
 {
@@ -689,6 +691,21 @@ typedef struct hddvd_tmap_entry
     hddvd_time start;
     hddvd_time duration;
 } hddvd_tmap_entry;
+/* Where a title time plays from. evo_uri is a borrowed file:///dvddisc/ URI,
+   valid until hddvd_title_map_close(). pts is the EVO presentation time of
+   the title time (the EVOB start time plus evob_offset). Reading from sector
+   reaches it: that EVOBU starts at entry_pts, at or before pts. */
+typedef struct hddvd_title_position
+{
+    size_t clip;
+    const char *evo_uri;
+    uint16_t evob_number;
+    hddvd_time evob_offset;
+    hddvd_time pts;
+    size_t entry;
+    uint32_t sector;
+    hddvd_time entry_pts;
+} hddvd_title_position;
 
 /* Capability bits describe independently usable library facilities, not
    complete interactive-menu conformance. Unknown bits must be ignored so
@@ -1025,6 +1042,23 @@ HDDVD_API int hddvd_tmap_find(const hddvd_tmap *, hddvd_time, size_t *);
    add up to the EVOB's sector count, and playback time that adds up to
    end - start. Returns HDDVD_EPARSE on any disagreement. */
 HDDVD_API int hddvd_tmap_check_evob(const hddvd_tmap *, const hddvd_vti_evob *);
+/* Convert a playlist time to title time on the 90 kHz clock. A "60fps"
+   timeBase counts at 60000/1001 frames per second (docs/formats/ifo-map.md);
+   other rates are unconfirmed and return HDDVD_ENOTSUP. Results that do not
+   fit return HDDVD_ELIMIT. */
+HDDVD_API int hddvd_xpl_time_to_ticks(hddvd_xpl_time, hddvd_time *);
+/* Open the time maps of a title's primary audio/video clips, and the VTI
+   each one names in its own directory, through the context's disc root.
+   A clip needs a src and a titleTimeEnd after its titleTimeBegin (default
+   0); its time map must name an EVOB in the VTI and cover clipTimeBegin
+   (default 0) plus the clip's length. Failures are recorded on the context.
+   A title without primary clips opens, and locates nothing. */
+HDDVD_API int hddvd_title_map_open(hddvd_ctx *, const hddvd_xpl *, size_t, hddvd_title_map **);
+HDDVD_API void hddvd_title_map_close(hddvd_title_map *);
+/* Resolve a title time to the EVO and sector that play it. The first clip
+   whose [titleTimeBegin, titleTimeEnd) contains the time is used; times
+   that no clip covers return HDDVD_ENOTFOUND. */
+HDDVD_API int hddvd_title_map_locate(const hddvd_title_map *, hddvd_time, hddvd_title_position *);
 HDDVD_API void hddvd_free(void *);
 #ifdef __cplusplus
 }
