@@ -16,7 +16,9 @@ Experimental open-source HD DVD inspection library.
 - EVO program-stream probing
 - IFO/VTI/MAP header validation, the VTI's EVOB table, and time maps; a title
   time resolves through the playlist's clips to an EVO file and the sector to
-  read from (Standard Content IFO tables are not decoded yet)
+  read from
+- Standard Content title sets and title tables: chapters, PGCs, cells, time
+  maps, cell addresses and VOBU maps (`hddvd_vts_open`, `hddvd_vmg_open`)
 - A sandboxed script runtime (`hddvd_runtime`) that runs HDi ECMAScript source,
   UTF-16 as on disc or UTF-8, with heap, recursion, operation and wall-clock
   budgets, in an optional QuickJS engine. HDi host objects (`Player`,
@@ -51,6 +53,9 @@ but unconfirmed bytes, or unknown ranges (see `docs/formats/hdi-script.md`).
 checks each time map against them (see `docs/formats/ifo-map.md`).
 `hddvd-locate DISC_ROOT PLAYLIST.XPL TITLE_INDEX MILLISECONDS...` resolves title
 times to the EVO file, presentation time and sector that play them.
+`hddvd-vtsinfo HVnnnI01.IFO [HVnnnT01.EVO]` prints a Standard Content title
+set or title table and checks its tables; given the title EVO, it checks them
+against the EVO's navigation packs.
 `python3 tools/inventory_hdi_scripts.py DIR...` lists the host objects, methods
 and events that the `.js` files under each directory use, without printing any
 source (see `docs/hdi-host-api.md`).
@@ -175,4 +180,4 @@ original synthetic seeds and contain no bytes from the reference archive.
 
 ## Status
 
-This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content IFO tables and the HDi host objects scripts call are future work.
+This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content command semantics and menus, and the HDi host objects scripts call, are future work.
