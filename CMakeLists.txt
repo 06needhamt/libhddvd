@@ -200,6 +200,14 @@ if(BUILD_TESTING)
                     $<TARGET_FILE:hddvd-acaextract>
                     --xplinfo $<TARGET_FILE:hddvd-xplinfo>
                     --require-modeled)
+        # The script inventory must report exactly the host API the original
+        # fixture scripts use.
+        add_test(NAME hdi-api-inventory
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/check_hdi_api_inventory.py
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tools/inventory_hdi_scripts.py
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/hdi-api
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/hdi_api_inventory_expected.txt)
     endif()
 
     add_test(NAME install-consumer

@@ -17,8 +17,9 @@ Experimental open-source HD DVD inspection library.
 - IFO/VTI/MAP header validation, the VTI's EVOB table, and time maps; a title
   time resolves through the playlist's clips to an EVO file and the sector to
   read from (Standard Content IFO tables are not decoded yet)
-- A bounded, engine-neutral script-table decoder and disassembler for clean-room
-  structural fixtures; commercial HDi bytecode remains explicitly unsupported
+- An inventory of the HDi host API that disc scripts use (`docs/hdi-host-api.md`).
+  Disc scripts are ECMAScript source; there is no script runtime yet. A bounded
+  structural decoder covers the clean-room `HDIS` fixture format only
 - Renderer-neutral, damage-tracked display lists with host-decoded premultiplied
   RGBA planes, nested clipping/layout, stable stacking, focus image selection,
   letterbox transforms, and reverse-paint-order hit testing, built directly from
@@ -47,6 +48,9 @@ but unconfirmed bytes, or unknown ranges (see `docs/formats/hdi-script.md`).
 checks each time map against them (see `docs/formats/ifo-map.md`).
 `hddvd-locate DISC_ROOT PLAYLIST.XPL TITLE_INDEX MILLISECONDS...` resolves title
 times to the EVO file, presentation time and sector that play them.
+`python3 tools/inventory_hdi_scripts.py DIR...` lists the host objects, methods
+and events that the `.js` files under each directory use, without printing any
+source (see `docs/hdi-host-api.md`).
 
 The ACA implementation was validated against a genuine HD DVD archive with 40 members. The sample itself is not distributed with this source tree. Regression tests construct a small synthetic archive using the observed container structure.
 

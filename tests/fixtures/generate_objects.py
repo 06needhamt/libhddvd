@@ -96,6 +96,59 @@ def vti():
 
 timemaps = {"original.map": tmap(), "original.vti": vti()}
 
+# Original scripts for tools/inventory_hdi_scripts.py, in each container the
+# tool reads: bare UTF-16 with a byte-order mark, the clear AACS envelope, and
+# a protected envelope it must skip.
+HDI_API = Path(__file__).resolve().parent / "hdi-api"
+menu_js = """// Player.ignored() in a comment is not a use.
+/* neither is document.ignored() */
+var panel, count = 0, label = "Player.ignored()";
+var pattern = /\\/\\/ not a comment/g;
+
+function onKey(evt) {
+    if (evt.keyCode == 1) {
+        Player.playlist.titles["main"].jump("00:00:00:00", false);
+    }
+    evt.preventDefault();
+    raise("openPanel");
+}
+
+function startup() {
+    panel = document.getElementById("panel");
+    panel.state.setProperty("focused", "true");
+    count = count + Math.max(1, 2);
+    application.addEventListener("controller_key_down", onKey, false);
+    application.addEventListener("openPanel", onOpen, false);
+    application.addEventListener("closePanel", onOpen, false);
+    application.addEventListener("never_raised", onOpen, false);
+    timer = createTimer("00:00:01:00", TIMER_APPLICATION, startup);
+}
+
+setMarkupLoadedHandler(startup);
+"""
+lib_js = """function raise(type) {
+    var evt = createEvent(type);
+    evt.initEvent(type, true, true);
+    dispatchEvent(evt);
+}
+
+function onOpen(evt) {
+    var options = { visible: true, depth: 2 };
+    shared.total = options.depth;
+    trace("opened " + evt.type);
+}
+var shared = {};
+"""
+menu_xmu = """<root xmlns="http://www.dvdforum.org/2005/ihd"><head><timing>
+<event name="closePanel"/></timing></head><body/></root>
+"""
+hdi_api = {
+    "menu.js": b"\xfe\xff" + menu_js.encode("utf-16-be"),
+    "lib.js": aacs(0x12, lib_js.encode("utf-8"), "lib.js.AACS", bytes(4), bytes_5_6=0),
+    "locked.js": aacs(0x11, bytes(range(32)), trailer=bytes(8), bytes_5_6=1),
+    "menu.xmu": menu_xmu.encode("utf-8"),
+}
+
 # Seeds for harnesses whose input is not a file format of its own.
 FUZZ = Path(__file__).resolve().parent / "fuzz"
 fuzz_seeds = {
@@ -181,6 +234,12 @@ for path in TIMEMAP.iterdir():
     if path.is_file(): path.unlink()
 for name, data in sorted(timemaps.items()):
     (TIMEMAP / name).write_bytes(data)
+
+HDI_API.mkdir(exist_ok=True)
+for path in HDI_API.iterdir():
+    if path.is_file(): path.unlink()
+for name, data in sorted(hdi_api.items()):
+    (HDI_API / name).write_bytes(data)
 
 for name, data in sorted(fuzz_seeds.items()):
     path = FUZZ / name

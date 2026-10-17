@@ -67,10 +67,9 @@ MAP/IFO files, so P6-03 remains blocked on a binary fixture/specification
 inventory. The recurring XMF/XMU constructs make P3-02 implementation ready to
 start, but style computation remains dependent on that DOM model.
 
-The second type-`0x11` family improves structural comparison for P4-01. It does
-not establish instruction encoding or opcode behavior. Commercial bytes remain
-unsupported by the clean-room script decoder until a public specification or
-independently generated programs provide semantic evidence.
+The second type-`0x11` family improves structural comparison for P4-01. Type
+`0x11` payloads were later found to be encrypted rather than compiled: on other
+discs, readable scripts are ECMAScript source (`docs/formats/hdi-script.md`).
 
 ## Data-handling rules
 
