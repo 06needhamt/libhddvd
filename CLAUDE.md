@@ -102,9 +102,14 @@ Layered, bottom-up (see `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the full desi
 7. **Script decoder** (`script_decode.c`): bounded structural decoder/disassembler for
    clean-room fixtures only. Commercial HDi bytecode semantics and any script runtime
    are explicitly unsupported/blocked (`HDDVD_FEATURE_SCRIPT_RUNTIME` stays unset).
-8. **Display list** (`display.c`): renderer-neutral, damage-tracked quads from a scene
-   tree; images are decoded by a host callback into premultiplied RGBA (no built-in
-   image decoder). Includes letterbox transforms and hit testing.
+8. **Display list** (`display.c`, `scene.c`): renderer-neutral, damage-tracked quads from a
+   scene tree; images are decoded by a host callback into premultiplied RGBA (no built-in
+   image decoder). Includes letterbox transforms and hit testing. `hddvd_scene_build` turns
+   markup and computed styles into that scene tree (geometry, visibility, opacity, z-order,
+   focus images, `<object>` images), fetching image bytes through a host callback, plus
+   per-node decorations (background fill, text, image placement).
+   `hddvd_display_build_scene` turns those into fill/image/text items
+   (`hddvd_display_get_item`); the older quad accessors still list image quads only.
 9. **Navigation scheduler** (`player.c`): `hddvd_nav` event queue, timers on title time
    (`hddvd_time`, 90 kHz), discontinuity/seek handling, and host command callbacks.
 10. **Probes and time maps** (`evo.c`, `ifo.c`, `vti.c`, `map.c`, `title_map.c`): EVO

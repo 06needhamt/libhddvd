@@ -126,6 +126,20 @@ fuzz_seeds = {
         b"s:contentWidth='90%' s:contentHeight='scale-to-fit' s:navIndex='none' "
         b"s:navRightDown='none'/><div id='b' s:fontSize='small' s:color='blue' "
         b"s:futureProperty='1'/></body></root>"),
+    # A scene with a fill, text, an image object and placed images.
+    "xmu/scene.xmu": (
+        b"<root xmlns='http://www.dvdforum.org/2005/ihd' "
+        b"xmlns:s='http://www.dvdforum.org/2005/ihd#style' "
+        b"xmlns:st='http://www.dvdforum.org/2005/ihd#state'><body>"
+        b"<div id='panel' s:width='200px' s:height='100px' s:backgroundColor='#102030' "
+        b"s:opacity='0.5' s:backgroundImage=\"url('a.png') url('ab.png')\" "
+        b"s:backgroundPositionHorizontal='center' s:backgroundPositionVertical='30%'>"
+        b"<p s:color='white' s:fontSize='30px'>Original text</p>"
+        b"<button id='b' s:width='50%' s:opacity='inherit' "
+        b"s:backgroundImage=\"url('abc.png')\" s:contentWidth='50%'/>"
+        b"<input mode='display' st:value='OK'/>"
+        b"<object type='image/png' src='abcd.png' s:width='8px' s:height='8px'/>"
+        b"</div></body></root>"),
     # Viewport 640x360, four 8x8 images, then a root and two image children
     # (20 bytes each: parent, x, y, width, height, then 11 attribute bytes).
     "display/three-nodes.bin": (
