@@ -637,6 +637,22 @@ regression test in `test_object.c`.
   - Their seeds are generated into `tests/fixtures/fuzz/`.
 - **Scheduled fuzzing:** `.github/workflows/fuzz.yml` runs every harness for ten minutes each night, and on demand. It uploads crash inputs as artifacts.
 
+### X-04 — Release checks
+
+**Status:** Complete for the checks below; Windows and macOS still depend on GitHub Actions running
+**Depends on:** X-03
+
+`ci.yml` adds four release checks:
+
+- **`tsan`:** runs the test suite under ThreadSanitizer. `test_threads.c` uses a separate set of objects in each of four threads at once: playlists, markup and styles, time maps and VTIs, navigation schedulers, and display lists. The results must match a single-threaded run. The library keeps no mutable global state, and ThreadSanitizer reports no races.
+- **`static-analysis`:** runs the Clang static analyzer over the library, tools and tests, and fails on any report. Its first run found three issues, all now fixed:
+  - in `hddvd_script_close`, a NULL dereference after a failed allocation;
+  - in `hddvd-scriptinfo`, `qsort` called on a NULL array;
+  - in a test, a dead store.
+- **`i386`:** builds and tests a 32-bit library using `cmake/toolchains/linux-i386.cmake`, including the install-consumer test. It builds with no warnings.
+- **`abi`:** runs on pull requests. It builds the shared library at the base commit and at the head, and runs `tools/abi_check.sh`, which fails unless the changes are only additions.
+  - abidiff's own "incompatible" exit bit is not enough. It stays clear when a public struct changes layout, which `abi_check.sh` catches through the changed-function count. This was verified by inserting a field into `hddvd_xmu_style`.
+
 ## Phase 9 — actionable diagnostics
 
 ### X-01 — Error detail API

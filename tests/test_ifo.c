@@ -60,7 +60,7 @@ static int open_vti(const unsigned char *b, size_t size, hddvd_vti **vti)
 
 static void test_vti(void)
 {
-    unsigned char *b = make_vti(2), *t = b + 2048, *r;
+    unsigned char *b = make_vti(2), *t, *r;
     hddvd_vti *vti;
     hddvd_vti_evob evob;
     hddvd_ifo_header header;

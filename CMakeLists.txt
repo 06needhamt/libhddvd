@@ -128,6 +128,18 @@ if(BUILD_TESTING)
     target_compile_definitions(test-limits PRIVATE
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 
+    # Concurrent use of separate objects; the CI tsan job runs it under
+    # ThreadSanitizer. POSIX threads only.
+    find_package(Threads)
+    if(CMAKE_USE_PTHREADS_INIT)
+        add_executable(test-threads tests/test_threads.c)
+        target_link_libraries(test-threads PRIVATE hddvd Threads::Threads)
+        target_compile_options(test-threads PRIVATE -UNDEBUG)
+        target_compile_definitions(test-threads PRIVATE
+            HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+        add_test(NAME threads COMMAND test-threads)
+    endif()
+
     if(HDDVD_ENABLE_REFERENCE_TESTS)
         find_package(Python3 3.8 REQUIRED COMPONENTS Interpreter)
         add_test(NAME reference-menu

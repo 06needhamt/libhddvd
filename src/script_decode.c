@@ -40,7 +40,9 @@ void hddvd_script_close(hddvd_script *script)
     size_t i;
     if (!script)
         return;
-    for (i = 0; i < script->string_count; ++i)
+    /* string_count is set before the array is allocated, so a failed
+       allocation leaves strings NULL with a nonzero count. */
+    for (i = 0; script->strings && i < script->string_count; ++i)
         free(script->strings[i]);
     free(script->strings);
     free(script->functions);

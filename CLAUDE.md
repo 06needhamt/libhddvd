@@ -38,8 +38,11 @@ Fixtures in `tests/fixtures/objects`, `tests/fixtures/scripts`, `tests/fixtures/
 `tests/fixtures/generate_objects.py`; edit the generator and rerun it rather than editing bytes.
 
 CI (`.github/workflows/ci.yml`) runs the format check, a Linux/macOS/Windows build+test
-matrix (shared+static, static-only, shared-only), an ASan+UBSan build with Clang, and a
-libFuzzer job that builds every harness and replays the seeds in `tests/fixtures`. The
+matrix (shared+static, static-only, shared-only), an ASan+UBSan build with Clang, a
+ThreadSanitizer run (`test_threads.c` uses separate objects concurrently), the Clang static
+analyzer (`scan-build --status-bugs`), a 32-bit build (`cmake/toolchains/linux-i386.cmake`),
+an ABI check on pull requests (`tools/abi_check.sh` allows only additions), and a libFuzzer
+job that builds every harness and replays the seeds in `tests/fixtures`. The
 scheduled `.github/workflows/fuzz.yml` runs each harness for ten minutes nightly. The
 `install-consumer` CTest installs the library to a temp prefix and builds `tests/consumer/`
 (C, C++17, and static variants) against the installed CMake package, so it catches

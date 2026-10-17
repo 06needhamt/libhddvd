@@ -74,6 +74,66 @@ jobs:
       - run: cmake --build build --parallel
       - run: ctest --test-dir build --output-on-failure
 
+  # Separate objects used concurrently (test-threads), under ThreadSanitizer.
+  tsan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libxml2-dev
+      - name: Configure ThreadSanitizer
+        env:
+          CC: clang
+          CFLAGS: -fsanitize=thread -g -O1
+          LDFLAGS: -fsanitize=thread
+        run: cmake -S . -B build -DBUILD_TESTING=ON
+      - run: cmake --build build --parallel
+      - run: ctest --test-dir build --output-on-failure
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libxml2-dev clang-18 clang-tools-18
+      - name: Clang static analyzer
+        run: |
+          scan-build-18 --use-cc=clang-18 cmake -S . -B build -DBUILD_TESTING=ON
+          scan-build-18 --use-cc=clang-18 --status-bugs -o scan-report cmake --build build --parallel
+
+  i386:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install 32-bit toolchain and libxml2
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib libxml2-dev:i386
+      - run: cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_TOOLCHAIN_FILE=$PWD/cmake/toolchains/linux-i386.cmake
+      - run: cmake --build build --parallel
+      - run: ctest --test-dir build --output-on-failure
+
+  # Only additions to the shared library's ABI are allowed against the base.
+  abi:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: sudo apt-get update && sudo apt-get install -y libxml2-dev abigail-tools
+      - name: Build base and head with debug info
+        env:
+          CFLAGS: -g -Og
+        run: |
+          git worktree add ../base ${{ github.event.pull_request.base.sha }}
+          for side in base head; do
+            src=$([ "$side" = base ] && echo ../base || echo .)
+            cmake -S "$src" -B "../build-$side" -DBUILD_TESTING=OFF -DHDDVD_BUILD_STATIC=OFF
+            cmake --build "../build-$side" --parallel --target hddvd
+          done
+      - name: Compare
+        run: tools/abi_check.sh ../build-base/libhddvd.so ../base/include ../build-head/libhddvd.so include
+
   fuzzers:
     runs-on: ubuntu-latest
     steps:

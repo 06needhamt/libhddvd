@@ -278,7 +278,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    qsort(l.items, l.count, sizeof(*l.items), compare_regions);
+    /* qsort must not be given a NULL array, even an empty one. */
+    if (l.count)
+        qsort(l.items, l.count, sizeof(*l.items), compare_regions);
     printf("format: %s\nsize: %zu\n", format, size);
     for (i = 0; i <= l.count; i++)
     {
