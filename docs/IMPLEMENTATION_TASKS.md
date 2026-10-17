@@ -575,6 +575,12 @@ reference archive remains absent from public CI.
 
 The `fuzzers` job builds every harness and replays the synthetic seeds; the
 build matrix covers shared+static, static-only, and shared-only libraries.
+The harnesses link `hddvd_fuzz`, a static copy of the library built with
+`-fsanitize=fuzzer-no-link`, so libFuzzer's coverage feedback reaches the
+parsers. Before this, `fuzz-timemap` reported 3 edges; with it, 445. The first instrumented
+run found a heap over-read in the `HDDVDOBJ` envelope parser: a payload length
+near 2^64 wrapped the length sum back to the input size. It is fixed, with a
+regression test in `test_object.c`.
 
 ## Phase 9 — actionable diagnostics
 

@@ -184,6 +184,22 @@ int main(void)
     put64(corrupt + 16, 8);
     if (hddvd_object_open(corrupt, size, &object) != HDDVD_EPARSE)
         return 3;
+    /* A header longer than the input, with a payload length that wraps the
+       64-bit sum of the lengths back to the input size (found by fuzz-object). */
+    {
+        unsigned char *exact = malloc(size);
+        int rc;
+        if (!exact)
+            return 46;
+        memcpy(exact, bytes, 36);
+        memset(exact + 36, 0, size - 36);
+        put32(exact + 12, 200);
+        put64(exact + 16, (uint64_t)size - 202u);
+        rc = hddvd_object_open(exact, size, &object);
+        free(exact);
+        if (rc != HDDVD_EPARSE)
+            return 46;
+    }
     memcpy(corrupt, bytes, size);
     corrupt[8] = 2;
     if (hddvd_object_open(corrupt, size, &object) != HDDVD_ENOTSUP)

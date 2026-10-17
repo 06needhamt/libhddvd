@@ -28,7 +28,9 @@ find include src tests tools -type f \( -name '*.c' -o -name '*.h' -o -name '*.c
 ```
 
 Useful CMake options: `HDDVD_BUILD_SHARED` / `HDDVD_BUILD_STATIC` (both ON by default; at
-least one is required), `HDDVD_BUILD_FUZZERS` (Clang only; builds `fuzz-{aca,object,xmf,xmu,script,xpl,navigation,timemap}`),
+least one is required), `HDDVD_BUILD_FUZZERS` (Clang only; builds `fuzz-{aca,object,xmf,xmu,script,xpl,navigation,timemap}`
+against `hddvd_fuzz`, a coverage-instrumented static copy of the library; fuzz with a scratch
+copy of the seeds, because libFuzzer writes new inputs into the corpus directory it is given),
 `HDDVD_ENABLE_REFERENCE_TESTS` and `HDDVD_ENABLE_EXTERNAL_MENU_TESTS` (opt-in Python tests that
 read external data from `HDDVD_REFERENCE_ACA` / `HDDVD_EXTERNAL_MENU_CORPUS` and exit 77 =
 skipped when unset; `HDDVD_EXTERNAL_MENU_STRICT=1` also fails on unmodeled XPL constructs).

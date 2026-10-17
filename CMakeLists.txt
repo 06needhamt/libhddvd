@@ -208,9 +208,14 @@ if(HDDVD_BUILD_FUZZERS)
     if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
         message(FATAL_ERROR "HDDVD_BUILD_FUZZERS requires Clang and libFuzzer")
     endif()
+    # The harnesses link a separate static copy of the library built with
+    # coverage instrumentation, so libFuzzer can steer inputs into the parsers.
+    add_library(hddvd_fuzz STATIC ${HDDVD_SOURCES})
+    hddvd_configure_library(hddvd_fuzz STATIC)
+    target_compile_options(hddvd_fuzz PRIVATE -fsanitize=fuzzer-no-link,address,undefined)
     foreach(target aca object xmf xmu script xpl navigation timemap)
         add_executable(fuzz-${target} tests/fuzz_${target}.c)
-        target_link_libraries(fuzz-${target} PRIVATE hddvd)
+        target_link_libraries(fuzz-${target} PRIVATE hddvd_fuzz)
         target_compile_options(fuzz-${target} PRIVATE
             -fsanitize=fuzzer,address,undefined)
         target_link_options(fuzz-${target} PRIVATE
