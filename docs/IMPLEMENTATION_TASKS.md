@@ -439,7 +439,7 @@ all represented in the conformance report.
 
 ### P6-03 — Decode required IFO and MAP navigation structures
 
-**Status:** Headers validated against real files; table decoding blocked on VTI/EVO samples or a specification
+**Status:** Advanced Content time maps and the VTI EVOB table decoded and verified against a real disc; Standard Content IFO tables and the VTI attribute table remain
 **Depends on:** P1-01, P6-02
 **Likely files:** `src/ifo.c`, `src/map.c`, `tests/test_ifo.c`, `tests/test_map.c`
 
@@ -457,6 +457,30 @@ sectors and an end-sector field that matches the size, and read the VTI name
 each MAP refers to. `docs/formats/ifo-map.md` records the evidence. The supplied
 files include no VTI or EVO files, so nothing yet confirms what the time-map or
 IFO tables point to.
+
+Second slice: one disc's `HVA00001.VTI` and one of its EVO files showed what the
+tables mean. `hddvd_vti_open` reads the VTI's EVOB table (file name, number,
+start and end time, sector count). `hddvd_tmap_open` decodes every MAP entry as
+one EVOBU: first-reference size, playback time in 3003/8-tick units, and size.
+Entry sizes match the EVO's navigation packs. On that disc both maps sum to
+their VTI records exactly, and all 130 MAPs from five discs open.
+`hddvd_tmap_find` maps a time within an EVOB to an EVOBU and its first sector.
+Synthetic builders in `test_ifo.c` and `test_map.c` cover every field and
+rejection, `fuzz-timemap` covers both readers, and `hddvd-timemap` checks real
+files.
+
+Third slice: `hddvd_title_map_open` connects a playlist title to its media. It
+opens the time map of each primary audio/video clip and the VTI that map names,
+and checks that the clip fits its map. `hddvd_title_map_locate` then resolves a
+title time to the EVO URI, its presentation time, and the sector of the EVOBU
+that plays it. Playlist times count `timeBase="60fps"` at 60000/1001 frames per
+second (`hddvd_xpl_time_to_ticks`). On both 300 discs, all 86 clips are exactly
+as long as their maps at that rate, and shorter at a true 60. On the South Park
+disc, `hddvd-locate` reproduces the EVOBU start times in `FBILogo.EVO`'s
+navigation packs. `test_title_map.c` covers a synthetic disc tree.
+
+Still open: Standard Content IFO tables, the VTI attribute table, angle or
+interleaved maps, and the clock for time bases other than 60fps.
 
 ### P6-04 — Harden EVO packet and stream metadata parsing
 
@@ -563,6 +587,12 @@ reference archive remains absent from public CI.
 
 The `fuzzers` job builds every harness and replays the synthetic seeds; the
 build matrix covers shared+static, static-only, and shared-only libraries.
+The harnesses link `hddvd_fuzz`, a static copy of the library built with
+`-fsanitize=fuzzer-no-link`, so libFuzzer's coverage feedback reaches the
+parsers. Before this, `fuzz-timemap` reported 3 edges; with it, 445. The first instrumented
+run found a heap over-read in the `HDDVDOBJ` envelope parser: a payload length
+near 2^64 wrapped the length sum back to the input size. It is fixed, with a
+regression test in `test_object.c`.
 
 ## Phase 9 — actionable diagnostics
 

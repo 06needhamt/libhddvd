@@ -74,7 +74,7 @@ static int parse_hddvdobj(const unsigned char *data, size_t size, hddvd_object *
 {
     uint32_t header_size;
     uint16_t name_size, trailer_size;
-    uint64_t payload_size, total;
+    uint64_t payload_size;
     size_t i;
     if (size < OBJECT_HEADER_SIZE)
         return HDDVD_EPARSE;
@@ -86,8 +86,10 @@ static int parse_hddvdobj(const unsigned char *data, size_t size, hddvd_object *
     trailer_size = be16(data + 26);
     if (header_size < OBJECT_HEADER_SIZE || name_size > header_size - OBJECT_HEADER_SIZE)
         return HDDVD_EPARSE;
-    total = (uint64_t)header_size + payload_size + trailer_size;
-    if (total != size || payload_size > SIZE_MAX)
+    /* Compare each length with what remains, so a huge payload length cannot
+       wrap the sum around to the input size. */
+    if (header_size > size || payload_size > size - header_size ||
+        trailer_size != size - header_size - payload_size)
         return HDDVD_EPARSE;
     if (name_size && memchr(data + OBJECT_HEADER_SIZE, 0, name_size))
         return HDDVD_EPARSE;
@@ -99,7 +101,7 @@ static int parse_hddvdobj(const unsigned char *data, size_t size, hddvd_object *
     object->info.flags = data[9];
     object->info.raw_type = be16(data + 10);
     object->info.unknown_1 = be32(data + 28);
-    object->info.declared_length = total;
+    object->info.declared_length = size;
     object->info.payload_offset = header_size;
     object->info.payload_length = payload_size;
     object->info.trailer_offset = (uint64_t)header_size + payload_size;

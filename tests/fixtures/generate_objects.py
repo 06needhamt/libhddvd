@@ -5,6 +5,7 @@ import struct
 
 OUT = Path(__file__).resolve().parent / "objects"
 SCRIPTS = Path(__file__).resolve().parent / "scripts"
+TIMEMAP = Path(__file__).resolve().parent / "timemap"
 
 def envelope(kind, payload, name="", trailer=b"", flags=0, unknown_1=0):
     encoded = name.encode("utf-8")
@@ -62,6 +63,39 @@ valid = {
     "unknown.hdo": envelope(0x1234, b"opaque"),
 }
 
+def sectors(blob):
+    return blob + b"\0" * (-len(blob) % 2048)
+
+# An original time map for EVOB 1 and the VTI record it must agree with. The
+# units are 3003/8 ticks of the 90 kHz clock (docs/formats/ifo-map.md).
+TMAP_ENTRIES = [(3, 120, 40), (2, 140, 25), (9, 140, 60), (1, 50, 6)]
+TMAP_START = 5000
+tmap_units = sum(units for _, units, _ in TMAP_ENTRIES)
+tmap_sectors = sum(size for _, _, size in TMAP_ENTRIES)
+
+def tmap():
+    head = bytearray(0x1a0)
+    head[0:12] = b"HDDVD_TMAP00"
+    head[0x72:0x7e] = b"ORIGINAL.VTI"
+    head[0x180:0x188] = struct.pack(">IHH", 0x1a0, 1, len(TMAP_ENTRIES))
+    body = b"".join(struct.pack(">I", ref << 21 | units << 11 | size)
+                    for ref, units, size in TMAP_ENTRIES)
+    return sectors(bytes(head) + body)
+
+def vti():
+    record = bytearray(0x140)
+    record[2:14] = b"ORIGINAL.EVO"
+    record[0x108:0x118] = struct.pack(">HIIIH", 1, TMAP_START,
+                                      TMAP_START + tmap_units * 3003 // 8, tmap_sectors, 1)
+    table = struct.pack(">HHII", 0, 1, 8 + 4 + len(record) - 1, 12) + bytes(record)
+    head = bytearray(2048)
+    head[0:12] = b"ADVANCED-VTS"
+    head[0x1c:0x20] = struct.pack(">I", 1)
+    head[0xbc:0xc0] = struct.pack(">I", 1)
+    return bytes(head) + sectors(table)
+
+timemaps = {"original.map": tmap(), "original.vti": vti()}
+
 def mutate(blob, offset, replacement):
     return blob[:offset] + replacement + blob[offset + len(replacement):]
 
@@ -88,3 +122,9 @@ for path in SCRIPTS.iterdir():
     if path.is_file(): path.unlink()
 for name, data in sorted(scripts.items()):
     (SCRIPTS / name).write_bytes(data)
+
+TIMEMAP.mkdir(exist_ok=True)
+for path in TIMEMAP.iterdir():
+    if path.is_file(): path.unlink()
+for name, data in sorted(timemaps.items()):
+    (TIMEMAP / name).write_bytes(data)

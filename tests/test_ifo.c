@@ -17,6 +17,115 @@ static unsigned char *make_ifo(const char *identifier, size_t sectors, uint32_t 
     return b;
 }
 
+static void put32(unsigned char *b, uint32_t v)
+{
+    b[0] = (unsigned char)(v >> 24);
+    b[1] = (unsigned char)(v >> 16);
+    b[2] = (unsigned char)(v >> 8);
+    b[3] = (unsigned char)v;
+}
+
+/* An original VTI-shaped buffer: the EVOB table in sector 1, with a 0x140
+   byte record per EVOB after the offset list. */
+static unsigned char *make_vti(size_t count)
+{
+    unsigned char *b = make_ifo("ADVANCED-VTS", 2, 1), *t = b + 2048;
+    size_t i;
+    put32(b + 0xbc, 1);
+    t[3] = (unsigned char)count;
+    put32(t + 4, (uint32_t)(8 + 4 * count + 0x140 * count - 1));
+    for (i = 0; i < count; i++)
+    {
+        unsigned char *r = t + 8 + 4 * count + 0x140 * i;
+        put32(t + 8 + 4 * i, (uint32_t)(r - t));
+        snprintf((char *)r + 2, 256, "CLIP%u.EVO", (unsigned)i);
+        r[0x109] = (unsigned char)(i + 1);
+        put32(r + 0x10a, 1000u * (uint32_t)(i + 1));
+        put32(r + 0x10e, 0x80000000u + (uint32_t)i);
+        put32(r + 0x112, 0x10000u + (uint32_t)i);
+        r[0x117] = (unsigned char)(i + 1);
+    }
+    return b;
+}
+
+static int open_vti(const unsigned char *b, size_t size, hddvd_vti **vti)
+{
+    hddvd_stream *stream = NULL;
+    int rc;
+    assert(hddvd_stream_open_memory(b, size, &stream) == HDDVD_OK);
+    rc = hddvd_vti_open(stream, vti);
+    hddvd_stream_close(stream);
+    return rc;
+}
+
+static void test_vti(void)
+{
+    unsigned char *b = make_vti(2), *t = b + 2048, *r;
+    hddvd_vti *vti;
+    hddvd_vti_evob evob;
+    hddvd_ifo_header header;
+    size_t index;
+    hddvd_stream *stream;
+
+    assert(hddvd_stream_open_memory(b, 4096, &stream) == HDDVD_OK);
+    assert(hddvd_ifo_read_header(stream, &header) == HDDVD_OK &&
+           header.kind == HDDVD_IFO_ADVANCED_VTS);
+    hddvd_stream_close(stream);
+    assert(open_vti(b, 4096, &vti) == HDDVD_OK && hddvd_vti_evob_count(vti) == 2);
+    assert(hddvd_vti_get_evob(vti, 1, &evob) == HDDVD_OK);
+    assert(evob.number == 2 && evob.attribute_number == 2 && !strcmp(evob.file_name, "CLIP1.EVO"));
+    assert(evob.start.ticks == 2000 && evob.end.ticks == 0x80000001u &&
+           evob.sector_count == 0x10001u);
+    assert(hddvd_vti_find_evob(vti, 2, &index) == HDDVD_OK && index == 1);
+    assert(hddvd_vti_find_evob(vti, 3, &index) == HDDVD_ENOTFOUND);
+    assert(hddvd_vti_get_evob(vti, 2, &evob) == HDDVD_EINVAL);
+    hddvd_vti_close(vti);
+    free(b);
+
+    /* An empty table is valid. */
+    b = make_vti(0);
+    assert(open_vti(b, 4096, &vti) == HDDVD_OK && hddvd_vti_evob_count(vti) == 0);
+    hddvd_vti_close(vti);
+    free(b);
+
+    /* Other identifiers are not VTI files. */
+    b = make_ifo("STANDARD-VTS", 1, 0);
+    vti = (hddvd_vti *)b;
+    assert(open_vti(b, 2048, &vti) == HDDVD_ENOTSUP && vti == NULL);
+    free(b);
+
+#define REJECT(edit)                                                                               \
+    do                                                                                             \
+    {                                                                                              \
+        b = make_vti(2);                                                                           \
+        t = b + 2048;                                                                              \
+        r = t + 16;                                                                                \
+        (void)r;                                                                                   \
+        edit;                                                                                      \
+        assert(open_vti(b, 4096, &vti) == HDDVD_EPARSE && vti == NULL);                            \
+        free(b);                                                                                   \
+    } while (0)
+    REJECT(put32(b + 0xbc, 0));              /* table in the header sector */
+    REJECT(put32(b + 0xbc, 2));              /* table past the end sector */
+    REJECT(put32(t + 4, 2048));              /* table runs off the file */
+    REJECT(put32(t + 4, 12));                /* offset list overruns the table */
+    REJECT(put32(t + 8, 4));                 /* record over the offset list */
+    REJECT(put32(t + 12, 2048 - 0x140 + 1)); /* record past the table */
+    REJECT(memset(r + 2, 0, 256));           /* empty name */
+    REJECT(memset(r + 2, 'A', 256));         /* unterminated name */
+    REJECT(r[3] = '/');                      /* path separator */
+    REJECT(r[3] = ' ');                      /* unprintable */
+    REJECT(r[0x109] = 2);                    /* duplicate number */
+    REJECT(put32(r + 0x10e, 999));           /* end before start */
+    REJECT(put32(r + 0x112, 0));             /* no sectors */
+#undef REJECT
+    assert(hddvd_vti_open(NULL, &vti) == HDDVD_EINVAL);
+    assert(hddvd_vti_open(NULL, NULL) == HDDVD_EINVAL);
+    assert(hddvd_vti_evob_count(NULL) == 0);
+    assert(hddvd_vti_find_evob(NULL, 1, &index) == HDDVD_EINVAL);
+    hddvd_vti_close(NULL);
+}
+
 static int read_header(const unsigned char *b, size_t size, hddvd_ifo_header *header)
 {
     hddvd_stream *stream = NULL;
@@ -57,5 +166,6 @@ int main(void)
     assert(read_header(b, 2048, &header) == HDDVD_ENOTSUP && header.kind == HDDVD_IFO_UNKNOWN);
     free(b);
     assert(hddvd_ifo_read_header(NULL, &header) == HDDVD_EINVAL);
+    test_vti();
     return 0;
 }

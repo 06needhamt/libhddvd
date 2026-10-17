@@ -12,6 +12,8 @@ or extracted from the external reference menu.
   fixtures (valid and single-field corruptions) and clean-room `HDIS` scripts,
   plus original objects in the on-disc `AACS` envelope layout (clear text,
   clear image, and a protected script).
+* `timemap/` is also written by `generate_objects.py`: an original VTI with one
+  EVOB record and the time map that agrees with it.
 
 They are seeds for the parser fuzzers and will become direct typed-model fixtures
 when the Phase 3 APIs are introduced.  `test_aca.c` independently constructs its

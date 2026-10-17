@@ -9,7 +9,9 @@ static const struct
 {
     const char *identifier;
     hddvd_ifo_kind kind;
-} ifo_identifiers[] = {{"HVDVD-VMG100", HDDVD_IFO_VMG}, {"STANDARD-VTS", HDDVD_IFO_STANDARD_VTS}};
+} ifo_identifiers[] = {{"HVDVD-VMG100", HDDVD_IFO_VMG},
+                       {"STANDARD-VTS", HDDVD_IFO_STANDARD_VTS},
+                       {"ADVANCED-VTS", HDDVD_IFO_ADVANCED_VTS}};
 
 static hddvd_ifo_kind ifo_kind(const unsigned char *identifier)
 {
