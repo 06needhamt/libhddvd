@@ -18,6 +18,11 @@ The protected payloads have the entropy of encrypted data rather than the
 structure of compiled code; they are most likely the same kind of source,
 encrypted. libhddvd never decrypts them (see `aacs-object-envelope.md`).
 
+`hddvd_runtime_evaluate` takes this text as it is, UTF-16 with its byte-order
+mark or UTF-8, and runs it in the script runtime
+(`docs/decisions/0001-script-engine.md`). All 126 readable scripts compile there
+without syntax errors.
+
 What a runtime needs beyond the language is the HDi host API: the player,
 application, markup DOM, event, timer, file and network objects the scripts
 call. `docs/hdi-host-api.md` lists the parts the readable scripts use, measured

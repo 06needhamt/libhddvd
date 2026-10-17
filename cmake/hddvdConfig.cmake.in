@@ -2,6 +2,14 @@
 
 include(CMakeFindDependencyMacro)
 find_dependency(LibXml2)
+# What static libhddvd needs for its script engine: QuickJS's own runtime
+# dependencies when it is compiled in, or the installed QuickJS it used.
+if("@HDDVD_QUICKJS_MODE@" STREQUAL "source")
+    find_dependency(Threads)
+elseif("@HDDVD_QUICKJS_MODE@" STREQUAL "installed")
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
+    find_dependency(QuickJS)
+endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/hddvdTargets.cmake")
 check_required_components(hddvd)

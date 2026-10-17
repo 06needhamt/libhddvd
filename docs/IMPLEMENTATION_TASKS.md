@@ -308,7 +308,7 @@ decoder for the clean-room `HDIS` fixtures and keep their tests and fuzzing.
 
 ### P4-03 — Select and isolate an ECMAScript execution backend
 
-**Status:** Ready
+**Status:** Complete
 **Depends on:** P4-01
 **Likely files:** `cmake/`, `src/script_engine.h`, `docs/decisions/`
 
@@ -317,13 +317,26 @@ UTF-16BE, such as QuickJS or Duktape. Record the decision, license/packaging
 impact, determinism, sandbox controls, and fallback plan. Keep the dependency
 optional at build time.
 
+`docs/decisions/0001-script-engine.md` records the choice of QuickJS. The public
+`hddvd_runtime` API evaluates UTF-16 or UTF-8 source and calls global
+functions, with per-runtime heap and per-entry recursion, operation and
+wall-clock budgets (`hddvd_runtime_limits`, or the config's script fields).
+Results distinguish syntax errors (`HDDVD_EPARSE`), uncaught exceptions
+(`HDDVD_ESCRIPT`) and exhausted budgets (`HDDVD_ELIMIT` with the budget named).
+The engine sits behind `src/script_engine.h`, is selected by
+`HDDVD_SCRIPT_ENGINE`, and is either compiled from a QuickJS release
+(`HDDVD_QUICKJS_SOURCE_DIR`) or linked from an installed library. Without one,
+the runtime reports `HDDVD_ENOTSUP` and no `HDDVD_FEATURE_SCRIPT_RUNTIME`.
+`test_runtime.c`, `test_limits.c`, `test_threads.c` and `fuzz-runtime` cover
+both builds.
+
 **Acceptance:** a synthetic function executes with instruction, heap, recursion,
 and wall-clock budgets; the library builds and reports the missing capability when
 the backend is disabled.
 
 ### P4-04 — Implement DOM, focus, and event host objects
 
-**Status:** Blocked on P4-03
+**Status:** Ready
 **Depends on:** P3-03, P4-03
 **Likely files:** `src/runtime.c`, `src/runtime_dom.c`, `tests/test_runtime.c`
 
@@ -711,7 +724,7 @@ stable status names.
 
 ### X-02 — Configurable limits
 
-**Status:** Complete for implemented subsystems; script heap and recursion enforcement awaits P4-03
+**Status:** Complete
 **Depends on:** P1-01 ownership conventions
 
 Define one limits object for archive members, resource bytes, XML nodes/depth,
@@ -720,8 +733,10 @@ Provide conservative defaults and tests proving every limit is enforced.
 
 `test_limits.c` lowers each field with a consumer through the unified
 `*_with_config` entry points and checks the rejection (`max_resource_bytes` is
-covered by `test_resource.c`). `max_script_heap_bytes` and
-`max_script_recursion` have no consumer until a script runtime exists.
+covered by `test_resource.c`). The script runtime takes `max_script_heap_bytes`,
+`max_script_recursion`, `max_script_instructions` (as its operation budget)
+and `max_script_bytes` from the config; `test_limits.c` checks each when the
+build has an engine.
 
 ## Milestone completion order
 

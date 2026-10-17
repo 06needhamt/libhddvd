@@ -18,15 +18,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        harness: [aca, object, xmf, xmu, script, xpl, navigation, timemap, uri, titlemap, display]
+        harness: [aca, object, xmf, xmu, script, xpl, navigation, timemap, uri, titlemap, display, runtime]
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y libxml2-dev
+      - name: Fetch QuickJS
+        run: echo "QUICKJS=$(tools/fetch_quickjs.sh "$RUNNER_TEMP/quickjs")" >> "$GITHUB_ENV"
       - name: Build the harness
         env:
           CC: clang
         run: |
-          cmake -S . -B build -DHDDVD_BUILD_FUZZERS=ON -DBUILD_TESTING=OFF
+          cmake -S . -B build -DHDDVD_BUILD_FUZZERS=ON -DBUILD_TESTING=OFF -DHDDVD_SCRIPT_ENGINE=quickjs -DHDDVD_QUICKJS_SOURCE_DIR="$QUICKJS"
           cmake --build build --parallel --target fuzz-${{ matrix.harness }}
       # libFuzzer writes new inputs into its corpus directory, so the seeds
       # are copied out of the source tree first.
@@ -40,7 +42,7 @@ jobs:
             xpl) cp tests/fixtures/playlist_full.xpl corpus/ ;;
             script) cp tests/fixtures/scripts/*.hdis corpus/ ;;
             timemap) cp tests/fixtures/timemap/* corpus/ ;;
-            uri|titlemap|display) cp tests/fixtures/fuzz/${{ matrix.harness }}/* corpus/ ;;
+            uri|titlemap|display|runtime) cp tests/fixtures/fuzz/${{ matrix.harness }}/* corpus/ ;;
           esac
       - name: Fuzz
         run: >-

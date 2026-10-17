@@ -33,7 +33,8 @@ typedef enum hddvd_status
     HDDVD_ENOTFOUND = -5,
     HDDVD_ENOTSUP = -6,
     HDDVD_ELIMIT = -7,
-    HDDVD_EPROTECTED = -8
+    HDDVD_EPROTECTED = -8,
+    HDDVD_ESCRIPT = -9
 } hddvd_status;
 typedef struct hddvd_ctx hddvd_ctx;
 typedef struct hddvd_stream hddvd_stream;
@@ -46,6 +47,7 @@ typedef struct hddvd_application hddvd_application;
 typedef struct hddvd_xpl hddvd_xpl;
 typedef struct hddvd_object hddvd_object;
 typedef struct hddvd_script hddvd_script;
+typedef struct hddvd_runtime hddvd_runtime;
 typedef struct hddvd_image_cache hddvd_image_cache;
 typedef struct hddvd_display_list hddvd_display_list;
 typedef struct hddvd_nav hddvd_nav;
@@ -529,6 +531,46 @@ typedef struct hddvd_script_instruction
     uint8_t flags;
     int32_t operand;
 } hddvd_script_instruction;
+/* Budgets for a script runtime. Heap is the memory the engine holds in
+   total; the others apply afresh to each evaluate or call. */
+typedef struct hddvd_runtime_limits
+{
+    /* Largest source accepted by hddvd_runtime_evaluate, in bytes. */
+    uint64_t max_source_bytes;
+    uint64_t max_heap_bytes;
+    /* Nested calls that always succeed. The engine stops scripts at
+       max_recursion * HDDVD_RUNTIME_FRAME_BYTES of native stack, which the
+       calling thread must have free; how much deeper a script can go depends
+       on its frames and the engine build. */
+    size_t max_recursion;
+    /* Loop iterations and calls. The engine checks the count in blocks
+       (10,000 with QuickJS), so a script may run up to one block past it. */
+    uint64_t max_operations;
+    /* Wall-clock time, checked at the same points as max_operations. */
+    uint32_t max_milliseconds;
+} hddvd_runtime_limits;
+#define HDDVD_RUNTIME_FRAME_BYTES 16384u
+/* The budget that ended an evaluate or call with HDDVD_ELIMIT. */
+typedef enum hddvd_runtime_limit
+{
+    HDDVD_RUNTIME_LIMIT_NONE = 0,
+    HDDVD_RUNTIME_LIMIT_SOURCE = 1,
+    HDDVD_RUNTIME_LIMIT_HEAP = 2,
+    HDDVD_RUNTIME_LIMIT_RECURSION = 3,
+    HDDVD_RUNTIME_LIMIT_OPERATIONS = 4,
+    HDDVD_RUNTIME_LIMIT_TIME = 5
+} hddvd_runtime_limit;
+/* Outcome of the last evaluate or call. Strings are borrowed until the next
+   evaluate, call or destroy, and are NULL when absent. */
+typedef struct hddvd_runtime_diagnostic
+{
+    int status;
+    hddvd_runtime_limit limit;
+    /* The engine's description, such as "TypeError: x is not a function". */
+    const char *message;
+    /* The engine's call trace, one frame per line. */
+    const char *trace;
+} hddvd_runtime_diagnostic;
 typedef struct hddvd_rect
 {
     int32_t x;
@@ -1015,6 +1057,36 @@ HDDVD_API int hddvd_script_get_function(const hddvd_script *, size_t, hddvd_scri
 HDDVD_API size_t hddvd_script_instruction_count(const hddvd_script *);
 HDDVD_API int hddvd_script_get_instruction(const hddvd_script *, size_t,
                                            hddvd_script_instruction *);
+/* Script runtime: runs HDi ECMAScript source in a sandboxed engine chosen at
+   build time (docs/decisions/0001-script-engine.md). Builds without an engine
+   report no HDDVD_FEATURE_SCRIPT_RUNTIME, hddvd_runtime_engine() returns NULL
+   and hddvd_runtime_create* fail with HDDVD_ENOTSUP.
+
+   Scripts see the ECMAScript built-ins only, with no file, network or process
+   access; Math.random is seeded identically in every runtime. HDi host objects
+   are not provided yet. A runtime is single-threaded; separate runtimes may be
+   used on separate threads. */
+HDDVD_API const char *hddvd_runtime_engine(void);
+/* Heap and recursion come from the config's max_script_heap_bytes and
+   max_script_recursion, operations from max_script_instructions, source size
+   from max_script_bytes, and time defaults to one second. */
+HDDVD_API void hddvd_runtime_limits_default(hddvd_runtime_limits *);
+HDDVD_API int hddvd_runtime_create(hddvd_runtime **);
+HDDVD_API int hddvd_runtime_create_with_limits(const hddvd_runtime_limits *, hddvd_runtime **);
+HDDVD_API int hddvd_runtime_create_with_config(const hddvd_config_limits *, hddvd_runtime **);
+HDDVD_API void hddvd_runtime_destroy(hddvd_runtime *);
+/* Runs a script in the global scope. Source is UTF-16 with a byte-order mark
+   (as on disc) or UTF-8, with or without one; name labels it in traces and
+   may be NULL. Returns HDDVD_EPARSE for invalid text or a syntax error,
+   HDDVD_ESCRIPT for an uncaught exception, and HDDVD_ELIMIT when a budget
+   runs out. An allocation refused by the heap budget is reported even when
+   the script catches it. */
+HDDVD_API int hddvd_runtime_evaluate(hddvd_runtime *, const char *name, const void *source,
+                                     size_t size);
+/* Calls a global function with no arguments. HDDVD_ENOTFOUND when the name
+   is not a function; otherwise as hddvd_runtime_evaluate. */
+HDDVD_API int hddvd_runtime_call(hddvd_runtime *, const char *function);
+HDDVD_API int hddvd_runtime_get_diagnostic(const hddvd_runtime *, hddvd_runtime_diagnostic *);
 /* Decoders must return premultiplied RGBA8. The cache calls release exactly
    once after the last display list using a plane is closed. All objects are
    single-threaded and callbacks are made only by cache_get/build calls. */

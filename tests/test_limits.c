@@ -228,6 +228,53 @@ static void test_script_limits(void)
     assert(script == NULL);
 }
 
+/* The config's script heap, recursion, instruction and byte limits also
+   bound the script runtime, when the build has one. */
+static void test_runtime_limits(void)
+{
+    static const char loop[] = "for (var i = 0; i < 200000; i++) {}";
+    static const char deep[] = "function d(n) { return n ? d(n - 1) : 0; } d(100000);";
+    static const char grow[] = "var a = []; for (var i = 0; i < 200000; i++) a.push('x' + i);";
+    hddvd_config_limits config;
+    hddvd_runtime *runtime = NULL;
+    hddvd_runtime_diagnostic out;
+    if (!hddvd_runtime_engine())
+        return;
+    hddvd_config_limits_default(&config);
+    assert(hddvd_runtime_create_with_config(&config, &runtime) == HDDVD_OK);
+    assert(hddvd_runtime_evaluate(runtime, "loop", loop, sizeof(loop) - 1) == HDDVD_OK);
+    hddvd_runtime_destroy(runtime);
+
+    config.max_script_instructions = 10000;
+    assert(hddvd_runtime_create_with_config(&config, &runtime) == HDDVD_OK);
+    assert(hddvd_runtime_evaluate(runtime, "loop", loop, sizeof(loop) - 1) == HDDVD_ELIMIT);
+    assert(hddvd_runtime_get_diagnostic(runtime, &out) == HDDVD_OK);
+    assert(out.limit == HDDVD_RUNTIME_LIMIT_OPERATIONS);
+    hddvd_runtime_destroy(runtime);
+
+    hddvd_config_limits_default(&config);
+    config.max_script_recursion = 8;
+    assert(hddvd_runtime_create_with_config(&config, &runtime) == HDDVD_OK);
+    assert(hddvd_runtime_evaluate(runtime, "deep", deep, sizeof(deep) - 1) == HDDVD_ELIMIT);
+    assert(hddvd_runtime_get_diagnostic(runtime, &out) == HDDVD_OK);
+    assert(out.limit == HDDVD_RUNTIME_LIMIT_RECURSION);
+    hddvd_runtime_destroy(runtime);
+
+    hddvd_config_limits_default(&config);
+    config.max_script_heap_bytes = 2u * 1024u * 1024u;
+    assert(hddvd_runtime_create_with_config(&config, &runtime) == HDDVD_OK);
+    assert(hddvd_runtime_evaluate(runtime, "grow", grow, sizeof(grow) - 1) == HDDVD_ELIMIT);
+    assert(hddvd_runtime_get_diagnostic(runtime, &out) == HDDVD_OK);
+    assert(out.limit == HDDVD_RUNTIME_LIMIT_HEAP);
+    hddvd_runtime_destroy(runtime);
+
+    hddvd_config_limits_default(&config);
+    config.max_script_bytes = sizeof(loop) - 2;
+    assert(hddvd_runtime_create_with_config(&config, &runtime) == HDDVD_OK);
+    assert(hddvd_runtime_evaluate(runtime, "loop", loop, sizeof(loop) - 1) == HDDVD_ELIMIT);
+    hddvd_runtime_destroy(runtime);
+}
+
 static void release_plane(void *opaque, const uint8_t *pixels)
 {
     (void)opaque;
@@ -328,6 +375,7 @@ int main(void)
     test_archive_limits();
     test_xml_limits();
     test_script_limits();
+    test_runtime_limits();
     test_display_limits();
     test_navigation_limits();
     return 0;

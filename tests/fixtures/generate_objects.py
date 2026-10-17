@@ -152,6 +152,19 @@ hdi_api = {
 # Seeds for harnesses whose input is not a file format of its own.
 FUZZ = Path(__file__).resolve().parent / "fuzz"
 fuzz_seeds = {
+    # fuzz-runtime evaluates a script, then calls its function f.
+    "runtime/calls.js": (
+        "var count = 0;\n"
+        "function f() { for (var i = 0; i < 10; i++) count += helper(i); }\n"
+        "function helper(n) { return n % 2 ? Math.floor(Math.random() * 3) : n; }\n"
+    ).encode("utf-8"),
+    "runtime/utf16.js": b"\xfe\xff" + (
+        "function f() { var s = '\u00e9'; if (s.length !== 1) throw new Error(s); }"
+    ).encode("utf-16-be"),
+    "runtime/throws.js": b"function f() { throw new TypeError('original'); }",
+    "runtime/recursion.js": b"function f() { return f(); }",
+    "runtime/loop.js": b"function f() { for (;;) {} }",
+    "runtime/syntax.js": b"function f( {",
     "uri/disc-file.txt": b"file:///dvddisc/ADV_OBJ/menu.xmf",
     "uri/archive-member.txt": b"file:///dvddisc/ADV_OBJ/menu.aca/menu.xmu",
     "uri/traversal.txt": b"file:///dvddisc/ADV_OBJ/../../etc/passwd",

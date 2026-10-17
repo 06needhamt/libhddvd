@@ -8,4 +8,5 @@ Description: HD DVD resource, inspection, display-list, and navigation library
 Version: @PROJECT_VERSION@
 Libs: -L${libdir} -lhddvd
 Requires.private: libxml-2.0
+Libs.private: @HDDVD_PC_LIBS_PRIVATE@
 Cflags: -I${includedir}
