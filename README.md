@@ -30,7 +30,14 @@ Experimental open-source HD DVD inspection library.
 hddvd-acainfo archived.aca
 hddvd-acaextract archived.aca extracted
 hddvd-menuinfo archived.aca
+hddvd-menuinfo --scene archived.aca MARKUP.xmu [FOCUSED_ID]
 ```
+
+`--scene` lays out one markup file the way the library would draw it:
+- every scene node, with its bounds, z-order, opacity, visibility and images;
+- every display-list item (images, background fills and text runs), with its destination and clip.
+
+Images are resolved by name among the archive's members. This makes it easy to compare a menu's initial state against a real player.
 
 `hddvd-xplinfo playlist.xpl` summarizes the typed playlist model as JSON and
 lists every construct it parsed but does not model. `hddvd-scriptinfo FILE`

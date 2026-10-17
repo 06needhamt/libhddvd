@@ -404,7 +404,21 @@ Three rules are not confirmed against a player:
 - A hidden element also hides its descendants, as the display list already does. CSS would still show a descendant marked `visible`.
 - `position: relative` is placed the same way as `absolute`.
 
-Background position, crop, colours and text are modelled in the style details but not drawn, because a scene node has no field for them.
+Background position, colours and text are now drawn as well, without changing any existing record.
+
+- **Scene decorations:** each scene node has a decoration record (`hddvd_scene_get_decoration`) holding:
+  - its `backgroundColor`;
+  - its text, from a `<p>` element's text or an `<input>`'s `state:value`, with font, size, colour, alignment and wrapping;
+  - its image placement, from `backgroundPosition` and percentage `contentWidth`/`contentHeight`.
+- **Image objects:** `<object type="image/...">` elements draw their `src`. 40 real objects use this; it was previously missed, because their image is not a `backgroundImage`.
+- **Display items:** `hddvd_display_build_scene` turns a scene into fill, image and text items, in that order within a node (`hddvd_display_get_item`). Damage and hit tests cover every item. `hddvd_display_quad_count`/`get_quad` still list image quads only, so existing hosts see no change.
+- **Image placement:** an image is drawn at its own size and positioned only when `backgroundPosition` is declared. Otherwise it is still stretched to the node.
+- **Not drawn:** crop (its meaning is unconfirmed) and border.
+
+Checked with `hddvd-menuinfo --scene` against the real archives:
+- Every markup file builds a display list.
+- Image objects add 3 drawn images to the initial Fast & Furious main menu, and the rating card to `mpaa.xmu`.
+- The on-screen keyboard draws 45 key-label text runs. Its keys are authored at `0,0` and arranged by script at runtime.
 
 Results on the 39 real markup files:
 - All build scenes, and every image URL they name resolves to a member of the same archive.
