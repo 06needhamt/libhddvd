@@ -21,17 +21,31 @@ struct hddvd_image_cache
     uint64_t pixels;
 };
 
+/* Items within one node paint as fill, image, text. */
+enum item_layer
+{
+    LAYER_FILL,
+    LAYER_IMAGE,
+    LAYER_TEXT
+};
 typedef struct display_item
 {
     hddvd_display_quad quad;
     cached_image *image;
     uint8_t hit;
     size_t order;
+    enum item_layer layer;
+    uint32_t color;
+    uint8_t has_color;
+    const hddvd_scene_decoration *decoration;
 } display_item;
 struct hddvd_display_list
 {
     display_item *items;
     size_t count;
+    /* Indices of the image items, which the quad accessors report. */
+    size_t *quads;
+    size_t quad_count;
     hddvd_rect *damage;
     size_t damage_count;
 };
@@ -205,14 +219,63 @@ static int cmp_item(const void *a, const void *b)
         return -1;
     if (x->quad.z_index > y->quad.z_index)
         return 1;
-    return x->order < y->order ? -1 : x->order > y->order;
+    if (x->order != y->order)
+        return x->order < y->order ? -1 : 1;
+    return (int)x->layer - (int)y->layer;
 }
 static int same_quad(const display_item *a, const display_item *b)
 {
-    return a->quad.node_id == b->quad.node_id && a->image == b->image &&
+    const char *ta = a->decoration && a->layer == LAYER_TEXT ? a->decoration->text : NULL;
+    const char *tb = b->decoration && b->layer == LAYER_TEXT ? b->decoration->text : NULL;
+    return a->quad.node_id == b->quad.node_id && a->layer == b->layer && a->image == b->image &&
            !memcmp(&a->quad.destination, &b->quad.destination, sizeof(hddvd_rect)) &&
            !memcmp(&a->quad.clip, &b->quad.clip, sizeof(hddvd_rect)) &&
-           a->quad.z_index == b->quad.z_index && a->quad.opacity == b->quad.opacity;
+           a->quad.z_index == b->quad.z_index && a->quad.opacity == b->quad.opacity &&
+           a->color == b->color && a->has_color == b->has_color &&
+           (ta == tb || (ta && tb && !strcmp(ta, tb)));
+}
+static int same_item(const display_item *a, const display_item *b)
+{
+    return a->quad.node_id == b->quad.node_id && a->layer == b->layer;
+}
+
+/* Offset of a placed image along one axis of its node. */
+static int64_t place(hddvd_xmu_background_position position, int32_t offset, uint32_t box,
+                     uint32_t size)
+{
+    int64_t room = (int64_t)box - size;
+    switch (position)
+    {
+        case HDDVD_XMU_BACKGROUND_CENTER:
+            return room / 2;
+        case HDDVD_XMU_BACKGROUND_END:
+            return room;
+        case HDDVD_XMU_BACKGROUND_OFFSET:
+            return offset;
+        case HDDVD_XMU_BACKGROUND_PERCENT:
+            return room * offset / 100;
+        default:
+            return 0;
+    }
+}
+
+/* Where a placed image is drawn: its own size, or a percentage of the
+   node, positioned within the node. */
+static int placed_rect(const hddvd_scene_decoration *d, hddvd_rect bounds,
+                       const hddvd_image_plane *plane, hddvd_rect *out)
+{
+    uint32_t w = d->image_width_percent
+                     ? (uint32_t)((uint64_t)bounds.width * d->image_width_percent / 100u)
+                     : plane->width;
+    uint32_t h = d->image_height_percent
+                     ? (uint32_t)((uint64_t)bounds.height * d->image_height_percent / 100u)
+                     : plane->height;
+    int64_t x = (int64_t)bounds.x + place(d->image_x, d->image_x_offset, bounds.width, w);
+    int64_t y = (int64_t)bounds.y + place(d->image_y, d->image_y_offset, bounds.height, h);
+    if (x < INT32_MIN || x > INT32_MAX || y < INT32_MIN || y > INT32_MAX)
+        return HDDVD_ELIMIT;
+    *out = (hddvd_rect){(int32_t)x, (int32_t)y, w, h};
+    return HDDVD_OK;
 }
 static void add_damage(hddvd_display_list *l, hddvd_rect r)
 {
@@ -220,9 +283,9 @@ static void add_damage(hddvd_display_list *l, hddvd_rect r)
         l->damage[l->damage_count++] = r;
 }
 
-int hddvd_display_build(hddvd_image_cache *cache, uint32_t width, uint32_t height,
-                        const hddvd_scene_node *nodes, size_t count, const hddvd_display_list *old,
-                        hddvd_display_list **out)
+static int build(hddvd_image_cache *cache, uint32_t width, uint32_t height,
+                 const hddvd_scene_node *nodes, const hddvd_scene_decoration *decorations,
+                 size_t count, const hddvd_display_list *old, hddvd_display_list **out)
 {
     hddvd_display_list *l;
     int64_t *xs = NULL, *ys = NULL;
@@ -238,13 +301,16 @@ int hddvd_display_build(hddvd_image_cache *cache, uint32_t width, uint32_t heigh
     l = (hddvd_display_list *)calloc(1, sizeof(*l));
     if (!l)
         return HDDVD_ENOMEM;
-    l->items = (display_item *)calloc(count ? count : 1, sizeof(*l->items));
-    l->damage = (hddvd_rect *)calloc((count + (old ? old->count : 0)) * 2 + 1, sizeof(*l->damage));
+    /* Up to a fill, an image and a text item per node. */
+    l->items = (display_item *)calloc(count ? count * 3 : 1, sizeof(*l->items));
+    l->quads = (size_t *)calloc(count ? count : 1, sizeof(*l->quads));
+    l->damage =
+        (hddvd_rect *)calloc((count * 3 + (old ? old->count : 0)) * 2 + 1, sizeof(*l->damage));
     xs = (int64_t *)calloc(count ? count : 1, sizeof(*xs));
     ys = (int64_t *)calloc(count ? count : 1, sizeof(*ys));
     clips = (hddvd_rect *)calloc(count ? count : 1, sizeof(*clips));
     visible = (uint8_t *)calloc(count ? count : 1, 1);
-    if (!l->items || !l->damage || !xs || !ys || !clips || !visible)
+    if (!l->items || !l->quads || !l->damage || !xs || !ys || !clips || !visible)
     {
         rc = HDDVD_ENOMEM;
         goto fail;
@@ -252,9 +318,11 @@ int hddvd_display_build(hddvd_image_cache *cache, uint32_t width, uint32_t heigh
     for (i = 0; i < count; i++)
     {
         const hddvd_scene_node *n = &nodes[i];
-        hddvd_rect bounds, ownclip;
+        const hddvd_scene_decoration *d = decorations ? &decorations[i] : NULL;
+        hddvd_rect bounds, ownclip, destination;
         const hddvd_image_source *source;
         cached_image *img;
+        display_item *item;
         if (n->parent != SIZE_MAX && n->parent >= i)
         {
             rc = HDDVD_EINVAL;
@@ -288,26 +356,71 @@ int hddvd_display_build(hddvd_image_cache *cache, uint32_t width, uint32_t heigh
                                rect_intersect(clips[i], ownclip, &clips[i]));
         if (!visible[i] || !rect_intersect(clips[i], bounds, &ownclip))
             continue;
+        if (d && (d->properties & HDDVD_SCENE_FILL))
+        {
+            item = &l->items[l->count++];
+            item->quad = (hddvd_display_quad){n->id,   {0},        {0, 0, 0, 0}, bounds,
+                                              ownclip, n->z_index, n->opacity};
+            item->layer = LAYER_FILL;
+            item->color = d->fill_color;
+            item->has_color = 1;
+            item->hit = n->hit_test;
+            item->order = i;
+            item->decoration = d;
+        }
         source = (n->focused && n->focused_image.identity) ? &n->focused_image : &n->normal_image;
-        if (!source->identity)
-            continue;
-        rc = image_get(cache, source, &img);
-        if (rc != HDDVD_OK)
-            goto fail;
-        l->items[l->count].quad = (hddvd_display_quad){
-            n->id,      img->plane, {0, 0, img->plane.width, img->plane.height}, bounds, ownclip,
-            n->z_index, n->opacity};
-        l->items[l->count].image = img;
-        l->items[l->count].hit = n->hit_test;
-        l->items[l->count].order = i;
-        l->count++;
+        if (source->identity)
+        {
+            hddvd_rect visible_part;
+            rc = image_get(cache, source, &img);
+            if (rc != HDDVD_OK)
+                goto fail;
+            destination = bounds;
+            if (d && (d->properties & HDDVD_SCENE_IMAGE_PLACED) &&
+                (rc = placed_rect(d, bounds, &img->plane, &destination)) != HDDVD_OK)
+            {
+                img->refs--;
+                goto fail;
+            }
+            /* A placed image entirely outside its node draws nothing. */
+            if (!rect_intersect(ownclip, destination, &visible_part))
+                img->refs--;
+            else
+            {
+                item = &l->items[l->count++];
+                item->quad = (hddvd_display_quad){
+                    n->id,       img->plane, {0, 0, img->plane.width, img->plane.height},
+                    destination, ownclip,    n->z_index,
+                    n->opacity};
+                item->image = img;
+                item->layer = LAYER_IMAGE;
+                item->hit = n->hit_test;
+                item->order = i;
+                item->decoration = d;
+            }
+        }
+        if (d && (d->properties & HDDVD_SCENE_TEXT))
+        {
+            item = &l->items[l->count++];
+            item->quad = (hddvd_display_quad){n->id,   {0},        {0, 0, 0, 0}, bounds,
+                                              ownclip, n->z_index, n->opacity};
+            item->layer = LAYER_TEXT;
+            item->color = d->text_color;
+            item->has_color = (uint8_t)((d->properties & HDDVD_SCENE_TEXT_COLOR) != 0);
+            item->hit = n->hit_test;
+            item->order = i;
+            item->decoration = d;
+        }
     }
     qsort(l->items, l->count, sizeof(*l->items), cmp_item);
+    for (i = 0; i < l->count; i++)
+        if (l->items[i].layer == LAYER_IMAGE)
+            l->quads[l->quad_count++] = i;
     for (i = 0; i < l->count; i++)
     {
         int found = 0;
         for (j = 0; old && j < old->count; j++)
-            if (old->items[j].quad.node_id == l->items[i].quad.node_id)
+            if (same_item(&old->items[j], &l->items[i]))
             {
                 found = 1;
                 if (!same_quad(&l->items[i], &old->items[j]))
@@ -325,7 +438,7 @@ int hddvd_display_build(hddvd_image_cache *cache, uint32_t width, uint32_t heigh
         {
             int found = 0;
             for (i = 0; i < l->count; i++)
-                if (old->items[j].quad.node_id == l->items[i].quad.node_id)
+                if (same_item(&old->items[j], &l->items[i]))
                 {
                     found = 1;
                     break;
@@ -348,6 +461,27 @@ fail:
     return rc;
 }
 
+int hddvd_display_build(hddvd_image_cache *cache, uint32_t width, uint32_t height,
+                        const hddvd_scene_node *nodes, size_t count, const hddvd_display_list *old,
+                        hddvd_display_list **out)
+{
+    return build(cache, width, height, nodes, NULL, count, old, out);
+}
+
+int hddvd_display_build_scene(hddvd_image_cache *cache, uint32_t width, uint32_t height,
+                              const hddvd_scene *scene, const hddvd_display_list *old,
+                              hddvd_display_list **out)
+{
+    if (!scene)
+    {
+        if (out)
+            *out = NULL;
+        return HDDVD_EINVAL;
+    }
+    return build(cache, width, height, hddvd_scene_nodes(scene),
+                 hddvd_scene_decorations_internal(scene), hddvd_scene_node_count(scene), old, out);
+}
+
 void hddvd_display_list_close(hddvd_display_list *l)
 {
     size_t i;
@@ -357,18 +491,48 @@ void hddvd_display_list_close(hddvd_display_list *l)
         if (l->items[i].image)
             l->items[i].image->refs--;
     free(l->items);
+    free(l->quads);
     free(l->damage);
     free(l);
 }
 size_t hddvd_display_quad_count(const hddvd_display_list *l)
 {
-    return l ? l->count : 0;
+    return l ? l->quad_count : 0;
 }
 int hddvd_display_get_quad(const hddvd_display_list *l, size_t i, hddvd_display_quad *q)
 {
-    if (!l || !q || i >= l->count)
+    if (!l || !q || i >= l->quad_count)
         return HDDVD_EINVAL;
-    *q = l->items[i].quad;
+    *q = l->items[l->quads[i]].quad;
+    return HDDVD_OK;
+}
+size_t hddvd_display_item_count(const hddvd_display_list *l)
+{
+    return l ? l->count : 0;
+}
+int hddvd_display_get_item(const hddvd_display_list *l, size_t i, hddvd_display_item *out)
+{
+    static const hddvd_display_item_kind kinds[] = {
+        HDDVD_DISPLAY_ITEM_FILL, HDDVD_DISPLAY_ITEM_IMAGE, HDDVD_DISPLAY_ITEM_TEXT};
+    const display_item *p;
+    if (!l || !out || i >= l->count)
+        return HDDVD_EINVAL;
+    p = &l->items[i];
+    memset(out, 0, sizeof(*out));
+    out->kind = kinds[p->layer];
+    out->quad = p->quad;
+    out->color = p->color;
+    out->has_color = p->has_color;
+    if (p->layer == LAYER_TEXT && p->decoration)
+    {
+        out->text = p->decoration->text;
+        out->font = p->decoration->font;
+        out->font_size = p->decoration->font_size;
+        out->font_style = p->decoration->font_style;
+        out->text_align = p->decoration->text_align;
+        out->display_align = p->decoration->display_align;
+        out->wrap = p->decoration->wrap;
+    }
     return HDDVD_OK;
 }
 size_t hddvd_display_damage_count(const hddvd_display_list *l)

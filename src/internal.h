@@ -48,4 +48,6 @@ int hddvd_config_limits_valid(const hddvd_config_limits *);
    otherwise *owned holds the payload and must be freed by the caller. */
 int hddvd_object_unwrap(const void *, size_t, hddvd_object_type, unsigned char **, const void **,
                         size_t *);
+/* The decoration array parallel to hddvd_scene_nodes, for display.c. */
+const hddvd_scene_decoration *hddvd_scene_decorations_internal(const hddvd_scene *);
 #endif

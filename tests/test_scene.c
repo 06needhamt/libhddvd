@@ -37,15 +37,16 @@ static void release(void *opaque, const uint8_t *pixels)
 static int decode(void *opaque, const char *id, const void *data, size_t size,
                   hddvd_image_plane *plane)
 {
+    /* "placed..." images are 20x10, everything else 1x1. */
+    int placed = !strncmp(id, "placed", 6);
     (void)opaque;
-    (void)id;
     (void)data;
     (void)size;
     memset(plane, 0, sizeof(*plane));
-    plane->pixels = calloc(1, 4);
-    plane->width = 1;
-    plane->height = 1;
-    plane->stride = 4;
+    plane->width = placed ? 20 : 1;
+    plane->height = placed ? 10 : 1;
+    plane->stride = plane->width * 4u;
+    plane->pixels = calloc(plane->height, plane->stride);
     plane->release = release;
     return plane->pixels ? HDDVD_OK : HDDVD_ENOMEM;
 }
@@ -184,9 +185,123 @@ static void fragments_and_empty(void)
     hddvd_xmu_close(xmu);
 }
 
+/* Background fills, text from <p> and <input state:value>, object images,
+   and placed background images, through to display-list items. */
+static void decorations_and_items(void)
+{
+    static const char xml[] =
+        "<root xmlns='" NS "' xmlns:s='" STYLE "' xmlns:st='" NS "#state'><body>"
+        "<div id='panel' s:width='200px' s:height='100px' s:backgroundColor='#102030' "
+        "s:backgroundImage=\"url('placed.png')\" s:backgroundPositionHorizontal='center' "
+        "s:backgroundPositionVertical='bottom'>"
+        "<p id='title' s:color='rgba(1,2,3,4)' s:font='Original.ttf' s:fontSize='30px' "
+        "s:textAlign='center' s:wrapOption='no-wrap'>Hello</p>"
+        "<p id='blank'>   </p>"
+        "<input id='label' mode='display' st:value='OK' s:width='40px' s:height='20px'/>"
+        "<object id='picture' type='image/png' src='picture.png' s:width='8px' "
+        "s:height='8px'/>"
+        "<object id='sound' type='audio/x-wav' src='sound.wav'/>"
+        "<div id='far' s:width='10px' s:height='10px' s:backgroundImage=\"url('placed2.png')\" "
+        "s:backgroundPositionHorizontal='500px'/>"
+        "<div id='scaled' s:x='50px' s:width='100px' s:height='40px' "
+        "s:backgroundImage=\"url('placed3.png')\" s:backgroundPositionHorizontal='25%' "
+        "s:contentWidth='50%'/></div></body></root>";
+    hddvd_xmu *xmu = NULL;
+    hddvd_xmu_styles *styles = NULL;
+    hddvd_scene *scene = NULL;
+    hddvd_image_cache *cache = NULL;
+    hddvd_display_list *list = NULL, *again = NULL;
+    hddvd_scene_decoration d;
+    hddvd_display_item item;
+    hddvd_display_quad quad;
+    struct lookup lookup = {0, 0};
+    size_t i, panel, title, label, picture, sound, scaled, images = 0;
+    uint64_t hit;
+
+    open_markup(xml, &xmu, &styles);
+    assert(hddvd_scene_build(xmu, styles, SIZE_MAX, image, &lookup, &scene) == HDDVD_OK);
+    panel = (size_t)(find(scene, hddvd_xmu_find_id(xmu, "panel")) - hddvd_scene_nodes(scene));
+    title = (size_t)(find(scene, hddvd_xmu_find_id(xmu, "title")) - hddvd_scene_nodes(scene));
+    label = (size_t)(find(scene, hddvd_xmu_find_id(xmu, "label")) - hddvd_scene_nodes(scene));
+    picture = (size_t)(find(scene, hddvd_xmu_find_id(xmu, "picture")) - hddvd_scene_nodes(scene));
+    sound = (size_t)(find(scene, hddvd_xmu_find_id(xmu, "sound")) - hddvd_scene_nodes(scene));
+    scaled = (size_t)(find(scene, hddvd_xmu_find_id(xmu, "scaled")) - hddvd_scene_nodes(scene));
+
+    assert(hddvd_scene_get_decoration(scene, panel, &d) == HDDVD_OK);
+    assert(d.properties == (HDDVD_SCENE_FILL | HDDVD_SCENE_IMAGE_PLACED) &&
+           d.fill_color == 0x102030ffu && d.image_x == HDDVD_XMU_BACKGROUND_CENTER &&
+           d.image_y == HDDVD_XMU_BACKGROUND_END);
+    assert(hddvd_scene_get_decoration(scene, title, &d) == HDDVD_OK);
+    assert(d.properties == (HDDVD_SCENE_TEXT | HDDVD_SCENE_TEXT_COLOR) &&
+           !strcmp(d.text, "Hello") && d.text_color == 0x01020304u &&
+           !strcmp(d.font, "Original.ttf") && d.font_size == 30 &&
+           d.text_align == HDDVD_XMU_ALIGN_CENTER && d.wrap == 0);
+    /* Whitespace is not text; an input's state:value is, wrapping by default. */
+    assert(hddvd_scene_get_decoration(scene, title + 1, &d) == HDDVD_OK && !d.properties);
+    assert(hddvd_scene_get_decoration(scene, label, &d) == HDDVD_OK &&
+           d.properties == HDDVD_SCENE_TEXT && !strcmp(d.text, "OK") && d.wrap == 1 && !d.font &&
+           !d.font_size);
+    /* Image objects draw their src; other objects draw nothing. */
+    assert(!strcmp(hddvd_scene_nodes(scene)[picture].normal_image.identity, "picture.png"));
+    assert(!hddvd_scene_nodes(scene)[sound].normal_image.identity);
+    assert(hddvd_scene_get_decoration(scene, scaled, &d) == HDDVD_OK &&
+           d.image_x == HDDVD_XMU_BACKGROUND_PERCENT && d.image_x_offset == 25 &&
+           d.image_width_percent == 50);
+    assert(hddvd_scene_get_decoration(scene, hddvd_scene_node_count(scene), &d) == HDDVD_EINVAL);
+
+    assert(hddvd_image_cache_create(decode, NULL, NULL, &cache) == HDDVD_OK);
+    assert(hddvd_display_build_scene(cache, 1920, 1080, scene, NULL, &list) == HDDVD_OK);
+    /* panel: fill, image; title: text; label: text; picture: image; far: its
+       image lies outside the node; scaled: image. */
+    assert(hddvd_display_item_count(list) == 6);
+    assert(hddvd_display_get_item(list, 0, &item) == HDDVD_OK &&
+           item.kind == HDDVD_DISPLAY_ITEM_FILL && item.color == 0x102030ffu && item.has_color &&
+           item.quad.destination.width == 200);
+    /* A 20x10 image centered horizontally, at the bottom of a 200x100 node. */
+    assert(hddvd_display_get_item(list, 1, &item) == HDDVD_OK &&
+           item.kind == HDDVD_DISPLAY_ITEM_IMAGE && item.quad.destination.x == 90 &&
+           item.quad.destination.y == 90 && item.quad.destination.width == 20 &&
+           item.quad.destination.height == 10);
+    assert(hddvd_display_get_item(list, 2, &item) == HDDVD_OK &&
+           item.kind == HDDVD_DISPLAY_ITEM_TEXT && !strcmp(item.text, "Hello") && item.has_color &&
+           item.color == 0x01020304u && item.font_size == 30 && !item.wrap);
+    assert(hddvd_display_get_item(list, 3, &item) == HDDVD_OK &&
+           item.kind == HDDVD_DISPLAY_ITEM_TEXT && !strcmp(item.text, "OK") && !item.has_color &&
+           item.quad.destination.width == 40);
+    assert(hddvd_display_get_item(list, 4, &item) == HDDVD_OK &&
+           item.kind == HDDVD_DISPLAY_ITEM_IMAGE && item.quad.destination.width == 8);
+    /* 50 of a 100px width, its 25% point on the node's 25% point. */
+    assert(hddvd_display_get_item(list, 5, &item) == HDDVD_OK &&
+           item.kind == HDDVD_DISPLAY_ITEM_IMAGE && item.quad.destination.x == 50 + 12 &&
+           item.quad.destination.width == 50 && item.quad.destination.height == 10);
+    assert(hddvd_display_get_item(list, 6, &item) == HDDVD_EINVAL);
+    /* The quad view still lists image items only. */
+    for (i = 0; i < hddvd_display_quad_count(list); i++)
+        images += hddvd_display_get_quad(list, i, &quad) == HDDVD_OK && quad.image.pixels;
+    assert(hddvd_display_quad_count(list) == 3 && images == 3);
+    /* The label input is hit-testable through its text item. */
+    assert(hddvd_display_hit_test(list, 10, 10, &hit) == HDDVD_OK &&
+           hit == hddvd_xmu_find_id(xmu, "label"));
+
+    /* An identical rebuild damages nothing. */
+    assert(hddvd_display_build_scene(cache, 1920, 1080, scene, list, &again) == HDDVD_OK);
+    assert(hddvd_display_damage_count(again) == 0);
+    hddvd_display_list_close(again);
+    assert(hddvd_display_build_scene(cache, 1920, 1080, NULL, NULL, &again) == HDDVD_EINVAL &&
+           !again);
+    assert(hddvd_display_get_item(NULL, 0, &item) == HDDVD_EINVAL &&
+           hddvd_display_item_count(NULL) == 0);
+    hddvd_display_list_close(list);
+    hddvd_image_cache_destroy(cache);
+    hddvd_scene_close(scene);
+    hddvd_xmu_styles_close(styles);
+    hddvd_xmu_close(xmu);
+}
+
 int main(void)
 {
     builds_scene();
+    decorations_and_items();
     fragments_and_empty();
     return 0;
 }

@@ -4,6 +4,7 @@
 
 #define SCENE_WIDTH 1920u
 #define SCENE_HEIGHT 1080u
+#define STATE_NS "http://www.dvdforum.org/2005/ihd#state"
 
 struct scene_image
 {
@@ -16,6 +17,7 @@ struct scene_image
 struct hddvd_scene
 {
     hddvd_scene_node *nodes;
+    hddvd_scene_decoration *decorations;
     size_t count;
 };
 
@@ -39,6 +41,91 @@ static int is_skipped(const char *name)
 static int is_interactive(const char *name)
 {
     return !strcmp(name, "button") || !strcmp(name, "input");
+}
+
+/* An attribute's value by namespace (NULL for none) and name. */
+static const char *attribute(const hddvd_xmu *xmu, size_t index, size_t count,
+                             const char *namespace_uri, const char *name)
+{
+    hddvd_xmu_attribute a;
+    size_t i;
+    for (i = 0; i < count; i++)
+        if (!hddvd_xmu_get_attribute(xmu, index, i, &a) && !strcmp(a.name, name) &&
+            (namespace_uri ? a.namespace_uri && !strcmp(a.namespace_uri, namespace_uri)
+                           : !a.namespace_uri))
+            return a.value;
+    return NULL;
+}
+
+static int has_visible_text(const char *text)
+{
+    for (; text && *text; text++)
+        if (*text != ' ' && *text != '\t' && *text != '\r' && *text != '\n')
+            return 1;
+    return 0;
+}
+
+/* An <object type="image/..."> draws its src. */
+static const char *object_image(const hddvd_xmu *xmu, size_t index, const hddvd_xmu_node *node)
+{
+    const char *type;
+    if (strcmp(node->name, "object"))
+        return NULL;
+    type = attribute(xmu, index, node->attribute_count, NULL, "type");
+    if (!type || strncmp(type, "image/", 6))
+        return NULL;
+    return attribute(xmu, index, node->attribute_count, NULL, "src");
+}
+
+static void decorate(const hddvd_xmu *xmu, size_t index, const hddvd_xmu_node *node,
+                     const hddvd_xmu_style_details *details, hddvd_scene_decoration *d)
+{
+    const char *text = NULL;
+    memset(d, 0, sizeof(*d));
+    if (details->properties & HDDVD_XMU_DETAIL_BACKGROUND_COLOR)
+    {
+        d->properties |= HDDVD_SCENE_FILL;
+        d->fill_color = details->background_color;
+    }
+    if (!strcmp(node->name, "p"))
+        text = node->text;
+    else if (!strcmp(node->name, "input"))
+        text = attribute(xmu, index, node->attribute_count, STATE_NS, "value");
+    if (has_visible_text(text))
+    {
+        d->properties |= HDDVD_SCENE_TEXT;
+        d->text = text;
+        d->font = details->font;
+        d->font_size = details->properties & HDDVD_XMU_DETAIL_FONT_SIZE ? details->font_size : 0;
+        d->font_style = details->font_style;
+        d->text_align = details->text_align;
+        d->display_align = details->display_align;
+        /* Wrapping unless wrapOption says otherwise. */
+        d->wrap = details->properties & HDDVD_XMU_DETAIL_WRAP ? details->wrap : 1;
+        if (details->properties & HDDVD_XMU_DETAIL_COLOR)
+        {
+            d->properties |= HDDVD_SCENE_TEXT_COLOR;
+            d->text_color = details->color;
+        }
+    }
+    if (details->properties & (HDDVD_XMU_DETAIL_BACKGROUND_X | HDDVD_XMU_DETAIL_BACKGROUND_Y))
+    {
+        d->properties |= HDDVD_SCENE_IMAGE_PLACED;
+        if (details->properties & HDDVD_XMU_DETAIL_BACKGROUND_X)
+        {
+            d->image_x = details->background_x;
+            d->image_x_offset = details->background_x_offset;
+        }
+        if (details->properties & HDDVD_XMU_DETAIL_BACKGROUND_Y)
+        {
+            d->image_y = details->background_y;
+            d->image_y_offset = details->background_y_offset;
+        }
+        if (details->properties & HDDVD_XMU_DETAIL_CONTENT_WIDTH)
+            d->image_width_percent = details->content_width_percent;
+        if (details->properties & HDDVD_XMU_DETAIL_CONTENT_HEIGHT)
+            d->image_height_percent = details->content_height_percent;
+    }
 }
 
 /* Finds or requests an image, so each URL reaches the callback once. */
@@ -158,7 +245,8 @@ int hddvd_scene_build(const hddvd_xmu *xmu, const hddvd_xmu_styles *styles, size
     }
     state = calloc(count ? count : 1, sizeof(*state));
     scene->nodes = calloc(count ? count : 1, sizeof(*scene->nodes));
-    if (!state || !scene->nodes)
+    scene->decorations = calloc(count ? count : 1, sizeof(*scene->decorations));
+    if (!state || !scene->nodes || !scene->decorations)
     {
         rc = HDDVD_ENOMEM;
         goto done;
@@ -225,11 +313,16 @@ int hddvd_scene_build(const hddvd_xmu *xmu, const hddvd_xmu_styles *styles, size
                                  details.visibility == HDDVD_XMU_VISIBILITY_HIDDEN));
         n->focused = (uint8_t)(i == focused);
         n->hit_test = (uint8_t)is_interactive(node.name);
-        rc = lookup_image(&images, &image_count, hddvd_xmu_style_image_for_state(styles, i, 0), fn,
-                          opaque, &n->normal_image);
-        if (!rc)
-            rc = lookup_image(&images, &image_count, hddvd_xmu_style_image_for_state(styles, i, 1),
-                              fn, opaque, &n->focused_image);
+        {
+            const char *normal = hddvd_xmu_style_image_for_state(styles, i, 0);
+            const char *focus = hddvd_xmu_style_image_for_state(styles, i, 1);
+            if (!normal)
+                normal = focus = object_image(xmu, i, &node);
+            rc = lookup_image(&images, &image_count, normal, fn, opaque, &n->normal_image);
+            if (!rc)
+                rc = lookup_image(&images, &image_count, focus, fn, opaque, &n->focused_image);
+        }
+        decorate(xmu, i, &node, &details, &scene->decorations[scene->count]);
         state[i].scene_index = scene->count++;
     }
 done:
@@ -249,6 +342,7 @@ void hddvd_scene_close(hddvd_scene *scene)
     if (!scene)
         return;
     free(scene->nodes);
+    free(scene->decorations);
     free(scene);
 }
 
@@ -260,4 +354,17 @@ size_t hddvd_scene_node_count(const hddvd_scene *scene)
 const hddvd_scene_node *hddvd_scene_nodes(const hddvd_scene *scene)
 {
     return scene && scene->count ? scene->nodes : NULL;
+}
+
+int hddvd_scene_get_decoration(const hddvd_scene *scene, size_t index, hddvd_scene_decoration *out)
+{
+    if (!scene || !out || index >= scene->count)
+        return HDDVD_EINVAL;
+    *out = scene->decorations[index];
+    return HDDVD_OK;
+}
+
+const hddvd_scene_decoration *hddvd_scene_decorations_internal(const hddvd_scene *scene)
+{
+    return scene && scene->count ? scene->decorations : NULL;
 }

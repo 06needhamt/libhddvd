@@ -577,6 +577,42 @@ typedef struct hddvd_scene_node
     hddvd_image_source normal_image;
     hddvd_image_source focused_image;
 } hddvd_scene_node;
+/* Drawing beyond a scene node's image, from its computed style
+   (hddvd_scene_get_decoration). Strings borrow from the markup. */
+typedef enum hddvd_scene_decoration_property
+{
+    /* backgroundColor fills the node. */
+    HDDVD_SCENE_FILL = 1u << 0,
+    /* The node has text: a <p> element's text, or an <input>'s state:value. */
+    HDDVD_SCENE_TEXT = 1u << 1,
+    /* color was declared for the text; otherwise the host chooses. */
+    HDDVD_SCENE_TEXT_COLOR = 1u << 2,
+    /* backgroundPosition was declared: the image is drawn at its own size
+       (or contentWidth/contentHeight percent of the node) and placed, not
+       stretched to the node. */
+    HDDVD_SCENE_IMAGE_PLACED = 1u << 3
+} hddvd_scene_decoration_property;
+typedef struct hddvd_scene_decoration
+{
+    uint32_t properties;
+    uint32_t fill_color;
+    const char *text;
+    const char *font;
+    /* Pixels; 0 when undeclared or a keyword size. */
+    uint32_t font_size;
+    uint32_t text_color;
+    hddvd_xmu_font_style font_style;
+    hddvd_xmu_align text_align;
+    hddvd_xmu_align display_align;
+    uint8_t wrap;
+    hddvd_xmu_background_position image_x;
+    hddvd_xmu_background_position image_y;
+    int32_t image_x_offset;
+    int32_t image_y_offset;
+    /* Whole percentages of the node, 0 for the image's own size. */
+    uint32_t image_width_percent;
+    uint32_t image_height_percent;
+} hddvd_scene_decoration;
 typedef struct hddvd_display_quad
 {
     uint64_t node_id;
@@ -596,6 +632,31 @@ typedef struct hddvd_video_transform
     uint32_t logical_width;
     uint32_t logical_height;
 } hddvd_video_transform;
+/* Display-list items from hddvd_display_build_scene, in paint order. For
+   each node: a FILL item, then its IMAGE, then a TEXT item. quad carries the
+   node, destination, clip, z and opacity for every kind; image and source
+   only for IMAGE. color is the fill color, or the text color when
+   has_color; text fields borrow from the scene's markup. */
+typedef enum hddvd_display_item_kind
+{
+    HDDVD_DISPLAY_ITEM_IMAGE = 1,
+    HDDVD_DISPLAY_ITEM_FILL,
+    HDDVD_DISPLAY_ITEM_TEXT
+} hddvd_display_item_kind;
+typedef struct hddvd_display_item
+{
+    hddvd_display_item_kind kind;
+    hddvd_display_quad quad;
+    uint32_t color;
+    uint8_t has_color;
+    const char *text;
+    const char *font;
+    uint32_t font_size;
+    hddvd_xmu_font_style font_style;
+    hddvd_xmu_align text_align;
+    hddvd_xmu_align display_align;
+    uint8_t wrap;
+} hddvd_display_item;
 typedef int (*hddvd_aca_entry_cb)(void *, const hddvd_aca_entry *);
 
 typedef enum hddvd_object_type
@@ -1004,6 +1065,18 @@ HDDVD_API void hddvd_scene_close(hddvd_scene *);
 HDDVD_API size_t hddvd_scene_node_count(const hddvd_scene *);
 /* The node array, valid until hddvd_scene_close(); NULL when empty. */
 HDDVD_API const hddvd_scene_node *hddvd_scene_nodes(const hddvd_scene *);
+HDDVD_API int hddvd_scene_get_decoration(const hddvd_scene *, size_t, hddvd_scene_decoration *);
+/* Build a display list from a scene, including its decorations: background
+   fills, text runs, and placed images. The scene (and its markup) must
+   outlive the list. hddvd_display_quad_count and hddvd_display_get_quad
+   still report image quads only; hddvd_display_item_count and
+   hddvd_display_get_item report every item. Damage and hit tests cover
+   every item. */
+HDDVD_API int hddvd_display_build_scene(hddvd_image_cache *, uint32_t, uint32_t,
+                                        const hddvd_scene *, const hddvd_display_list *,
+                                        hddvd_display_list **);
+HDDVD_API size_t hddvd_display_item_count(const hddvd_display_list *);
+HDDVD_API int hddvd_display_get_item(const hddvd_display_list *, size_t, hddvd_display_item *);
 HDDVD_API int hddvd_scan_files(const hddvd_ctx *, hddvd_file_cb, void *);
 HDDVD_API const char *hddvd_file_kind_name(hddvd_file_kind);
 HDDVD_API int hddvd_xpl_find_start_ref(const char *, char **);
