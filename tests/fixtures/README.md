@@ -14,6 +14,9 @@ or extracted from the external reference menu.
   clear image, and a protected script).
 * `timemap/` is also written by `generate_objects.py`: an original VTI with one
   EVOB record and the time map that agrees with it.
+* `fuzz/` holds generated seeds for the harnesses whose input is not a file
+  format of its own: URIs, playlists for the title-map harness's synthetic
+  disc, and the byte layout `fuzz_display.c` decodes into scene nodes.
 
 They are seeds for the parser fuzzers and will become direct typed-model fixtures
 when the Phase 3 APIs are introduced.  `test_aca.c` independently constructs its

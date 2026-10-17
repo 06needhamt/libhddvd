@@ -94,6 +94,9 @@ jobs:
           ./build/fuzz-xpl tests/fixtures/playlist_full.xpl
           ./build/fuzz-script tests/fixtures/scripts/*.hdis
           ./build/fuzz-timemap tests/fixtures/timemap/*
+          ./build/fuzz-uri tests/fixtures/fuzz/uri/*
+          ./build/fuzz-titlemap tests/fixtures/fuzz/titlemap/*
+          ./build/fuzz-display tests/fixtures/fuzz/display/*
           ./build/fuzz-aca -seed=1 -runs=1000
           ./build/fuzz-script -seed=1 -runs=1000
           ./build/fuzz-navigation -seed=1 -runs=1000

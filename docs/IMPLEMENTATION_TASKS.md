@@ -610,6 +610,12 @@ parsers. Before this, `fuzz-timemap` reported 3 edges; with it, 445. The first i
 run found a heap over-read in the `HDDVDOBJ` envelope parser: a payload length
 near 2^64 wrapped the length sum back to the input size. It is fixed, with a
 regression test in `test_object.c`.
+- **New harnesses:**
+  - `fuzz-uri` covers URI parsing and resource resolution against a temporary disc root.
+  - `fuzz-titlemap` fuzzes playlists against a synthetic disc that holds a time map and a VTI.
+  - `fuzz-display` builds display lists from fuzzed scene nodes and decoder output, including a decoder that reports a too-short stride.
+  - Their seeds are generated into `tests/fixtures/fuzz/`.
+- **Scheduled fuzzing:** `.github/workflows/fuzz.yml` runs every harness for ten minutes each night, and on demand. It uploads crash inputs as artifacts.
 
 ## Phase 9 — actionable diagnostics
 

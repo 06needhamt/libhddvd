@@ -214,7 +214,7 @@ if(HDDVD_BUILD_FUZZERS)
     add_library(hddvd_fuzz STATIC ${HDDVD_SOURCES})
     hddvd_configure_library(hddvd_fuzz STATIC)
     target_compile_options(hddvd_fuzz PRIVATE -fsanitize=fuzzer-no-link,address,undefined)
-    foreach(target aca object xmf xmu script xpl navigation timemap)
+    foreach(target aca object xmf xmu script xpl navigation timemap uri titlemap display)
         add_executable(fuzz-${target} tests/fuzz_${target}.c)
         target_link_libraries(fuzz-${target} PRIVATE hddvd_fuzz)
         target_compile_options(fuzz-${target} PRIVATE

@@ -1,0 +1,54 @@
+name: Fuzz
+
+# Longer fuzzing than the per-push smoke run in ci.yml: every harness runs
+# for ten minutes from the synthetic seeds. Crash inputs are uploaded as
+# artifacts; they are fuzzer-generated, never disc data.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds per harness
+        default: '600'
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        harness: [aca, object, xmf, xmu, script, xpl, navigation, timemap, uri, titlemap, display]
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libxml2-dev
+      - name: Build the harness
+        env:
+          CC: clang
+        run: |
+          cmake -S . -B build -DHDDVD_BUILD_FUZZERS=ON -DBUILD_TESTING=OFF
+          cmake --build build --parallel --target fuzz-${{ matrix.harness }}
+      # libFuzzer writes new inputs into its corpus directory, so the seeds
+      # are copied out of the source tree first.
+      - name: Collect seeds
+        run: |
+          mkdir -p corpus artifacts
+          case "${{ matrix.harness }}" in
+            object) cp tests/fixtures/objects/*.hdo corpus/ ;;
+            xmf) cp tests/fixtures/plain_manifest.xmf corpus/ ;;
+            xmu) cp tests/fixtures/plain_markup.xmu corpus/ ;;
+            xpl) cp tests/fixtures/playlist_full.xpl corpus/ ;;
+            script) cp tests/fixtures/scripts/*.hdis corpus/ ;;
+            timemap) cp tests/fixtures/timemap/* corpus/ ;;
+            uri|titlemap|display) cp tests/fixtures/fuzz/${{ matrix.harness }}/* corpus/ ;;
+          esac
+      - name: Fuzz
+        run: >-
+          ./build/fuzz-${{ matrix.harness }} corpus
+          -max_total_time=${{ github.event.inputs.seconds || '600' }}
+          -rss_limit_mb=4096 -artifact_prefix=artifacts/
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-${{ matrix.harness }}
+          path: artifacts/

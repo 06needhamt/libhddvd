@@ -96,6 +96,30 @@ def vti():
 
 timemaps = {"original.map": tmap(), "original.vti": vti()}
 
+# Seeds for harnesses whose input is not a file format of its own.
+FUZZ = Path(__file__).resolve().parent / "fuzz"
+fuzz_seeds = {
+    "uri/disc-file.txt": b"file:///dvddisc/ADV_OBJ/menu.xmf",
+    "uri/archive-member.txt": b"file:///dvddisc/ADV_OBJ/menu.aca/menu.xmu",
+    "uri/traversal.txt": b"file:///dvddisc/ADV_OBJ/../../etc/passwd",
+    # fuzz-titlemap's disc holds ONE.MAP (40 frames of EVOB 1) and its VTI.
+    "titlemap/two-clips.xpl": (
+        b"<Playlist xmlns='http://www.dvdforum.org/2005/HDDVDVideo/Playlist'>"
+        b"<TitleSet timeBase='60fps'><Title id='t' titleDuration='00:00:01:00'>"
+        b"<PrimaryAudioVideoClip src='file:///dvddisc/HVDVD_TS/ONE.MAP' "
+        b"titleTimeBegin='00:00:00:00' titleTimeEnd='00:00:00:20'/>"
+        b"<PrimaryAudioVideoClip src='file:///dvddisc/HVDVD_TS/ONE.MAP' "
+        b"titleTimeBegin='00:00:00:20' clipTimeBegin='00:00:00:10' "
+        b"titleTimeEnd='00:00:00:40'/></Title></TitleSet></Playlist>"),
+    # Viewport 640x360, four 8x8 images, then a root and two image children
+    # (20 bytes each: parent, x, y, width, height, then 11 attribute bytes).
+    "display/three-nodes.bin": (
+        struct.pack(">HH", 640, 360) + bytes([8, 8] * 4) + bytes([0, 16, 16, 0])
+        + bytes([0]) + struct.pack(">hhHH", 10, 10, 300, 200) + bytes([0, 0, 0, 0, 0, 255, 0b101, 0, 0, 0, 0])
+        + bytes([0]) + struct.pack(">hhHH", 5, 5, 8, 8) + bytes([0, 0, 0, 0, 1, 255, 0b111, 4, 5, 0, 0])
+        + bytes([0]) + struct.pack(">hhHH", 20, 5, 8, 8) + bytes([0, 0, 4, 4, 2, 128, 0b101, 6, 0, 0, 0])),
+}
+
 def mutate(blob, offset, replacement):
     return blob[:offset] + replacement + blob[offset + len(replacement):]
 
@@ -128,3 +152,8 @@ for path in TIMEMAP.iterdir():
     if path.is_file(): path.unlink()
 for name, data in sorted(timemaps.items()):
     (TIMEMAP / name).write_bytes(data)
+
+for name, data in sorted(fuzz_seeds.items()):
+    path = FUZZ / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
