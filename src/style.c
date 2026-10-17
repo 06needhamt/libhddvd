@@ -6,20 +6,35 @@
 
 #define STYLE_NS "http://www.dvdforum.org/2005/ihd#style"
 
+/* The first four directions are in hddvd_xmu_style, the diagonals in the
+   details record. */
 enum nav_direction
 {
     NAV_LEFT,
     NAV_RIGHT,
     NAV_UP,
     NAV_DOWN,
+    NAV_LEFT_UP,
+    NAV_LEFT_DOWN,
+    NAV_RIGHT_UP,
+    NAV_RIGHT_DOWN,
     NAV_COUNT
 };
+#define NAV_PUBLIC 4
+
+/* parse_property results beyond hddvd_status codes. */
+#define STYLE_UNKNOWN_PROPERTY 1
+#define STYLE_UNKNOWN_KEYWORD 2
 
 struct style_value
 {
     hddvd_xmu_style public_value;
+    hddvd_xmu_style_details details;
     char **images;
     char *nav_ids[NAV_COUNT];
+    char *font;
+    char *anchor;
+    char *border;
 };
 
 struct hddvd_xmu_styles
@@ -30,6 +45,8 @@ struct hddvd_xmu_styles
     size_t *z_order;
     size_t count;
     int fragment;
+    hddvd_xmu_style_unmodeled *unmodeled;
+    size_t unmodeled_count;
 };
 
 /* Animation keyframes inside <timing> are not static style declarations. */
@@ -56,6 +73,10 @@ static void value_init(struct style_value *value)
     value->public_value.nav_right = SIZE_MAX;
     value->public_value.nav_up = SIZE_MAX;
     value->public_value.nav_down = SIZE_MAX;
+    value->details.nav_left_up = SIZE_MAX;
+    value->details.nav_left_down = SIZE_MAX;
+    value->details.nav_right_up = SIZE_MAX;
+    value->details.nav_right_down = SIZE_MAX;
 }
 
 static void value_clear(struct style_value *value)
@@ -66,6 +87,9 @@ static void value_clear(struct style_value *value)
     free(value->images);
     for (i = 0; i < NAV_COUNT; i++)
         free(value->nav_ids[i]);
+    free(value->font);
+    free(value->anchor);
+    free(value->border);
     value_init(value);
 }
 
@@ -173,7 +197,7 @@ static int parse_images(struct style_value *style, const char *text)
 }
 
 static int set_nav(struct style_value *style, enum nav_direction direction, const char *value,
-                   uint32_t property)
+                   uint32_t *properties, uint32_t property)
 {
     if (!*value)
         return HDDVD_EPARSE;
@@ -186,8 +210,376 @@ static int set_nav(struct style_value *style, enum nav_direction direction, cons
         if (!style->nav_ids[direction])
             return HDDVD_ENOMEM;
     }
-    style->public_value.properties |= property;
+    *properties |= property;
     return HDDVD_OK;
+}
+
+static int set_string(char **slot, const char *value)
+{
+    if (!*value)
+        return HDDVD_EPARSE;
+    free(*slot);
+    *slot = duplicate_range(value, strlen(value));
+    return *slot ? HDDVD_OK : HDDVD_ENOMEM;
+}
+
+/* opacity: a decimal from 0 to 1, kept in thousandths. */
+static int parse_opacity(const char *text, uint16_t *result)
+{
+    unsigned whole, fraction = 0, scale = 100;
+    if (*text < '0' || *text > '9')
+        return HDDVD_EPARSE;
+    whole = (unsigned)(*text++ - '0');
+    if (*text == '.')
+    {
+        text++;
+        if (*text < '0' || *text > '9')
+            return HDDVD_EPARSE;
+        for (; *text >= '0' && *text <= '9'; text++, scale /= 10)
+            fraction += scale * (unsigned)(*text - '0');
+    }
+    if (*text || whole > 1 || (whole == 1 && fraction))
+        return HDDVD_EPARSE;
+    *result = (uint16_t)(whole * 1000u + fraction);
+    return HDDVD_OK;
+}
+
+static int hex_digit(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+/* rgb(r,g,b) or rgba(r,g,b,a) with components from 0 to 255. */
+static int parse_components(const char *text, unsigned count, uint32_t *result)
+{
+    uint32_t value = 0;
+    unsigned i;
+    for (i = 0; i < count; i++)
+    {
+        char *end;
+        unsigned long component;
+        while (*text == ' ')
+            text++;
+        if (*text < '0' || *text > '9')
+            return HDDVD_EPARSE;
+        errno = 0;
+        component = strtoul(text, &end, 10);
+        if (errno || component > 255)
+            return HDDVD_EPARSE;
+        text = end;
+        while (*text == ' ')
+            text++;
+        if (*text != (i + 1 == count ? ')' : ','))
+            return HDDVD_EPARSE;
+        text++;
+        value = value << 8 | (uint32_t)component;
+    }
+    if (*text)
+        return HDDVD_EPARSE;
+    *result = count == 3 ? value << 8 | 0xffu : value;
+    return HDDVD_OK;
+}
+
+static int parse_color(const char *text, uint32_t *result)
+{
+    static const struct
+    {
+        const char *name;
+        uint32_t rgba;
+    } names[] = {{"black", 0x000000ffu},  {"silver", 0xc0c0c0ffu}, {"gray", 0x808080ffu},
+                 {"grey", 0x808080ffu},   {"white", 0xffffffffu},  {"maroon", 0x800000ffu},
+                 {"red", 0xff0000ffu},    {"purple", 0x800080ffu}, {"fuchsia", 0xff00ffffu},
+                 {"green", 0x008000ffu},  {"lime", 0x00ff00ffu},   {"olive", 0x808000ffu},
+                 {"yellow", 0xffff00ffu}, {"navy", 0x000080ffu},   {"blue", 0x0000ffffu},
+                 {"teal", 0x008080ffu},   {"aqua", 0x00ffffffu},   {"transparent", 0}};
+    size_t i;
+    if (*text == '#')
+    {
+        uint32_t value = 0;
+        for (i = 1; i <= 6; i++)
+        {
+            int digit = hex_digit(text[i]);
+            if (digit < 0)
+                return HDDVD_EPARSE;
+            value = value << 4 | (uint32_t)digit;
+        }
+        if (text[7])
+            return HDDVD_EPARSE;
+        *result = value << 8 | 0xffu;
+        return HDDVD_OK;
+    }
+    if (!strncmp(text, "rgba(", 5))
+        return parse_components(text + 5, 4, result);
+    if (!strncmp(text, "rgb(", 4))
+        return parse_components(text + 4, 3, result);
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+        if (!strcmp(text, names[i].name))
+        {
+            *result = names[i].rgba;
+            return HDDVD_OK;
+        }
+    return STYLE_UNKNOWN_KEYWORD;
+}
+
+/* Matches value against a keyword list; the keyword's position is the
+   enum value. */
+static int keyword(const char *value, const char *const *keywords, unsigned *result)
+{
+    unsigned i;
+    for (i = 0; keywords[i]; i++)
+        if (!strcmp(value, keywords[i]))
+        {
+            *result = i;
+            return HDDVD_OK;
+        }
+    return STYLE_UNKNOWN_KEYWORD;
+}
+
+static int parse_unsigned(const char *text, uint32_t *result)
+{
+    int32_t value;
+    if (*text < '0' || *text > '9' || parse_signed(text, 0, &value) || value < 0)
+        return HDDVD_EPARSE;
+    *result = (uint32_t)value;
+    return HDDVD_OK;
+}
+
+/* A value that does not start like a number is a keyword, reported rather
+   than rejected; one that does must parse. */
+static int numeric(const char *value, int (*parse)(const char *, uint32_t *), uint32_t *result)
+{
+    if ((*value < '0' || *value > '9') && *value != '-' && *value != '+' && *value != '.')
+        return STYLE_UNKNOWN_KEYWORD;
+    return parse(value, result);
+}
+
+static int parse_background_position(const char *value, const char *start, const char *end,
+                                     hddvd_xmu_background_position *position, int32_t *offset)
+{
+    if (!strcmp(value, start))
+        *position = HDDVD_XMU_BACKGROUND_START;
+    else if (!strcmp(value, "center"))
+        *position = HDDVD_XMU_BACKGROUND_CENTER;
+    else if (!strcmp(value, end))
+        *position = HDDVD_XMU_BACKGROUND_END;
+    else if (*value == '-' || (*value >= '0' && *value <= '9'))
+    {
+        uint32_t percent;
+        size_t length = strlen(value);
+        if (value[length - 1] != '%')
+        {
+            *position = HDDVD_XMU_BACKGROUND_OFFSET;
+            return parse_signed(value, 1, offset);
+        }
+        if (parse_percent(value, &percent) || percent > INT32_MAX)
+            return HDDVD_EPARSE;
+        *position = HDDVD_XMU_BACKGROUND_PERCENT;
+        *offset = (int32_t)percent;
+        return HDDVD_OK;
+    }
+    else
+        return STYLE_UNKNOWN_KEYWORD;
+    *offset = 0;
+    return HDDVD_OK;
+}
+
+static int parse_crop(const char *text, int32_t crop[4])
+{
+    unsigned i;
+    for (i = 0; i < 4; i++)
+    {
+        char *end;
+        long long value;
+        while (*text == ' ')
+            text++;
+        errno = 0;
+        value = strtoll(text, &end, 10);
+        if (errno || end == text || value < INT32_MIN || value > INT32_MAX)
+            return HDDVD_EPARSE;
+        crop[i] = (int32_t)value;
+        text = end;
+    }
+    while (*text == ' ')
+        text++;
+    return *text ? HDDVD_EPARSE : HDDVD_OK;
+}
+
+/* Properties of the details record. Returns STYLE_UNKNOWN_PROPERTY for a
+   name it does not know. */
+static int parse_detail(struct style_value *style, const char *name, const char *value)
+{
+    static const char *const visibility[] = {"visible", "hidden", "inherit", NULL};
+    static const char *const font_style[] = {"normal", "italic", "oblique", NULL};
+    static const char *const text_align[] = {"start", "center", "end", "left", "right", NULL};
+    static const char *const display_align[] = {"before", "center", "after", NULL};
+    static const char *const wrap[] = {"no-wrap", "wrap", NULL};
+    static const char *const repeat[] = {"no-repeat", "repeat", NULL};
+    static const struct
+    {
+        const char *name;
+        enum nav_direction direction;
+        uint32_t bit;
+    } diagonals[] = {{"navLeftUp", NAV_LEFT_UP, HDDVD_XMU_DETAIL_NAV_LEFT_UP},
+                     {"navLeftDown", NAV_LEFT_DOWN, HDDVD_XMU_DETAIL_NAV_LEFT_DOWN},
+                     {"navRightUp", NAV_RIGHT_UP, HDDVD_XMU_DETAIL_NAV_RIGHT_UP},
+                     {"navRightDown", NAV_RIGHT_DOWN, HDDVD_XMU_DETAIL_NAV_RIGHT_DOWN}};
+    hddvd_xmu_style_details *d = &style->details;
+    uint32_t bit;
+    unsigned choice = 0;
+    size_t i;
+    int rc;
+    for (i = 0; i < sizeof(diagonals) / sizeof(diagonals[0]); i++)
+        if (!strcmp(name, diagonals[i].name))
+            return set_nav(style, diagonals[i].direction, value, &d->properties, diagonals[i].bit);
+    if (!strcmp(name, "opacity"))
+    {
+        bit = HDDVD_XMU_DETAIL_OPACITY;
+        d->opacity_inherit = !strcmp(value, "inherit");
+        if (d->opacity_inherit)
+            rc = HDDVD_OK;
+        else if ((*value < '0' || *value > '9') && *value != '.' && *value != '-')
+            rc = STYLE_UNKNOWN_KEYWORD;
+        else
+            rc = parse_opacity(value, &d->opacity);
+    }
+    else if (!strcmp(name, "visibility"))
+    {
+        bit = HDDVD_XMU_DETAIL_VISIBILITY;
+        rc = keyword(value, visibility, &choice);
+        d->visibility = (hddvd_xmu_visibility)choice;
+    }
+    else if (!strcmp(name, "color"))
+    {
+        bit = HDDVD_XMU_DETAIL_COLOR;
+        rc = parse_color(value, &d->color);
+    }
+    else if (!strcmp(name, "backgroundColor"))
+    {
+        bit = HDDVD_XMU_DETAIL_BACKGROUND_COLOR;
+        rc = parse_color(value, &d->background_color);
+    }
+    else if (!strcmp(name, "font"))
+    {
+        bit = HDDVD_XMU_DETAIL_FONT;
+        rc = set_string(&style->font, value);
+    }
+    else if (!strcmp(name, "fontSize"))
+    {
+        bit = HDDVD_XMU_DETAIL_FONT_SIZE;
+        rc = numeric(value, parse_unsigned_pixels, &d->font_size);
+    }
+    else if (!strcmp(name, "fontStyle"))
+    {
+        bit = HDDVD_XMU_DETAIL_FONT_STYLE;
+        rc = keyword(value, font_style, &choice);
+        d->font_style = (hddvd_xmu_font_style)choice;
+    }
+    else if (!strcmp(name, "textAlign"))
+    {
+        bit = HDDVD_XMU_DETAIL_TEXT_ALIGN;
+        rc = keyword(value, text_align, &choice);
+        d->text_align = (hddvd_xmu_align)choice;
+    }
+    else if (!strcmp(name, "displayAlign"))
+    {
+        bit = HDDVD_XMU_DETAIL_DISPLAY_ALIGN;
+        rc = keyword(value, display_align, &choice);
+        d->display_align = (hddvd_xmu_align)choice;
+    }
+    else if (!strcmp(name, "wrapOption"))
+    {
+        bit = HDDVD_XMU_DETAIL_WRAP;
+        rc = keyword(value, wrap, &choice);
+        d->wrap = (uint8_t)choice;
+    }
+    else if (!strcmp(name, "textAltitude"))
+    {
+        bit = HDDVD_XMU_DETAIL_TEXT_ALTITUDE;
+        rc = numeric(value, parse_percent, &d->text_altitude_percent);
+    }
+    else if (!strcmp(name, "anchor"))
+    {
+        bit = HDDVD_XMU_DETAIL_ANCHOR;
+        rc = set_string(&style->anchor, value);
+    }
+    else if (!strcmp(name, "border"))
+    {
+        bit = HDDVD_XMU_DETAIL_BORDER;
+        rc = set_string(&style->border, value);
+    }
+    else if (!strcmp(name, "padding"))
+    {
+        /* Only the single-length form has been observed. */
+        bit = HDDVD_XMU_DETAIL_PADDING_BEFORE | HDDVD_XMU_DETAIL_PADDING_AFTER |
+              HDDVD_XMU_DETAIL_PADDING_START | HDDVD_XMU_DETAIL_PADDING_END;
+        rc = numeric(value, parse_unsigned_pixels, &d->padding_before);
+        d->padding_after = d->padding_start = d->padding_end = d->padding_before;
+    }
+    else if (!strcmp(name, "paddingBefore"))
+    {
+        bit = HDDVD_XMU_DETAIL_PADDING_BEFORE;
+        rc = numeric(value, parse_unsigned_pixels, &d->padding_before);
+    }
+    else if (!strcmp(name, "paddingAfter"))
+    {
+        bit = HDDVD_XMU_DETAIL_PADDING_AFTER;
+        rc = numeric(value, parse_unsigned_pixels, &d->padding_after);
+    }
+    else if (!strcmp(name, "paddingStart"))
+    {
+        bit = HDDVD_XMU_DETAIL_PADDING_START;
+        rc = numeric(value, parse_unsigned_pixels, &d->padding_start);
+    }
+    else if (!strcmp(name, "paddingEnd"))
+    {
+        bit = HDDVD_XMU_DETAIL_PADDING_END;
+        rc = numeric(value, parse_unsigned_pixels, &d->padding_end);
+    }
+    else if (!strcmp(name, "backgroundPositionHorizontal"))
+    {
+        bit = HDDVD_XMU_DETAIL_BACKGROUND_X;
+        rc = parse_background_position(value, "left", "right", &d->background_x,
+                                       &d->background_x_offset);
+    }
+    else if (!strcmp(name, "backgroundPositionVertical"))
+    {
+        bit = HDDVD_XMU_DETAIL_BACKGROUND_Y;
+        rc = parse_background_position(value, "top", "bottom", &d->background_y,
+                                       &d->background_y_offset);
+    }
+    else if (!strcmp(name, "backgroundRepeat"))
+    {
+        bit = HDDVD_XMU_DETAIL_BACKGROUND_REPEAT;
+        rc = keyword(value, repeat, &choice);
+        d->background_repeat = (uint8_t)choice;
+    }
+    else if (!strcmp(name, "backgroundFrame"))
+    {
+        bit = HDDVD_XMU_DETAIL_BACKGROUND_FRAME;
+        rc = numeric(value, parse_unsigned, &d->background_frame);
+    }
+    else if (!strcmp(name, "crop"))
+    {
+        bit = HDDVD_XMU_DETAIL_CROP;
+        rc = parse_crop(value, d->crop);
+    }
+    else if (!strcmp(name, "navIndex"))
+    {
+        bit = HDDVD_XMU_DETAIL_NAV_INDEX;
+        d->nav_index_none = !strcmp(value, "none");
+        rc = d->nav_index_none ? HDDVD_OK : numeric(value, parse_unsigned, &d->nav_index);
+    }
+    else
+        return STYLE_UNKNOWN_PROPERTY;
+    if (!rc)
+        d->properties |= bit;
+    return rc;
 }
 
 static int parse_property(struct style_value *style, const char *name, const char *value)
@@ -276,9 +668,18 @@ static int parse_property(struct style_value *style, const char *name, const cha
     }
     if (!strcmp(name, "contentWidth") || !strcmp(name, "contentHeight"))
     {
+        int width = !strcmp(name, "contentWidth");
         uint32_t percent;
         if (parse_percent(value, &percent) == HDDVD_OK)
+        {
+            if (width)
+                style->details.content_width_percent = percent;
+            else
+                style->details.content_height_percent = percent;
+            style->details.properties |=
+                width ? HDDVD_XMU_DETAIL_CONTENT_WIDTH : HDDVD_XMU_DETAIL_CONTENT_HEIGHT;
             return HDDVD_OK;
+        }
         if (strcmp(value, "scale-to-fit"))
             return HDDVD_EPARSE;
         style->public_value.scale_to_fit = 1;
@@ -286,19 +687,56 @@ static int parse_property(struct style_value *style, const char *name, const cha
         return HDDVD_OK;
     }
     if (!strcmp(name, "navLeft"))
-        return set_nav(style, NAV_LEFT, value, HDDVD_XMU_STYLE_NAV_LEFT);
+        return set_nav(style, NAV_LEFT, value, &style->public_value.properties,
+                       HDDVD_XMU_STYLE_NAV_LEFT);
     if (!strcmp(name, "navRight"))
-        return set_nav(style, NAV_RIGHT, value, HDDVD_XMU_STYLE_NAV_RIGHT);
+        return set_nav(style, NAV_RIGHT, value, &style->public_value.properties,
+                       HDDVD_XMU_STYLE_NAV_RIGHT);
     if (!strcmp(name, "navUp"))
-        return set_nav(style, NAV_UP, value, HDDVD_XMU_STYLE_NAV_UP);
+        return set_nav(style, NAV_UP, value, &style->public_value.properties,
+                       HDDVD_XMU_STYLE_NAV_UP);
     if (!strcmp(name, "navDown"))
-        return set_nav(style, NAV_DOWN, value, HDDVD_XMU_STYLE_NAV_DOWN);
-    /* Unknown style properties are retained by the XMU DOM and ignored here. */
+        return set_nav(style, NAV_DOWN, value, &style->public_value.properties,
+                       HDDVD_XMU_STYLE_NAV_DOWN);
+    /* Everything else is a detail property, or reported as unmodeled. */
+    return parse_detail(style, name, value);
+}
+
+static int note_unmodeled(hddvd_xmu_styles *styles, const char *property, const char *value)
+{
+    hddvd_xmu_style_unmodeled *grown, *record;
+    size_t i;
+    for (i = 0; i < styles->unmodeled_count; i++)
+    {
+        record = &styles->unmodeled[i];
+        if (!strcmp(record->property, property) &&
+            (value ? record->value && !strcmp(record->value, value) : !record->value))
+        {
+            record->occurrences++;
+            return HDDVD_OK;
+        }
+    }
+    grown = realloc(styles->unmodeled, (styles->unmodeled_count + 1) * sizeof(*grown));
+    if (!grown)
+        return HDDVD_ENOMEM;
+    styles->unmodeled = grown;
+    record = &grown[styles->unmodeled_count];
+    record->property = duplicate_range(property, strlen(property));
+    record->value = value ? duplicate_range(value, strlen(value)) : NULL;
+    record->occurrences = 1;
+    if (!record->property || (value && !record->value))
+    {
+        free((char *)record->property);
+        free((char *)record->value);
+        return HDDVD_ENOMEM;
+    }
+    styles->unmodeled_count++;
     return HDDVD_OK;
 }
 
-static int parse_direct(const hddvd_xmu *xmu, size_t node_index, struct style_value *result)
+static int parse_direct(hddvd_xmu_styles *styles, size_t node_index, struct style_value *result)
 {
+    const hddvd_xmu *xmu = styles->xmu;
     hddvd_xmu_node node;
     hddvd_xmu_attribute attribute;
     size_t i;
@@ -315,6 +753,10 @@ static int parse_direct(const hddvd_xmu *xmu, size_t node_index, struct style_va
         if (attribute.namespace_uri && !strcmp(attribute.namespace_uri, STYLE_NS))
         {
             rc = parse_property(result, attribute.name, attribute.value);
+            if (rc == STYLE_UNKNOWN_PROPERTY)
+                rc = note_unmodeled(styles, attribute.name, NULL);
+            else if (rc == STYLE_UNKNOWN_KEYWORD)
+                rc = note_unmodeled(styles, attribute.name, attribute.value);
             if (rc)
                 return rc;
         }
@@ -336,10 +778,68 @@ static const char *style_reference(const hddvd_xmu *xmu, size_t node_index)
     return NULL;
 }
 
+static int copy_string(char **target, const char *source)
+{
+    free(*target);
+    *target = source ? duplicate_range(source, strlen(source)) : NULL;
+    return source && !*target ? HDDVD_ENOMEM : HDDVD_OK;
+}
+
+static int overlay_details(struct style_value *target, const struct style_value *source)
+{
+    const hddvd_xmu_style_details *s = &source->details;
+    hddvd_xmu_style_details *t = &target->details;
+    uint32_t p = s->properties;
+    int rc = HDDVD_OK;
+#define COPY_DETAIL(bit, field)                                                                    \
+    do                                                                                             \
+    {                                                                                              \
+        if (p & (bit))                                                                             \
+            t->field = s->field;                                                                   \
+    } while (0)
+    COPY_DETAIL(HDDVD_XMU_DETAIL_OPACITY, opacity);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_OPACITY, opacity_inherit);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_VISIBILITY, visibility);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_COLOR, color);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_BACKGROUND_COLOR, background_color);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_FONT_SIZE, font_size);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_FONT_STYLE, font_style);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_TEXT_ALIGN, text_align);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_DISPLAY_ALIGN, display_align);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_WRAP, wrap);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_TEXT_ALTITUDE, text_altitude_percent);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_PADDING_BEFORE, padding_before);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_PADDING_AFTER, padding_after);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_PADDING_START, padding_start);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_PADDING_END, padding_end);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_BACKGROUND_X, background_x);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_BACKGROUND_X, background_x_offset);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_BACKGROUND_Y, background_y);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_BACKGROUND_Y, background_y_offset);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_BACKGROUND_REPEAT, background_repeat);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_BACKGROUND_FRAME, background_frame);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_CONTENT_WIDTH, content_width_percent);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_CONTENT_HEIGHT, content_height_percent);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_NAV_INDEX, nav_index);
+    COPY_DETAIL(HDDVD_XMU_DETAIL_NAV_INDEX, nav_index_none);
+#undef COPY_DETAIL
+    if (p & HDDVD_XMU_DETAIL_CROP)
+        memcpy(t->crop, s->crop, sizeof(t->crop));
+    if (p & HDDVD_XMU_DETAIL_FONT)
+        rc = copy_string(&target->font, source->font);
+    if (!rc && (p & HDDVD_XMU_DETAIL_ANCHOR))
+        rc = copy_string(&target->anchor, source->anchor);
+    if (!rc && (p & HDDVD_XMU_DETAIL_BORDER))
+        rc = copy_string(&target->border, source->border);
+    t->properties |= p;
+    return rc;
+}
+
 static int overlay(struct style_value *target, const struct style_value *source)
 {
     uint32_t p = source->public_value.properties;
     size_t i;
+    int rc;
 #define COPY_PROPERTY(bit, field)                                                                  \
     do                                                                                             \
     {                                                                                              \
@@ -366,6 +866,9 @@ static int overlay(struct style_value *target, const struct style_value *source)
     COPY_PROPERTY(HDDVD_XMU_STYLE_SCALE_TO_FIT, scale_to_fit);
     COPY_PROPERTY(HDDVD_XMU_STYLE_POSITION, position_absolute);
 #undef COPY_PROPERTY
+    rc = overlay_details(target, source);
+    if (rc)
+        return rc;
     if (p & HDDVD_XMU_STYLE_BACKGROUND_IMAGE)
     {
         for (i = 0; i < target->public_value.background_image_count; i++)
@@ -387,8 +890,13 @@ static int overlay(struct style_value *target, const struct style_value *source)
     }
     for (i = 0; i < NAV_COUNT; i++)
     {
-        uint32_t bit = HDDVD_XMU_STYLE_NAV_LEFT << i;
-        if (!(p & bit))
+        static const uint32_t diagonal_bits[] = {
+            HDDVD_XMU_DETAIL_NAV_LEFT_UP, HDDVD_XMU_DETAIL_NAV_LEFT_DOWN,
+            HDDVD_XMU_DETAIL_NAV_RIGHT_UP, HDDVD_XMU_DETAIL_NAV_RIGHT_DOWN};
+        int set = i < NAV_PUBLIC
+                      ? (p & ((uint32_t)HDDVD_XMU_STYLE_NAV_LEFT << i)) != 0
+                      : (source->details.properties & diagonal_bits[i - NAV_PUBLIC]) != 0;
+        if (!set)
             continue;
         free(target->nav_ids[i]);
         target->nav_ids[i] = NULL;
@@ -451,9 +959,11 @@ static int apply_references(hddvd_xmu_styles *styles, size_t node_index, struct 
 static int resolve_navigation(hddvd_xmu_styles *styles, struct style_value *value)
 {
     size_t i;
-    size_t *destinations[NAV_COUNT] = {&value->public_value.nav_left,
-                                       &value->public_value.nav_right, &value->public_value.nav_up,
-                                       &value->public_value.nav_down};
+    size_t *destinations[NAV_COUNT] = {
+        &value->public_value.nav_left, &value->public_value.nav_right,
+        &value->public_value.nav_up,   &value->public_value.nav_down,
+        &value->details.nav_left_up,   &value->details.nav_left_down,
+        &value->details.nav_right_up,  &value->details.nav_right_down};
     for (i = 0; i < NAV_COUNT; i++)
     {
         if (!value->nav_ids[i])
@@ -511,7 +1021,7 @@ int hddvd_xmu_styles_open(const hddvd_xmu *xmu, hddvd_xmu_styles **result)
         value_init(&styles->specified[i]);
         value_init(&styles->computed[i]);
         if (!in_timing(xmu, i))
-            rc = parse_direct(xmu, i, &styles->specified[i]);
+            rc = parse_direct(styles, i, &styles->specified[i]);
         styles->z_order[i] = i;
     }
     for (i = 0; !rc && i < styles->count; i++)
@@ -546,6 +1056,12 @@ void hddvd_xmu_styles_close(hddvd_xmu_styles *styles)
     {
         value_clear(&styles->computed[i]);
     }
+    for (i = 0; i < styles->unmodeled_count; i++)
+    {
+        free((char *)styles->unmodeled[i].property);
+        free((char *)styles->unmodeled[i].value);
+    }
+    free(styles->unmodeled);
     free(styles->specified);
     free(styles->computed);
     free(styles->z_order);
@@ -600,4 +1116,32 @@ const char *hddvd_xmu_style_image_for_state(const hddvd_xmu_styles *styles, size
 size_t hddvd_xmu_style_z_order(const hddvd_xmu_styles *styles, size_t position)
 {
     return styles && position < styles->count ? styles->z_order[position] : SIZE_MAX;
+}
+
+int hddvd_xmu_get_style_details(const hddvd_xmu_styles *styles, size_t node, int computed,
+                                hddvd_xmu_style_details *result)
+{
+    const struct style_value *value;
+    if (!styles || !result || node >= styles->count)
+        return HDDVD_EINVAL;
+    value = computed ? &styles->computed[node] : &styles->specified[node];
+    *result = value->details;
+    result->font = value->font;
+    result->anchor = value->anchor;
+    result->border = value->border;
+    return HDDVD_OK;
+}
+
+size_t hddvd_xmu_styles_unmodeled_count(const hddvd_xmu_styles *styles)
+{
+    return styles ? styles->unmodeled_count : 0;
+}
+
+int hddvd_xmu_styles_get_unmodeled(const hddvd_xmu_styles *styles, size_t index,
+                                   hddvd_xmu_style_unmodeled *result)
+{
+    if (!styles || !result || index >= styles->unmodeled_count)
+        return HDDVD_EINVAL;
+    *result = styles->unmodeled[index];
+    return HDDVD_OK;
 }

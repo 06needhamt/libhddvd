@@ -90,7 +90,7 @@ jobs:
         run: |
           ./build/fuzz-object tests/fixtures/objects/*.hdo
           ./build/fuzz-xmf tests/fixtures/plain_manifest.xmf
-          ./build/fuzz-xmu tests/fixtures/plain_markup.xmu
+          ./build/fuzz-xmu tests/fixtures/plain_markup.xmu tests/fixtures/fuzz/xmu/*
           ./build/fuzz-xpl tests/fixtures/playlist_full.xpl
           ./build/fuzz-script tests/fixtures/scripts/*.hdis
           ./build/fuzz-timemap tests/fixtures/timemap/*

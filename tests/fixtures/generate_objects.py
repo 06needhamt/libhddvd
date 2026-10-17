@@ -111,6 +111,21 @@ fuzz_seeds = {
         b"<PrimaryAudioVideoClip src='file:///dvddisc/HVDVD_TS/ONE.MAP' "
         b"titleTimeBegin='00:00:00:20' clipTimeBegin='00:00:00:10' "
         b"titleTimeEnd='00:00:00:40'/></Title></TitleSet></Playlist>"),
+    # Every style detail property, keyword and unknown property included.
+    "xmu/style-details.xmu": (
+        b"<root xmlns='http://www.dvdforum.org/2005/ihd' "
+        b"xmlns:s='http://www.dvdforum.org/2005/ihd#style'><head><styling>"
+        b"<style id='base' s:opacity='0.4' s:color='#f7dc89' s:font='Original.ttf' "
+        b"s:fontSize='24px' s:padding='5px' s:navLeftUp='b' s:backgroundRepeat='no-repeat'/>"
+        b"</styling></head><body><div id='a' style='base' s:opacity='inherit' "
+        b"s:visibility='hidden' s:backgroundColor='rgba(199,180,153,128)' "
+        b"s:fontStyle='oblique' s:textAlign='center' s:displayAlign='after' "
+        b"s:wrapOption='wrap' s:textAltitude='140%' s:anchor='center' s:paddingStart='36px' "
+        b"s:border='1px solid white' s:backgroundPositionHorizontal='-6px' "
+        b"s:backgroundPositionVertical='30%' s:backgroundFrame='2' s:crop='0 0 20 33' "
+        b"s:contentWidth='90%' s:contentHeight='scale-to-fit' s:navIndex='none' "
+        b"s:navRightDown='none'/><div id='b' s:fontSize='small' s:color='blue' "
+        b"s:futureProperty='1'/></body></root>"),
     # Viewport 640x360, four 8x8 images, then a root and two image children
     # (20 bytes each: parent, x, y, width, height, then 11 attribute bytes).
     "display/three-nodes.bin": (

@@ -232,6 +232,26 @@ no target), keyframe lists on `<timing>` animations (which carry no static
 style), and fragments that reference styles defined by the including document.
 Styles now compute for all 39 markup files from five externally supplied discs.
 
+The same 39 files use about 40 style properties. `hddvd_xmu_get_style_details` now models every property they use, apart from keyword font sizes:
+
+| Group | Properties |
+|---|---|
+| Rendering | `opacity`, `visibility`, `color`, `backgroundColor`, `backgroundRepeat`, `backgroundPositionHorizontal`/`Vertical`, `backgroundFrame`, `crop` |
+| Text | `font`, `fontSize`, `fontStyle`, `textAlign`, `displayAlign`, `wrapOption`, `textAltitude`, `anchor`, `border` |
+| Padding | `padding`, `paddingBefore`/`After`/`Start`/`End` |
+| Content size | percentage `contentWidth` and `contentHeight` |
+| Navigation | `navLeftUp`, `navLeftDown`, `navRightUp`, `navRightDown`, `navIndex` |
+
+Values and parsing rules:
+- **Colors** are 0xRRGGBBAA. They are parsed from `#rrggbb`, `rgb()`, `rgba()` and the 16 basic colour names.
+- **Opacity** is stored in thousandths.
+- **`inherit`** is recorded as declared, because computed values do not inherit from parent elements.
+- **Kept as written:** `anchor`, `border` and `crop`, because their meaning is unconfirmed.
+- **Malformed numbers** fail the document, as they do for the older properties.
+- **Unrecognised keywords and unknown properties** are reported through `hddvd_xmu_styles_get_unmodeled` instead, so a new value never makes a whole menu unusable.
+
+On the real files, the only things still reported are keyword font sizes (`small`, `xx-large`). How they map to pixels is not established.
+
 ### P3-04 — Add dependency and capability reporting
 
 **Status:** Complete

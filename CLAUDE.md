@@ -94,7 +94,8 @@ Layered, bottom-up (see `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the full desi
    with `HDDVD_EPROTECTED`. Format notes: `docs/formats/`.
 6. **Immutable XML models** (libxml2): `xpl.c` (playlists/titles/clips/apps), `xmf.c`
    (manifests), `application.c` (manifest + resolved dependencies), `xmu.c` (markup tree),
-   `style.c` (specified/computed styles, image-for-state, z-order, navigation).
+   `style.c` (specified/computed styles, image-for-state, z-order, navigation; further
+   properties in `hddvd_xmu_get_style_details`, unknown ones reported as unmodeled).
 7. **Script decoder** (`script_decode.c`): bounded structural decoder/disassembler for
    clean-room fixtures only. Commercial HDi bytecode semantics and any script runtime
    are explicitly unsupported/blocked (`HDDVD_FEATURE_SCRIPT_RUNTIME` stays unset).

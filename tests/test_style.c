@@ -1,4 +1,5 @@
 #include "hddvd.h"
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -152,22 +153,136 @@ static int observed_constructs(void)
     return ok;
 }
 
+static void open_body(const char *body, hddvd_xmu **xmu, hddvd_xmu_styles **styles)
+{
+    char xml[4096];
+    snprintf(xml, sizeof(xml), "<root xmlns=\"%s\" xmlns:s=\"%s\">%s</root>", NS, STYLE, body);
+    assert(open_styles(xml, xmu, styles) == HDDVD_OK);
+}
+
+/* Detail properties as real discs declare them, with a style reference that
+   the node's own declarations override. */
+static void details_work(void)
+{
+    hddvd_xmu *xmu = NULL;
+    hddvd_xmu_styles *styles = NULL;
+    hddvd_xmu_style_details d;
+    size_t node, base, other;
+    open_body("<head><styling><style id=\"base\" s:opacity=\"0.4\" s:color=\"#f7dc89\" "
+              "s:font=\"Original.ttf\" s:fontSize=\"24px\" s:padding=\"5px\" s:navLeftUp=\"other\" "
+              "s:navRightDown=\"none\" s:backgroundRepeat=\"no-repeat\"/></styling></head>"
+              "<body><div id=\"n\" style=\"base\" s:opacity=\"inherit\" s:visibility=\"hidden\" "
+              "s:backgroundColor=\"rgba(199,180,153,128)\" s:fontStyle=\"oblique\" "
+              "s:textAlign=\"center\" s:displayAlign=\"after\" s:wrapOption=\"wrap\" "
+              "s:textAltitude=\"140%\" s:anchor=\"startCenter\" s:paddingStart=\"36px\" "
+              "s:border=\"1px solid white\" s:backgroundPositionHorizontal=\"-6px\" "
+              "s:backgroundPositionVertical=\"30%\" s:backgroundFrame=\"2\" s:crop=\"0 0 20 33\" "
+              "s:contentWidth=\"90%\" s:contentHeight=\"80%\" s:navIndex=\"none\"/>"
+              "<div id=\"other\" s:color=\"blue\" s:backgroundColor=\"rgb(1,2,3)\" "
+              "s:backgroundPositionVertical=\"bottom\" s:navIndex=\"7\" s:opacity=\"1.0\"/></body>",
+              &xmu, &styles);
+    node = hddvd_xmu_find_id(xmu, "n");
+    base = hddvd_xmu_find_id(xmu, "base");
+    other = hddvd_xmu_find_id(xmu, "other");
+
+    assert(hddvd_xmu_get_style_details(styles, base, 0, &d) == HDDVD_OK);
+    assert(d.opacity == 400 && !d.opacity_inherit && d.color == 0xf7dc89ffu &&
+           !strcmp(d.font, "Original.ttf") && d.font_size == 24 && d.padding_before == 5 &&
+           d.padding_after == 5 && d.padding_start == 5 && d.padding_end == 5);
+
+    /* Specified: only the node's own declarations. */
+    assert(hddvd_xmu_get_style_details(styles, node, 0, &d) == HDDVD_OK);
+    assert(!(d.properties & HDDVD_XMU_DETAIL_FONT) && !d.font);
+    assert((d.properties & HDDVD_XMU_DETAIL_OPACITY) && d.opacity_inherit);
+
+    /* Computed: references first, then the node's own declarations. */
+    assert(hddvd_xmu_get_style_details(styles, node, 1, &d) == HDDVD_OK);
+    assert(d.opacity_inherit && d.visibility == HDDVD_XMU_VISIBILITY_HIDDEN);
+    assert(d.color == 0xf7dc89ffu && d.background_color == 0xc7b49980u);
+    assert(!strcmp(d.font, "Original.ttf") && d.font_size == 24 &&
+           d.font_style == HDDVD_XMU_FONT_STYLE_OBLIQUE);
+    assert(d.text_align == HDDVD_XMU_ALIGN_CENTER && d.display_align == HDDVD_XMU_ALIGN_END &&
+           d.wrap == 1 && d.text_altitude_percent == 140 && !strcmp(d.anchor, "startCenter"));
+    assert(d.padding_before == 5 && d.padding_start == 36 && !strcmp(d.border, "1px solid white"));
+    assert(d.background_x == HDDVD_XMU_BACKGROUND_OFFSET && d.background_x_offset == -6 &&
+           d.background_y == HDDVD_XMU_BACKGROUND_PERCENT && d.background_y_offset == 30);
+    assert((d.properties & HDDVD_XMU_DETAIL_BACKGROUND_REPEAT) && d.background_repeat == 0);
+    assert(d.background_frame == 2 && d.crop[0] == 0 && d.crop[2] == 20 && d.crop[3] == 33);
+    assert(d.content_width_percent == 90 && d.content_height_percent == 80);
+    assert(d.nav_left_up == other && d.nav_right_down == SIZE_MAX &&
+           (d.properties & HDDVD_XMU_DETAIL_NAV_RIGHT_DOWN) && d.nav_left_down == SIZE_MAX &&
+           !(d.properties & HDDVD_XMU_DETAIL_NAV_LEFT_DOWN));
+    assert((d.properties & HDDVD_XMU_DETAIL_NAV_INDEX) && d.nav_index_none);
+
+    assert(hddvd_xmu_get_style_details(styles, other, 1, &d) == HDDVD_OK);
+    assert(d.color == 0x0000ffffu && d.background_color == 0x010203ffu &&
+           d.background_y == HDDVD_XMU_BACKGROUND_END && d.nav_index == 7 && !d.nav_index_none &&
+           d.opacity == 1000);
+    assert(hddvd_xmu_styles_unmodeled_count(styles) == 0);
+    assert(hddvd_xmu_get_style_details(styles, hddvd_xmu_node_count(xmu), 1, &d) == HDDVD_EINVAL);
+    assert(hddvd_xmu_get_style_details(NULL, 0, 1, &d) == HDDVD_EINVAL);
+    hddvd_xmu_styles_close(styles);
+    hddvd_xmu_close(xmu);
+}
+
+/* Unknown properties and keywords are reported, deduplicated, and leave the
+   property unset; keyframes inside <timing> are not reported. */
+static void unmodeled_reported(void)
+{
+    hddvd_xmu *xmu = NULL;
+    hddvd_xmu_styles *styles = NULL;
+    hddvd_xmu_style_details d;
+    hddvd_xmu_style_unmodeled u;
+    open_body("<head><timing><set s:futureProperty=\"1\"/></timing></head>"
+              "<body><div id=\"a\" s:fontSize=\"small\" s:color=\"chartreuse\" "
+              "s:futureProperty=\"x\"/><div s:fontSize=\"small\" s:futureProperty=\"y\" "
+              "s:visibility=\"collapse\" s:opacity=\"auto\"/></body>",
+              &xmu, &styles);
+    assert(hddvd_xmu_styles_unmodeled_count(styles) == 5);
+    assert(hddvd_xmu_styles_get_unmodeled(styles, 0, &u) == HDDVD_OK &&
+           !strcmp(u.property, "fontSize") && !strcmp(u.value, "small") && u.occurrences == 2);
+    assert(hddvd_xmu_styles_get_unmodeled(styles, 1, &u) == HDDVD_OK &&
+           !strcmp(u.property, "color") && !strcmp(u.value, "chartreuse") && u.occurrences == 1);
+    assert(hddvd_xmu_styles_get_unmodeled(styles, 2, &u) == HDDVD_OK &&
+           !strcmp(u.property, "futureProperty") && !u.value && u.occurrences == 2);
+    assert(hddvd_xmu_styles_get_unmodeled(styles, 3, &u) == HDDVD_OK &&
+           !strcmp(u.property, "visibility"));
+    assert(hddvd_xmu_styles_get_unmodeled(styles, 4, &u) == HDDVD_OK &&
+           !strcmp(u.property, "opacity") && !strcmp(u.value, "auto"));
+    assert(hddvd_xmu_styles_get_unmodeled(styles, 5, &u) == HDDVD_EINVAL);
+    assert(hddvd_xmu_styles_get_unmodeled(styles, 0, NULL) == HDDVD_EINVAL);
+    assert(hddvd_xmu_get_style_details(styles, hddvd_xmu_find_id(xmu, "a"), 1, &d) == HDDVD_OK &&
+           !(d.properties & (HDDVD_XMU_DETAIL_FONT_SIZE | HDDVD_XMU_DETAIL_COLOR)));
+    assert(hddvd_xmu_styles_unmodeled_count(NULL) == 0);
+    hddvd_xmu_styles_close(styles);
+    hddvd_xmu_close(xmu);
+}
+
 int main(void)
 {
-    const char *bad[] = {"<body><div s:x=\"1em\"/></body>",
-                         "<body><div s:width=\"-1px\"/></body>",
-                         "<body><div s:zIndex=\"2147483648\"/></body>",
-                         "<body><div s:display=\"inline\"/></body>",
-                         "<body><div s:position=\"fixed\"/></body>",
-                         "<body><div s:width=\"50.5%\"/></body>",
-                         "<body><div s:backgroundImage=\"url(no-quotes)\"/></body>",
-                         "<body><div style=\"missing\"/></body>",
-                         "<body><div id=\"notStyle\"/><div style=\"notStyle\"/></body>",
-                         "<head><styling><style id=\"a\" style=\"b\"/><style id=\"b\" style=\"a\"/>"
-                         "</styling></head>"};
+    const char *bad[] = {
+        "<body><div s:x=\"1em\"/></body>", "<body><div s:width=\"-1px\"/></body>",
+        "<body><div s:zIndex=\"2147483648\"/></body>", "<body><div s:display=\"inline\"/></body>",
+        "<body><div s:position=\"fixed\"/></body>", "<body><div s:width=\"50.5%\"/></body>",
+        "<body><div s:backgroundImage=\"url(no-quotes)\"/></body>",
+        "<body><div style=\"missing\"/></body>",
+        "<body><div id=\"notStyle\"/><div style=\"notStyle\"/></body>",
+        "<head><styling><style id=\"a\" style=\"b\"/><style id=\"b\" style=\"a\"/>"
+        "</styling></head>",
+        /* Malformed numbers in detail properties. */
+        "<body><div s:opacity=\"1.5\"/></body>", "<body><div s:opacity=\"0.\"/></body>",
+        "<body><div s:fontSize=\"12em\"/></body>", "<body><div s:color=\"#12345\"/></body>",
+        "<body><div s:color=\"rgba(1,2,3)\"/></body>",
+        "<body><div s:backgroundColor=\"rgb(1,2,256)\"/></body>",
+        "<body><div s:padding=\"-1px\"/></body>", "<body><div s:textAltitude=\"140\"/></body>",
+        "<body><div s:backgroundPositionVertical=\"5pt\"/></body>",
+        "<body><div s:backgroundFrame=\"-1\"/></body>", "<body><div s:crop=\"0 0 20\"/></body>",
+        "<body><div s:navIndex=\"1x\"/></body>", "<body><div s:font=\"\"/></body>"};
     size_t i;
     if (!model_works() || !fixture_works() || !observed_constructs())
         return 1;
+    details_work();
+    unmodeled_reported();
     for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
         if (!rejected(bad[i]))
             return 2;

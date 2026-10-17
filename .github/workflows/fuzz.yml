@@ -36,7 +36,7 @@ jobs:
           case "${{ matrix.harness }}" in
             object) cp tests/fixtures/objects/*.hdo corpus/ ;;
             xmf) cp tests/fixtures/plain_manifest.xmf corpus/ ;;
-            xmu) cp tests/fixtures/plain_markup.xmu corpus/ ;;
+            xmu) cp tests/fixtures/plain_markup.xmu tests/fixtures/fuzz/xmu/* corpus/ ;;
             xpl) cp tests/fixtures/playlist_full.xpl corpus/ ;;
             script) cp tests/fixtures/scripts/*.hdis corpus/ ;;
             timemap) cp tests/fixtures/timemap/* corpus/ ;;
