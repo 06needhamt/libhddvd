@@ -183,6 +183,7 @@ jobs:
           ./build/fuzz-uri tests/fixtures/fuzz/uri/*
           ./build/fuzz-titlemap tests/fixtures/fuzz/titlemap/*
           ./build/fuzz-display tests/fixtures/fuzz/display/*
+          ./build/fuzz-vts tests/fixtures/standard/*.IFO
           ./build/fuzz-runtime tests/fixtures/fuzz/runtime/*
           ./build/fuzz-aca -seed=1 -runs=1000
           ./build/fuzz-script -seed=1 -runs=1000

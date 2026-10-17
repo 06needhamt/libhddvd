@@ -54,6 +54,8 @@ typedef struct hddvd_nav hddvd_nav;
 typedef struct hddvd_evo_parser hddvd_evo_parser;
 typedef struct hddvd_vti hddvd_vti;
 typedef struct hddvd_tmap hddvd_tmap;
+typedef struct hddvd_vts hddvd_vts;
+typedef struct hddvd_vmg hddvd_vmg;
 typedef struct hddvd_title_map hddvd_title_map;
 typedef struct hddvd_scene hddvd_scene;
 typedef void (*hddvd_log_fn)(void *, int, const char *);
@@ -964,6 +966,102 @@ typedef struct hddvd_tmap_entry
     hddvd_time start;
     hddvd_time duration;
 } hddvd_tmap_entry;
+/* Standard Content IFO tables (docs/formats/ifo-map.md). Sectors in a
+   title set's tables are relative to the start of its title EVO. */
+typedef struct hddvd_vts_info
+{
+    /* Last sector of the whole title set (IFO, EVO and backup IFO). */
+    uint32_t last_sector;
+    uint32_t ifo_sectors;
+    /* Where the menu and title EVOs start within the title set; 0 when a
+       title set has no menu EVO. */
+    uint32_t menu_evo_sector;
+    uint32_t title_evo_sector;
+    /* Length of the title EVO, from the end of the cell address table. */
+    uint32_t title_evo_sectors;
+} hddvd_vts_info;
+/* A playback time as stored: BCD hours, minutes, seconds and frames. rate is
+   the frame byte's top two bits; 2 is the only code observed (30 frames per
+   second at 30000/1001). flag is the seconds byte's top bit, set in every
+   observed time; its meaning is unknown. */
+typedef struct hddvd_vts_time
+{
+    uint8_t hours;
+    uint8_t minutes;
+    uint8_t seconds;
+    uint8_t frames;
+    uint8_t rate;
+    uint8_t flag;
+} hddvd_vts_time;
+/* A chapter (part of title): the program of a PGC where it starts. Numbers
+   are 1-based, as stored. */
+typedef struct hddvd_vts_chapter
+{
+    uint16_t pgc;
+    uint16_t program;
+} hddvd_vts_chapter;
+typedef struct hddvd_vts_pgc
+{
+    /* From the PGC's search pointer: the entry flag (top bit) and the title
+       number (second byte). */
+    uint8_t entry;
+    uint8_t title;
+    uint16_t program_count;
+    uint16_t cell_count;
+    hddvd_vts_time playback_time;
+    uint16_t pre_command_count;
+    uint16_t post_command_count;
+    uint16_t cell_command_count;
+} hddvd_vts_pgc;
+typedef struct hddvd_vts_cell
+{
+    uint32_t category;
+    hddvd_vts_time playback_time;
+    uint32_t first_vobu_sector;
+    uint32_t first_ilvu_end_sector;
+    uint32_t last_vobu_sector;
+    uint32_t last_sector;
+    uint16_t evob_id;
+    uint8_t cell_id;
+    /* 1-based cell command run after the cell, 0 for none; command_flags
+       is the byte stored before it (0x10 to 0x70 observed), meaning unknown. */
+    uint8_t command;
+    uint8_t command_flags;
+} hddvd_vts_cell;
+typedef enum hddvd_vts_command_kind
+{
+    HDDVD_VTS_PRE_COMMAND = 0,
+    HDDVD_VTS_POST_COMMAND,
+    HDDVD_VTS_CELL_COMMAND
+} hddvd_vts_command_kind;
+/* One time-map entry: the VOBU playing at (index + 1) time units from the
+   PGC's start. discontinuity is set when the next entry is in another cell,
+   or there is none. */
+typedef struct hddvd_vts_map_entry
+{
+    uint32_t sector;
+    int discontinuity;
+} hddvd_vts_map_entry;
+/* A cell's extent from the cell address table. */
+typedef struct hddvd_vts_evob_cell
+{
+    uint16_t evob_id;
+    uint8_t cell_id;
+    uint32_t first_sector;
+    uint32_t last_sector;
+} hddvd_vts_evob_cell;
+/* A title from the disc's title table (HV000I01.IFO). */
+typedef struct hddvd_vmg_title
+{
+    /* Stored byte, not decoded. */
+    uint8_t playback_type;
+    uint8_t angle_count;
+    uint16_t chapter_count;
+    uint16_t title_set;
+    uint16_t title_set_title;
+    /* First sector of the title set on the disc. */
+    uint32_t title_set_sector;
+} hddvd_vmg_title;
 /* Where a title time plays from. evo_uri is a borrowed file:///dvddisc/ URI,
    valid until hddvd_title_map_close(). pts is the EVO presentation time of
    the title time (the EVOB start time plus evob_offset). Reading from sector
@@ -1411,6 +1509,59 @@ HDDVD_API int hddvd_tmap_find(const hddvd_tmap *, hddvd_time, size_t *);
    add up to the EVOB's sector count, and playback time that adds up to
    end - start. Returns HDDVD_EPARSE on any disagreement. */
 HDDVD_API int hddvd_tmap_check_evob(const hddvd_tmap *, const hddvd_vti_evob *);
+/* Read a Standard Content title set (STANDARD-VTS IFO) through its time
+   maps, cells and VOBU map. Other identifiers return HDDVD_ENOTSUP; an IFO
+   larger than the config's max_resource_bytes returns HDDVD_ELIMIT. Tables
+   outside the file, records outside their tables, and references that do
+   not resolve return HDDVD_EPARSE: a chapter naming a missing PGC or
+   program, a program map that is not increasing from cell 1, a cell whose
+   VOBUs are not in the VOBU map or not inside its address-table entry, a
+   cell command beyond the PGC's count, a time-map entry outside the PGC's
+   cells, or invalid BCD. Indexes are 0-based. The handle does not keep
+   the stream. */
+HDDVD_API int hddvd_vts_open(hddvd_stream *, hddvd_vts **);
+HDDVD_API int hddvd_vts_open_with_config(hddvd_stream *, const hddvd_config_limits *, hddvd_vts **);
+HDDVD_API void hddvd_vts_close(hddvd_vts *);
+HDDVD_API int hddvd_vts_get_info(const hddvd_vts *, hddvd_vts_info *);
+HDDVD_API size_t hddvd_vts_title_count(const hddvd_vts *);
+HDDVD_API size_t hddvd_vts_chapter_count(const hddvd_vts *, size_t title);
+HDDVD_API int hddvd_vts_get_chapter(const hddvd_vts *, size_t title, size_t chapter,
+                                    hddvd_vts_chapter *);
+HDDVD_API size_t hddvd_vts_pgc_count(const hddvd_vts *);
+HDDVD_API int hddvd_vts_get_pgc(const hddvd_vts *, size_t pgc, hddvd_vts_pgc *);
+/* The 1-based number of the cell where a program starts. */
+HDDVD_API int hddvd_vts_get_program(const hddvd_vts *, size_t pgc, size_t program,
+                                    uint16_t *first_cell);
+HDDVD_API int hddvd_vts_get_cell(const hddvd_vts *, size_t pgc, size_t cell, hddvd_vts_cell *);
+/* A raw 8-byte navigation command; its semantics are not decoded. */
+HDDVD_API int hddvd_vts_get_command(const hddvd_vts *, size_t pgc, hddvd_vts_command_kind,
+                                    size_t index, uint8_t command[8]);
+/* A PGC's time map: its unit in seconds (0 for an empty map) and entry
+   count. HDDVD_ENOTFOUND when the title set has no time map table. */
+HDDVD_API int hddvd_vts_get_time_map(const hddvd_vts *, size_t pgc, uint8_t *unit_seconds,
+                                     size_t *count);
+HDDVD_API int hddvd_vts_get_time_map_entry(const hddvd_vts *, size_t pgc, size_t index,
+                                           hddvd_vts_map_entry *);
+HDDVD_API size_t hddvd_vts_evob_cell_count(const hddvd_vts *);
+HDDVD_API int hddvd_vts_get_evob_cell(const hddvd_vts *, size_t, hddvd_vts_evob_cell *);
+HDDVD_API size_t hddvd_vts_vobu_count(const hddvd_vts *);
+HDDVD_API int hddvd_vts_get_vobu(const hddvd_vts *, size_t, uint32_t *sector);
+/* Convert a stored time to the 90 kHz clock: 30 frames per second at
+   30000/1001 for rate code 2. Other codes return HDDVD_ENOTSUP. */
+HDDVD_API int hddvd_vts_time_to_ticks(const hddvd_vts_time *, hddvd_time *);
+/* Read the disc's title table (HVDVD-VMG100 IFO). Rules as for
+   hddvd_vts_open; titles must have at least one angle and chapter, name a
+   title set within the title-set count when the IFO gives one, and start
+   after the VMG's own sectors. */
+HDDVD_API int hddvd_vmg_open(hddvd_stream *, hddvd_vmg **);
+HDDVD_API int hddvd_vmg_open_with_config(hddvd_stream *, const hddvd_config_limits *, hddvd_vmg **);
+HDDVD_API void hddvd_vmg_close(hddvd_vmg *);
+/* Last sector of the VMG, and the number of title sets (0 when the IFO has
+   no title-set attribute table). */
+HDDVD_API uint32_t hddvd_vmg_last_sector(const hddvd_vmg *);
+HDDVD_API size_t hddvd_vmg_title_set_count(const hddvd_vmg *);
+HDDVD_API size_t hddvd_vmg_title_count(const hddvd_vmg *);
+HDDVD_API int hddvd_vmg_get_title(const hddvd_vmg *, size_t, hddvd_vmg_title *);
 /* Convert a playlist time to title time on the 90 kHz clock. A "60fps"
    timeBase counts at 60000/1001 frames per second (docs/formats/ifo-map.md);
    other rates are unconfirmed and return HDDVD_ENOTSUP. Results that do not

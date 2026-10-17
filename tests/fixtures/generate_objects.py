@@ -96,6 +96,149 @@ def vti():
 
 timemaps = {"original.map": tmap(), "original.vti": vti()}
 
+# An original Standard Content disc in the layout of docs/formats/ifo-map.md:
+# a title set with two titles (PGC 1: two cells, PGC 2: one), its title EVO
+# of nine 4-sector VOBUs of 0.5005 s each, and a VMG naming both titles.
+STANDARD = Path(__file__).resolve().parent / "standard"
+VOBU_SECTORS, VOBU_TICKS = 4, 15 * 3003
+# (evob id, cell id, first VOBU, VOBU count)
+STD_CELLS = [(1, 1, 0, 3), (1, 2, 3, 2), (2, 1, 5, 4)]
+STD_PGCS = [[0, 1], [2]]  # cells of each PGC
+
+def bcd(value):
+    return (value // 10) << 4 | value % 10
+
+def std_time(frames):
+    """BCD hh mm ss ff with the observed flags: rate code 2 and the seconds
+    byte's top bit."""
+    seconds, frames = divmod(frames, 30)
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    return bytes([bcd(hours), bcd(minutes), 0x80 | bcd(seconds), 0x80 | bcd(frames)])
+
+def std_table(count, body, count_size=2):
+    """Count, reserved bytes, end address (last byte), then body."""
+    head = struct.pack(">H", count) + bytes(2) + struct.pack(">I", 8 + len(body) - 1)
+    return head + body
+
+def std_vts():
+    cell_frames = [n * 15 for _, _, _, n in STD_CELLS]
+    first = lambda c: STD_CELLS[c][2] * VOBU_SECTORS
+    last_vobu = lambda c: (STD_CELLS[c][2] + STD_CELLS[c][3] - 1) * VOBU_SECTORS
+    last = lambda c: (STD_CELLS[c][2] + STD_CELLS[c][3]) * VOBU_SECTORS - 1
+    # Chapters: title 1 is PGC 1 programs 1 and 2, title 2 is PGC 2.
+    ptt = std_table(2, struct.pack(">II", 16, 24) +
+                    struct.pack(">HHHH", 1, 1, 1, 2) + struct.pack(">HH", 2, 1))
+    pgcs = []
+    for number, cells in enumerate(STD_PGCS, 1):
+        commands = [bytes([0x71, 0, 0, 1, 0, 0, 0, number])] if number == 1 else []
+        post = [bytes([0x30, 0x02, 0, 0, 0, 1, 0, 0])]
+        cell_commands = [bytes([0x30, 0x06, 0, 0, 0, 1, 0, 0])] if number == 1 else []
+        command_table = (struct.pack(">HHHH", len(commands), len(post), len(cell_commands), 0) +
+                         b"".join(commands + post + cell_commands))
+        program_map = b"".join(struct.pack(">H", k + 1) for k in range(len(cells)))
+        playback = b""
+        for k, c in enumerate(cells):
+            # The second cell of PGC 1 runs cell command 1.
+            reference = bytes([0x10, 1, 0, 0]) if (number, k) == (1, 1) else bytes(4)
+            playback += (bytes([0x02 if k == 0 else 0x08, 0, 0, 0]) + std_time(cell_frames[c]) +
+                         struct.pack(">IIII", first(c), 0, last_vobu(c), last(c)) + reference)
+        positions = b"".join(struct.pack(">HBB", STD_CELLS[c][0], 0, STD_CELLS[c][1]) for c in cells)
+        offsets = [0xb0]
+        for part in (command_table, program_map, playback):
+            offsets.append(offsets[-1] + len(part))
+        header = (struct.pack(">HH", len(cells), len(cells)) +
+                  std_time(sum(cell_frames[c] for c in cells)) + bytes(0xa8 - 8) +
+                  struct.pack(">HHHH", *offsets) + bytes(0xb0 - 0xb0))
+        pgcs.append(header + command_table + program_map + playback + positions)
+    pointers, body = b"", b""
+    base = 8 + 12 * len(pgcs)
+    for number, pgc in enumerate(pgcs, 1):
+        pointers += bytes([0x80, number, 0, 0]) + bytes(4) + struct.pack(">I", base + len(body))
+        body += pgc
+    pgcit = std_table(len(pgcs), pointers + body)
+    # Time maps, one per PGC, unit 1 s: entry k names the VOBU playing at
+    # (k + 1) s, accumulating cell durations; the flag marks entries whose
+    # next entry is in another cell.
+    maps = []
+    for cells in STD_PGCS:
+        vobus = [(c, STD_CELLS[c][2] + i) for c in cells for i in range(STD_CELLS[c][3])]
+        total = len(vobus) * VOBU_TICKS
+        entries = [(vobus[(k * 90000) // VOBU_TICKS]) for k in range(1, total // 90000 + 1)]
+        words = b""
+        for k, (cell, vobu) in enumerate(entries):
+            flag = k + 1 == len(entries) or entries[k + 1][0] != cell
+            words += struct.pack(">I", vobu * VOBU_SECTORS | (0x80000000 if flag else 0))
+        maps.append(bytes([1, 0]) + struct.pack(">H", len(entries)) + words)
+    map_offsets, map_body = b"", b""
+    for m in maps:
+        map_offsets += struct.pack(">I", 8 + 4 * len(maps) + len(map_body))
+        map_body += m
+    tmapt = std_table(len(maps), map_offsets + map_body)
+    cadt = std_table(2, b"".join(struct.pack(">HBBII", e, 0, c, first(k), last(k))
+                                 for k, (e, c, _, _) in enumerate(STD_CELLS)))
+    vobu_count = sum(n for _, _, _, n in STD_CELLS)
+    admap = struct.pack(">I", 4 + 4 * vobu_count - 1) + b"".join(
+        struct.pack(">I", v * VOBU_SECTORS) for v in range(vobu_count))
+    tables = [ptt, pgcit, tmapt, cadt, admap]
+    ifo_sectors = 1 + len(tables)
+    evo_sectors = vobu_count * VOBU_SECTORS
+    head = bytearray(2048)
+    head[0:12] = b"STANDARD-VTS"
+    head[0x0c:0x10] = struct.pack(">I", 2 * ifo_sectors + evo_sectors - 1)
+    head[0x1c:0x20] = struct.pack(">I", ifo_sectors - 1)
+    head[0x20:0x22] = struct.pack(">H", 0x10)
+    head[0x80:0x84] = struct.pack(">I", 0x7ff)
+    for field, value in ((0xc4, ifo_sectors), (0xc8, 1), (0xcc, 2), (0xd4, 3), (0xe0, 4), (0xe4, 5)):
+        head[field:field + 4] = struct.pack(">I", value)
+    return bytes(head) + b"".join(sectors(t) for t in tables)
+
+def std_evo():
+    """Nine VOBUs: a navigation pack, then padding packs. The navigation
+    pack's PCI packet has the observed general-information layout."""
+    out = bytearray()
+    for c, (_, _, first_vobu, count) in enumerate(STD_CELLS):
+        evob_start = 27000 if c != 1 else 27000 + 3 * VOBU_TICKS
+        for i in range(count):
+            vobu = first_vobu + i
+            start = evob_start + i * VOBU_TICKS
+            last_in_evob = (c == 0 and False) or (c == 1 and i == count - 1) or (c == 2 and i == count - 1)
+            pack = bytearray(b"\x00\x00\x01\xba\x44\x00\x04\x00\x04\x01\x01\x89\xc3\xf8")
+            pack += b"\x00\x00\x01\xbb\x00\x06" + bytes(6)
+            pack += b"\x00\x00\x01\xbf" + struct.pack(">H", 0x20) + b"\x01" + bytes(0x1f)
+            pci = bytearray(0x3d1)
+            pci[1:5] = struct.pack(">I", vobu * VOBU_SECTORS)
+            pci[0x0d:0x11] = struct.pack(">I", start)
+            pci[0x11:0x15] = struct.pack(">I", start + VOBU_TICKS)
+            if last_in_evob:
+                pci[0x15:0x19] = struct.pack(">I", start + VOBU_TICKS)
+            elapsed = (i * 15)
+            pci[0x19:0x1d] = bytes([0, 0]) + std_time(elapsed)[2:]
+            pack += b"\x00\x00\x01\xbf" + struct.pack(">H", len(pci)) + pci
+            pack += b"\x00\x00\x01\xbe" + struct.pack(">H", 2048 - len(pack) - 6)
+            pack += b"\xff" * (2048 - len(pack))
+            out += pack
+            for _ in range(VOBU_SECTORS - 1):
+                filler = bytearray(b"\x00\x00\x01\xba\x44\x00\x04\x00\x04\x01\x01\x89\xc3\xf8")
+                filler += b"\x00\x00\x01\xbe" + struct.pack(">H", 2048 - 14 - 6)
+                filler += b"\xff" * (2048 - len(filler))
+                out += filler
+    return bytes(out)
+
+def std_vmg():
+    titles = b"".join(bytes([0x3c, 1, 0, 0]) + struct.pack(">HHHHI", chapters, 0, 1, number, 8)
+                      for number, chapters in ((1, 2), (2, 1)))
+    sets = std_table(1, struct.pack(">I", 12) + bytes(4))
+    head = bytearray(2048)
+    head[0:12] = b"HVDVD-VMG100"
+    head[0x0c:0x10] = struct.pack(">I", 7)
+    head[0x1c:0x20] = struct.pack(">I", 2)
+    head[0xc4:0xc8] = struct.pack(">I", 1)
+    head[0xd0:0xd4] = struct.pack(">I", 2)
+    return bytes(head) + sectors(std_table(2, titles)) + sectors(sets)
+
+standard = {"HV000I01.IFO": std_vmg(), "HV001I01.IFO": std_vts(), "HV001T01.EVO": std_evo()}
+
 # Original scripts for tools/inventory_hdi_scripts.py, in each container the
 # tool reads: bare UTF-16 with a byte-order mark, the clear AACS envelope, and
 # a protected envelope it must skip.
@@ -253,6 +396,12 @@ for path in HDI_API.iterdir():
     if path.is_file(): path.unlink()
 for name, data in sorted(hdi_api.items()):
     (HDI_API / name).write_bytes(data)
+
+STANDARD.mkdir(exist_ok=True)
+for path in STANDARD.iterdir():
+    if path.is_file(): path.unlink()
+for name, data in sorted(standard.items()):
+    (STANDARD / name).write_bytes(data)
 
 for name, data in sorted(fuzz_seeds.items()):
     path = FUZZ / name

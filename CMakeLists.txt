@@ -127,6 +127,7 @@ set(HDDVD_SOURCES
     src/uri.c
     src/util.c
     src/vti.c
+    src/vts.c
     src/xmf.c
     src/xmu.c
     src/xpl.c
@@ -210,13 +211,13 @@ elseif(HDDVD_BUILD_STATIC)
     add_library(hddvd::hddvd_static ALIAS hddvd)
 endif()
 
-foreach(tool info menuinfo acainfo acaextract scriptdump scriptinfo xplinfo timemap locate)
+foreach(tool info menuinfo acainfo acaextract scriptdump scriptinfo xplinfo timemap locate vtsinfo)
     add_executable(hddvd-${tool} tools/hddvd-${tool}.c)
     target_link_libraries(hddvd-${tool} PRIVATE hddvd)
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime)
+    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime vts)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         # Test assertions also perform setup and must run in Release builds.
@@ -237,6 +238,8 @@ if(BUILD_TESTING)
     target_compile_definitions(test-xpl PRIVATE
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
     target_compile_definitions(test-limits PRIVATE
+        HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+    target_compile_definitions(test-vts PRIVATE
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 
     # Concurrent use of separate objects; the CI tsan job runs it under
@@ -298,6 +301,17 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/timemap/original.map)
     set_tests_properties(timemap-fixture PROPERTIES PASS_REGULAR_EXPRESSION
         "evob=1 entries=4 sectors=131 duration=1\\.877s ok")
+    # The generated Standard Content title set must agree with its EVO's
+    # navigation packs, and a different file must not pass as that EVO.
+    add_test(NAME vtsinfo-fixture
+        COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HV001I01.IFO
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HV001T01.EVO)
+    set_tests_properties(vtsinfo-fixture PROPERTIES PASS_REGULAR_EXPRESSION
+        "evo .*sectors=36 navigation-packs=9.*summary ok")
+    add_test(NAME vtsinfo-wrong-evo
+        COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HV001I01.IFO
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/timemap/original.vti)
+    set_tests_properties(vtsinfo-wrong-evo PROPERTIES WILL_FAIL TRUE)
 
     # The inventory's library check must pass on the original synthetic
     # playlists before it is trusted on an external corpus.
@@ -345,7 +359,7 @@ if(HDDVD_BUILD_FUZZERS)
     add_library(hddvd_fuzz STATIC ${HDDVD_SOURCES})
     hddvd_configure_library(hddvd_fuzz STATIC)
     target_compile_options(hddvd_fuzz PRIVATE -fsanitize=fuzzer-no-link,address,undefined)
-    set(fuzz_targets aca object xmf xmu script xpl navigation timemap uri titlemap display)
+    set(fuzz_targets aca object xmf xmu script xpl navigation timemap uri titlemap display vts)
     if(HDDVD_SELECTED_ENGINE STREQUAL "quickjs")
         list(APPEND fuzz_targets runtime)
     endif()
@@ -362,7 +376,7 @@ endif()
 install(TARGETS
         ${hddvd_library_targets}
         hddvd-info hddvd-menuinfo hddvd-acainfo hddvd-acaextract
-        hddvd-scriptdump hddvd-scriptinfo hddvd-xplinfo hddvd-timemap hddvd-locate
+        hddvd-scriptdump hddvd-scriptinfo hddvd-xplinfo hddvd-timemap hddvd-locate hddvd-vtsinfo
     EXPORT hddvdTargets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

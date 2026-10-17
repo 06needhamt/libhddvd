@@ -532,7 +532,7 @@ all represented in the conformance report.
 
 ### P6-03 — Decode required IFO and MAP navigation structures
 
-**Status:** Advanced Content time maps and the VTI EVOB table decoded and verified against a real disc; Standard Content IFO tables and the VTI attribute table remain
+**Status:** Advanced Content time maps, the VTI EVOB table and Standard Content IFO tables decoded and verified against real discs; the VTI attribute table and Standard Content stream attributes, menus and command semantics remain
 **Depends on:** P1-01, P6-02
 **Likely files:** `src/ifo.c`, `src/map.c`, `tests/test_ifo.c`, `tests/test_map.c`
 
@@ -571,6 +571,15 @@ second (`hddvd_xpl_time_to_ticks`). On both 300 discs, all 86 clips are exactly
 as long as their maps at that rate, and shorter at a true 60. On the South Park
 disc, `hddvd-locate` reproduces the EVOBU start times in `FBILogo.EVO`'s
 navigation packs. `test_title_map.c` covers a synthetic disc tree.
+
+Fourth slice: Standard Content. `hddvd_vts_open` reads a title set's chapters,
+PGCs (programs, cells, raw commands), time maps, cell address table and VOBU
+map, rejecting any reference that does not resolve. `hddvd_vmg_open` reads the
+disc's title table. The layout is DVD-Video's with HD DVD record sizes (12-byte
+PGC search pointers, 28-byte cells, 16-byte titles). All 11 Dragon's Lair IFOs
+open, and `hddvd-vtsinfo` verifies one title set against its complete EVO:
+navigation packs, cell durations and every time-map entry. `test_vts.c` covers
+an original synthetic disc and every rejection, `fuzz-vts` both readers.
 
 Still open: Standard Content IFO tables, the VTI attribute table, angle or
 interleaved maps, and the clock for time bases other than 60fps.
