@@ -66,7 +66,10 @@ static int read_script(const hddvd_aca *aca, const char *name, void **out, size_
         if (!rc && got != length)
             rc = HDDVD_EIO;
         if (rc)
+        {
             free(*out);
+            *out = NULL;
+        }
         else
             *size = (size_t)length;
     }
