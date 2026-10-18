@@ -89,11 +89,18 @@ def vti():
     record[0x108:0x118] = struct.pack(">HIIIH", 1, TMAP_START,
                                       TMAP_START + tmap_units * 3003 // 8, tmap_sectors, 1)
     table = struct.pack(">HHII", 0, 1, 8 + 4 + len(record) - 1, 12) + bytes(record)
+    # One attribute record, which the EVOB names: VC-1 video and one English
+    # audio stream.
+    attributes = bytearray(1024)
+    attributes[2:6] = bytes([0x6b, 0x10, 0xc0, 0])
+    attributes[0x0e:0x18] = struct.pack(">H", 1) + bytes([0x1c, 0x04, 0xc4, 0]) + b"en" + bytes(2)
+    attribute_table = struct.pack(">HHII", 1, 0, 0x10 + 1024 - 1, 0x10) + bytes(4) + bytes(attributes)
     head = bytearray(2048)
     head[0:12] = b"ADVANCED-VTS"
-    head[0x1c:0x20] = struct.pack(">I", 1)
+    head[0x1c:0x20] = struct.pack(">I", 2)
+    head[0xb8:0xbc] = struct.pack(">I", 2)
     head[0xbc:0xc0] = struct.pack(">I", 1)
-    return bytes(head) + sectors(table)
+    return bytes(head) + sectors(table) + sectors(attribute_table)
 
 timemaps = {"original.map": tmap(), "original.vti": vti()}
 
@@ -122,7 +129,7 @@ def std_table(count, body, count_size=2):
     head = struct.pack(">H", count) + bytes(2) + struct.pack(">I", 8 + len(body) - 1)
     return head + body
 
-def std_vts():
+def std_vts(post_command=bytes([0x30, 0x02, 0, 0, 0, 1, 0, 0])):
     cell_frames = [n * 15 for _, _, _, n in STD_CELLS]
     first = lambda c: STD_CELLS[c][2] * VOBU_SECTORS
     last_vobu = lambda c: (STD_CELLS[c][2] + STD_CELLS[c][3] - 1) * VOBU_SECTORS
@@ -133,9 +140,11 @@ def std_vts():
     pgcs = []
     for number, cells in enumerate(STD_PGCS, 1):
         commands = [bytes([0x71, 0, 0, 1, 0, 0, 0, number])] if number == 1 else []
-        post = [bytes([0x30, 0x02, 0, 0, 0, 1, 0, 0])]
+        post = [post_command]
         cell_commands = [bytes([0x30, 0x06, 0, 0, 0, 1, 0, 0])] if number == 1 else []
-        command_table = (struct.pack(">HHHH", len(commands), len(post), len(cell_commands), 0) +
+        count = len(commands) + len(post) + len(cell_commands)
+        command_table = (struct.pack(">HHHI", len(commands), len(post), len(cell_commands),
+                                     10 + 8 * count - 1) +
                          b"".join(commands + post + cell_commands))
         program_map = b"".join(struct.pack(">H", k + 1) for k in range(len(cells)))
         playback = b""
@@ -186,6 +195,11 @@ def std_vts():
     evo_sectors = vobu_count * VOBU_SECTORS
     head = bytearray(2048)
     head[0:12] = b"STANDARD-VTS"
+    # Stream attributes: MPEG-2 video, one English audio and one English
+    # subpicture stream, as on the observed disc.
+    head[0x214:0x218] = bytes([0x2b, 0x08, 0xc0, 0])
+    head[0x218:0x222] = struct.pack(">H", 1) + bytes([0x1c, 0x04, 0xd4, 0]) + b"en" + bytes([0, 0x1f])
+    head[0x25a:0x262] = struct.pack(">H", 1) + bytes([0x21, 0x08]) + b"en" + bytes(2)
     head[0x0c:0x10] = struct.pack(">I", 2 * ifo_sectors + evo_sectors - 1)
     head[0x1c:0x20] = struct.pack(">I", ifo_sectors - 1)
     head[0x20:0x22] = struct.pack(">H", 0x10)
@@ -195,8 +209,9 @@ def std_vts():
     return bytes(head) + b"".join(sectors(t) for t in tables)
 
 def std_evo():
-    """Nine VOBUs: a navigation pack, then padding packs. The navigation
-    pack's PCI packet has the observed general-information layout."""
+    """Nine VOBUs: a navigation pack, then packs holding a video, an audio and
+    a subpicture packet. The navigation pack's PCI packet has the observed
+    general-information layout."""
     out = bytearray()
     for c, (_, _, first_vobu, count) in enumerate(STD_CELLS):
         evob_start = 27000 if c != 1 else 27000 + 3 * VOBU_TICKS
@@ -219,9 +234,17 @@ def std_evo():
             pack += b"\x00\x00\x01\xbe" + struct.pack(">H", 2048 - len(pack) - 6)
             pack += b"\xff" * (2048 - len(pack))
             out += pack
-            for _ in range(VOBU_SECTORS - 1):
+            # Then a video packet, an AC-3 audio packet and a subpicture
+            # packet (private stream 1 substreams 0xc0 and 0x20).
+            for kind in range(VOBU_SECTORS - 1):
                 filler = bytearray(b"\x00\x00\x01\xba\x44\x00\x04\x00\x04\x01\x01\x89\xc3\xf8")
-                filler += b"\x00\x00\x01\xbe" + struct.pack(">H", 2048 - 14 - 6)
+                if kind == 0:
+                    filler += b"\x00\x00\x01\xe0\x00\x07\x81\x00\x00\x00\x00\x01\xb3"
+                elif kind == 1:
+                    filler += b"\x00\x00\x01\xbd\x00\x05\x81\x00\x00\xc0\x01"
+                elif kind == 2:
+                    filler += b"\x00\x00\x01\xbd\x00\x05\x81\x00\x00\x20\x00"
+                filler += b"\x00\x00\x01\xbe" + struct.pack(">H", 2048 - len(filler) - 6)
                 filler += b"\xff" * (2048 - len(filler))
                 out += filler
     return bytes(out)
@@ -238,7 +261,9 @@ def std_vmg():
     head[0xd0:0xd4] = struct.pack(">I", 2)
     return bytes(head) + sectors(std_table(2, titles)) + sectors(sets)
 
-standard = {"HV000I01.IFO": std_vmg(), "HV001I01.IFO": std_vts(), "HV001T01.EVO": std_evo()}
+standard = {"HV000I01.IFO": std_vmg(), "HV001I01.IFO": std_vts(), "HV001T01.EVO": std_evo(),
+            # LinkCN 9 in PGCs of at most two cells: valid tables, a bad target.
+            "bad-link.IFO": std_vts(post_command=bytes([0x20, 0x07, 0, 0, 0, 0, 0, 9]))}
 
 # Original scripts for tools/inventory_hdi_scripts.py, in each container the
 # tool reads: bare UTF-16 with a byte-order mark, the clear AACS envelope, and

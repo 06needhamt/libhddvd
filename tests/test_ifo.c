@@ -126,6 +126,78 @@ static void test_vti(void)
     hddvd_vti_close(NULL);
 }
 
+/* make_vti(2) plus an attribute table in sectors 2 and 3: record 1 has VC-1
+   video and two audio streams (English, and one without a language), record
+   2 MPEG-2 video and no audio. */
+static unsigned char *make_vti_attributes(void)
+{
+    static const unsigned char english[8] = {0x1c, 0x04, 0xc4, 0, 'e', 'n', 0, 0x1f};
+    static const unsigned char unnamed[8] = {0x1c, 0, 0xc4, 0, 0, 0, 0, 0};
+    unsigned char *two = make_vti(2), *b = calloc(4, 2048), *t;
+    assert(b);
+    memcpy(b, two, 4096);
+    free(two);
+    put32(b + 0x1c, 3);
+    put32(b + 0xb8, 2);
+    t = b + 2 * 2048;
+    t[1] = 2;
+    put32(t + 4, 0x80f);
+    put32(t + 8, 0x10);
+    put32(t + 12, 0x410);
+    put32(t + 0x10 + 2, 0x6b10c000u);
+    t[0x10 + 0x0f] = 2;
+    memcpy(t + 0x10 + 0x10, english, 8);
+    memcpy(t + 0x10 + 0x18, unnamed, 8);
+    put32(t + 0x410 + 2, 0x2b08c000u);
+    return b;
+}
+
+static void test_vti_attributes(void)
+{
+    unsigned char *b = make_vti_attributes(), *t;
+    hddvd_vti *vti;
+    hddvd_video_attributes video;
+    hddvd_stream_attributes audio;
+    assert(open_vti(b, 4 * 2048, &vti) == HDDVD_OK);
+    assert(hddvd_vti_attribute_count(vti) == 2);
+    assert(hddvd_vti_get_video_attributes(vti, 0, &video) == HDDVD_OK);
+    assert(video.coding == 1 && video.raw[0] == 0x6b && video.raw[1] == 0x10);
+    assert(hddvd_vti_get_video_attributes(vti, 1, &video) == HDDVD_OK && video.coding == 0);
+    assert(hddvd_vti_audio_count(vti, 0) == 2 && hddvd_vti_audio_count(vti, 1) == 0);
+    assert(hddvd_vti_get_audio_attributes(vti, 0, 0, &audio) == HDDVD_OK);
+    assert(!strcmp(audio.language, "en") && audio.raw[0] == 0x1c && audio.raw[7] == 0x1f);
+    assert(hddvd_vti_get_audio_attributes(vti, 0, 1, &audio) == HDDVD_OK);
+    assert(audio.language[0] == '\0' && audio.raw[2] == 0xc4);
+    assert(hddvd_vti_get_audio_attributes(vti, 0, 2, &audio) == HDDVD_EINVAL);
+    assert(hddvd_vti_get_audio_attributes(vti, 1, 0, &audio) == HDDVD_EINVAL);
+    assert(hddvd_vti_get_video_attributes(vti, 2, &video) == HDDVD_EINVAL);
+    assert(hddvd_vti_audio_count(vti, 2) == 0 && hddvd_vti_audio_count(NULL, 0) == 0);
+    assert(hddvd_vti_attribute_count(NULL) == 0);
+    assert(hddvd_vti_get_video_attributes(NULL, 0, &video) == HDDVD_EINVAL);
+    assert(hddvd_vti_get_video_attributes(vti, 0, NULL) == HDDVD_EINVAL);
+    assert(hddvd_vti_get_audio_attributes(vti, 0, 0, NULL) == HDDVD_EINVAL);
+    hddvd_vti_close(vti);
+    free(b);
+
+#define REJECT(edit)                                                                               \
+    do                                                                                             \
+    {                                                                                              \
+        b = make_vti_attributes();                                                                 \
+        t = b + 2 * 2048;                                                                          \
+        edit;                                                                                      \
+        assert(open_vti(b, 4 * 2048, &vti) == HDDVD_EPARSE && vti == NULL);                        \
+        free(b);                                                                                   \
+    } while (0)
+    REJECT(put32(b + 0xb8, 4));       /* table past the end sector */
+    REJECT(put32(t + 4, 4096));       /* table runs off the file */
+    REJECT(put32(t + 12, 0x411));     /* record past the table */
+    REJECT(put32(t + 8, 4));          /* record over the offset list */
+    REJECT(t[0x10 + 0x0e] = 1);       /* audio records past the record */
+    REJECT(t[1] = 1);                 /* EVOB 2 names a missing record */
+    REJECT(b[2048 + 16 + 0x117] = 0); /* EVOB 1 names no record */
+#undef REJECT
+}
+
 static int read_header(const unsigned char *b, size_t size, hddvd_ifo_header *header)
 {
     hddvd_stream *stream = NULL;
@@ -167,5 +239,6 @@ int main(void)
     free(b);
     assert(hddvd_ifo_read_header(NULL, &header) == HDDVD_EINVAL);
     test_vti();
+    test_vti_attributes();
     return 0;
 }

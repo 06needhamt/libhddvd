@@ -137,8 +137,9 @@ Layered, bottom-up (see `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the full desi
     title's primary clips to their maps and VTI, so a title time resolves to an EVO URI and
     sector. Playlist `60fps` time counts at 60000/1001. Standard Content title sets
     (`hddvd_vts`: chapters, PGCs, cells, raw commands, time maps, cell addresses, VOBU map)
-    and the VMG title table (`hddvd_vmg`); `hddvd-vtsinfo` checks them against an EVO's
-    navigation packs (`docs/formats/ifo-map.md`).
+    and the VMG title table (`hddvd_vmg`); stream attributes in title sets and VTIs;
+    `hddvd-vtsinfo` disassembles commands (DVD-Video encoding) and checks them and the
+    tables against an EVO's navigation packs and streams (`docs/formats/ifo-map.md`).
 
 Capability negotiation: hosts call `hddvd_abi_version()` and `hddvd_get_features()`.
 Only set a feature bit when the capability is actually implemented.

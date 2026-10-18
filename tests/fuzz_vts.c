@@ -17,7 +17,14 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         hddvd_vts_info info;
         hddvd_vts_evob_cell extent;
         uint32_t sector;
+        hddvd_video_attributes video;
+        hddvd_stream_attributes attributes;
         (void)hddvd_vts_get_info(vts, &info);
+        (void)hddvd_vts_get_video_attributes(vts, &video);
+        for (i = 0; i < hddvd_vts_stream_count(vts, HDDVD_STREAM_AUDIO); i++)
+            (void)hddvd_vts_get_stream_attributes(vts, HDDVD_STREAM_AUDIO, i, &attributes);
+        for (i = 0; i < hddvd_vts_stream_count(vts, HDDVD_STREAM_SUBPICTURE); i++)
+            (void)hddvd_vts_get_stream_attributes(vts, HDDVD_STREAM_SUBPICTURE, i, &attributes);
         for (i = 0; i < hddvd_vts_title_count(vts); i++)
             for (j = 0; j < hddvd_vts_chapter_count(vts, i); j++)
             {

@@ -327,6 +327,10 @@ if(BUILD_TESTING)
         COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HV001I01.IFO
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/timemap/original.vti)
     set_tests_properties(vtsinfo-wrong-evo PROPERTIES WILL_FAIL TRUE)
+    # Commands that link to a cell their PGC lacks.
+    add_test(NAME vtsinfo-bad-link
+        COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/bad-link.IFO)
+    set_tests_properties(vtsinfo-bad-link PROPERTIES WILL_FAIL TRUE)
     # The generated application runs: both script encodings, markup, the
     # markup loaded handler, a navigation key, a key listener and its timer.
     if(HDDVD_SELECTED_ENGINE STREQUAL "quickjs")

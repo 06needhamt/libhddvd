@@ -1001,6 +1001,28 @@ typedef struct hddvd_tmap_entry
 } hddvd_tmap_entry;
 /* Standard Content IFO tables (docs/formats/ifo-map.md). Sectors in a
    title set's tables are relative to the start of its title EVO. */
+/* Stream attributes recorded in a title set IFO or a VTI
+   (docs/formats/ifo-map.md). Only the fields below are decoded; raw is the
+   record as stored, for everything else. */
+typedef enum hddvd_stream_kind
+{
+    HDDVD_STREAM_AUDIO = 0,
+    HDDVD_STREAM_SUBPICTURE = 1
+} hddvd_stream_kind;
+typedef struct hddvd_video_attributes
+{
+    /* Bits 7 and 6 of raw[0]: 0 for MPEG-2 and 1 for VC-1 were seen; other
+       values are not decoded. */
+    unsigned coding;
+    uint8_t raw[4];
+} hddvd_video_attributes;
+typedef struct hddvd_stream_attributes
+{
+    /* The two-letter language code, or "" when the record has none. */
+    char language[3];
+    /* Audio records are 8 bytes; subpicture records 6 (the rest zero). */
+    uint8_t raw[8];
+} hddvd_stream_attributes;
 typedef struct hddvd_vts_info
 {
     /* Last sector of the whole title set (IFO, EVO and backup IFO). */
@@ -1619,6 +1641,15 @@ HDDVD_API size_t hddvd_vti_evob_count(const hddvd_vti *);
 HDDVD_API int hddvd_vti_get_evob(const hddvd_vti *, size_t, hddvd_vti_evob *);
 /* Find the record with this EVOB number; HDDVD_ENOTFOUND if none. */
 HDDVD_API int hddvd_vti_find_evob(const hddvd_vti *, uint16_t, size_t *);
+/* The VTI's attribute records, which EVOBs name by attribute_number (record
+   index + 1): the video attributes and the audio streams of each. A VTI
+   without the table has none. Open rejects a record whose audio streams do
+   not fit in it and an EVOB naming a missing record (HDDVD_EPARSE). */
+HDDVD_API size_t hddvd_vti_attribute_count(const hddvd_vti *);
+HDDVD_API int hddvd_vti_get_video_attributes(const hddvd_vti *, size_t, hddvd_video_attributes *);
+HDDVD_API size_t hddvd_vti_audio_count(const hddvd_vti *, size_t);
+HDDVD_API int hddvd_vti_get_audio_attributes(const hddvd_vti *, size_t, size_t,
+                                             hddvd_stream_attributes *);
 /* Read a time map (MAP file). Besides the header rules above, the entry
    table must lie inside the file and hold at least one entry, and every
    entry must have a non-zero size and playback time and a first reference
@@ -1680,6 +1711,13 @@ HDDVD_API int hddvd_vts_get_vobu(const hddvd_vts *, size_t, uint32_t *sector);
 /* Convert a stored time to the 90 kHz clock: 30 frames per second at
    30000/1001 for rate code 2. Other codes return HDDVD_ENOTSUP. */
 HDDVD_API int hddvd_vts_time_to_ticks(const hddvd_vts_time *, hddvd_time *);
+/* A title set's video attributes and its audio and subpicture streams, in
+   stream number order. Open rejects more than 8 audio or 32 subpicture
+   streams (HDDVD_EPARSE). */
+HDDVD_API int hddvd_vts_get_video_attributes(const hddvd_vts *, hddvd_video_attributes *);
+HDDVD_API size_t hddvd_vts_stream_count(const hddvd_vts *, hddvd_stream_kind);
+HDDVD_API int hddvd_vts_get_stream_attributes(const hddvd_vts *, hddvd_stream_kind, size_t,
+                                              hddvd_stream_attributes *);
 /* Read the disc's title table (HVDVD-VMG100 IFO). Rules as for
    hddvd_vts_open; titles must have at least one angle and chapter, name a
    title set within the title-set count when the IFO gives one, and start

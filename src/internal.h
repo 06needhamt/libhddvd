@@ -50,6 +50,11 @@ int hddvd_object_unwrap(const void *, size_t, hddvd_object_type, unsigned char *
                         size_t *);
 /* The decoration array parallel to hddvd_scene_nodes, for display.c. */
 const hddvd_scene_decoration *hddvd_scene_decorations_internal(const hddvd_scene *);
+/* Stream attribute records shared by IFO title sets and VTIs (ifo.c). The
+   language is the two bytes at language_at when they are lowercase letters. */
+void hddvd_decode_video_attributes(const unsigned char *, hddvd_video_attributes *);
+void hddvd_decode_stream_attributes(const unsigned char *, size_t, size_t,
+                                    hddvd_stream_attributes *);
 /* Script style overrides (runtime_dom.c), on a styles object the runtime owns.
    override parses one property into a node's computed value: HDDVD_ENOTSUP
    for a property or keyword the model does not know, HDDVD_EPARSE for a

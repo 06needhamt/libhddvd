@@ -14,6 +14,12 @@ or extracted from the external reference menu.
   clear image, and a protected script).
 * `timemap/` is also written by `generate_objects.py`: an original VTI with one
   EVOB record and the time map that agrees with it.
+* `standard/` is written by `generate_objects.py`: an original Standard Content
+  title set (with stream attributes and navigation commands), its title EVO,
+  a VMG, and `bad-link.IFO`, whose commands link to a missing cell.
+* `app/app.aca` is written by `generate_objects.py`: an original HDi
+  application (manifest, a bare and an enveloped UTF-16 script, markup) for
+  the `hddvd-menurun` CTests.
 * `fuzz/` holds generated seeds for the harnesses whose input is not a file
   format of its own: URIs, playlists for the title-map harness's synthetic
   disc, and the byte layout `fuzz_display.c` decodes into scene nodes.

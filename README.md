@@ -17,8 +17,10 @@ Experimental open-source HD DVD inspection library.
 - IFO/VTI/MAP header validation, the VTI's EVOB table, and time maps; a title
   time resolves through the playlist's clips to an EVO file and the sector to
   read from
-- Standard Content title sets and title tables: chapters, PGCs, cells, time
-  maps, cell addresses and VOBU maps (`hddvd_vts_open`, `hddvd_vmg_open`)
+- Standard Content title sets and title tables: chapters, PGCs, cells, raw
+  navigation commands, time maps, cell addresses, VOBU maps and stream
+  attributes (video coding, audio and subpicture languages)
+  (`hddvd_vts_open`, `hddvd_vmg_open`); VTI attribute records
 - A sandboxed script runtime (`hddvd_runtime`) that runs HDi ECMAScript source,
   UTF-16 as on disc or UTF-8, with heap, recursion, operation and wall-clock
   budgets, in an optional QuickJS engine. Scripts get the HDi `document`
@@ -57,8 +59,9 @@ checks each time map against them (see `docs/formats/ifo-map.md`).
 `hddvd-locate DISC_ROOT PLAYLIST.XPL TITLE_INDEX MILLISECONDS...` resolves title
 times to the EVO file, presentation time and sector that play them.
 `hddvd-vtsinfo HVnnnI01.IFO [HVnnnT01.EVO]` prints a Standard Content title
-set or title table and checks its tables; given the title EVO, it checks them
-against the EVO's navigation packs.
+set or title table, its stream attributes and its navigation commands (in
+DVD-Video syntax), and checks its tables and every command target; given the
+title EVO, it checks them against the EVO's navigation packs and streams.
 `hddvd-menurun [--before FILE] archive.aca MANIFEST.xmf [STEP...]` runs one
 application in the script runtime: its manifest's scripts, its markup and the
 markup loaded handler, then steps such as `right`, `enter`, `key:0xCE`,

@@ -13,10 +13,13 @@
 #define TMAPT (3 * SECTOR)
 #define CADT (4 * SECTOR)
 #define ADMAP (5 * SECTOR)
-/* PGC 1 and its parts, from its search pointer and table offsets. */
+/* PGC 1 and its parts, from its search pointer and table offsets: three
+   commands after a 10-byte header, two programs, two cells. */
 #define PGC1 (PGCIT + 32u)
-#define PGC1_PROGRAMS (PGC1 + 0xd0u)
-#define PGC1_CELLS (PGC1 + 0xd4u)
+#define PGC1_COMMANDS (PGC1 + 0xb0u)
+#define PGC1_PROGRAMS (PGC1 + 0xd2u)
+#define PGC1_CELLS (PGC1 + 0xd6u)
+#define PGC1_POSITIONS (PGC1_CELLS + 2u * 28u)
 #define MAP1 (TMAPT + 16u)
 
 static unsigned char *load(const char *name, size_t *size)
@@ -159,6 +162,28 @@ static void title_set(void)
     assert(hddvd_vts_get_command(vts, 0, HDDVD_VTS_CELL_COMMAND, 0, command) == HDDVD_OK);
     assert(command[1] == 0x06);
     assert(hddvd_vts_get_command(vts, 1, HDDVD_VTS_CELL_COMMAND, 0, command) == HDDVD_EINVAL);
+    {
+        hddvd_video_attributes video;
+        hddvd_stream_attributes stream;
+        assert(hddvd_vts_get_video_attributes(vts, &video) == HDDVD_OK);
+        assert(video.coding == 0 && video.raw[0] == 0x2b);
+        assert(hddvd_vts_stream_count(vts, HDDVD_STREAM_AUDIO) == 1);
+        assert(hddvd_vts_stream_count(vts, HDDVD_STREAM_SUBPICTURE) == 1);
+        assert(hddvd_vts_get_stream_attributes(vts, HDDVD_STREAM_AUDIO, 0, &stream) == HDDVD_OK);
+        assert(!strcmp(stream.language, "en") && stream.raw[0] == 0x1c && stream.raw[7] == 0x1f);
+        assert(hddvd_vts_get_stream_attributes(vts, HDDVD_STREAM_SUBPICTURE, 0, &stream) ==
+               HDDVD_OK);
+        assert(!strcmp(stream.language, "en") && stream.raw[0] == 0x21 && stream.raw[6] == 0);
+        assert(hddvd_vts_get_stream_attributes(vts, HDDVD_STREAM_AUDIO, 1, &stream) ==
+               HDDVD_EINVAL);
+        assert(hddvd_vts_get_stream_attributes(vts, (hddvd_stream_kind)2, 0, &stream) ==
+               HDDVD_EINVAL);
+        assert(hddvd_vts_stream_count(vts, (hddvd_stream_kind)2) == 0);
+        assert(hddvd_vts_stream_count(NULL, HDDVD_STREAM_AUDIO) == 0);
+        assert(hddvd_vts_get_video_attributes(NULL, &video) == HDDVD_EINVAL);
+        assert(hddvd_vts_get_video_attributes(vts, NULL) == HDDVD_EINVAL);
+        assert(hddvd_vts_get_stream_attributes(vts, HDDVD_STREAM_AUDIO, 0, NULL) == HDDVD_EINVAL);
+    }
     assert(hddvd_vts_get_command(vts, 0, (hddvd_vts_command_kind)9, 0, command) == HDDVD_EINVAL);
 
     /* PGC 1: 1 s is in cell 1 (VOBU at sector 4), 2 s in cell 2 (sector 12). */
@@ -227,7 +252,13 @@ static void title_set_errors(void)
     assert(mutated32(bytes, size, PGC1_CELLS + 8, 1) == HDDVD_EPARSE);
     assert(mutated32(bytes, size, PGC1_CELLS + 20, 10) == HDDVD_EPARSE);
     /* A cell outside its address-table entry. */
-    assert(mutated8(bytes, size, PGC1 + 0x10cu + 3, 2) == HDDVD_EPARSE);
+    assert(mutated8(bytes, size, PGC1_POSITIONS + 3, 2) == HDDVD_EPARSE);
+    /* More audio or subpicture streams than the header holds records for. */
+    assert(mutated16(bytes, size, 0x218, 9) == HDDVD_EPARSE);
+    assert(mutated16(bytes, size, 0x25a, 33) == HDDVD_EPARSE);
+    /* A command table whose end address disagrees with its counts. */
+    assert(mutated32(bytes, size, PGC1_COMMANDS + 6, 10 + 3 * 8) == HDDVD_EPARSE);
+    assert(mutated16(bytes, size, PGC1_COMMANDS + 2, 2) == HDDVD_EPARSE);
     /* A cell command beyond the PGC's count. */
     assert(mutated8(bytes, size, PGC1_CELLS + 28 + 25, 2) == HDDVD_EPARSE);
     /* Invalid BCD. */
