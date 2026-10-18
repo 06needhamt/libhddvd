@@ -133,6 +133,17 @@ static void arguments(void)
     assert(hddvd_runtime_markup_loaded(runtime) == HDDVD_OK);
     assert(hddvd_runtime_load_markup(runtime, NULL) == HDDVD_OK);
     hddvd_runtime_destroy(runtime);
+    {
+        /* Installing the host objects does not use the operation or time
+           budgets, so even the smallest ones leave a working runtime. */
+        hddvd_runtime_limits limits;
+        hddvd_runtime_limits_default(&limits);
+        limits.max_operations = 1;
+        limits.max_milliseconds = 1;
+        assert(hddvd_runtime_create_with_limits(&limits, &runtime) == HDDVD_OK);
+        assert(run(runtime, "var x = typeof document;") == HDDVD_OK);
+        hddvd_runtime_destroy(runtime);
+    }
 }
 
 static void lookup(void)

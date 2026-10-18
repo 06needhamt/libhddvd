@@ -34,6 +34,8 @@ struct hddvd_engine
     uint64_t operations;
     uint64_t started;
     hddvd_runtime_limit stopped;
+    /* Clear while install runs the prelude. */
+    int budgeted;
     uint64_t random_state;
     /* Host objects: the prelude's entry object and the natives it calls. */
     JSValue host;
@@ -138,6 +140,8 @@ static int interrupt(JSRuntime *runtime, void *opaque)
 {
     hddvd_engine *engine = opaque;
     (void)runtime;
+    if (!engine->budgeted)
+        return 0;
     engine->operations += POLL_BLOCK;
     if (engine->operations > engine->limits.max_operations)
         engine->stopped = HDDVD_RUNTIME_LIMIT_OPERATIONS;
@@ -225,6 +229,7 @@ int hddvd_engine_create(const hddvd_runtime_limits *limits, hddvd_engine **out)
 
 static void begin(hddvd_engine *engine)
 {
+    engine->budgeted = 1;
     engine->heap_refused = 0;
     engine->operations = 0;
     engine->stopped = HDDVD_RUNTIME_LIMIT_NONE;
@@ -465,6 +470,7 @@ int hddvd_engine_install(hddvd_engine *engine, const char *source, size_t size,
     if (count > 0x7fff)
         return HDDVD_EINVAL;
     begin(engine);
+    engine->budgeted = 0;
     engine->native = native;
     engine->native_opaque = opaque;
     factory = JS_Eval(context, source, size, "<hdi-prelude>", JS_EVAL_TYPE_GLOBAL);

@@ -61,8 +61,11 @@ typedef int (*hddvd_engine_native_fn)(void *opaque, unsigned index, const hddvd_
                                       const char **message);
 int hddvd_engine_install(hddvd_engine *, const char *source, size_t size, const char *const *names,
                          size_t count, hddvd_engine_native_fn, void *opaque, hddvd_engine_report *);
-/* Calls the entry function `entry`. A number or boolean it returns is stored
-   in *result when result is not NULL (NaN for anything else). */
+/* Calls the entry function `entry` under the budgets. A number or boolean it
+   returns is stored in *result when result is not NULL (NaN for anything
+   else). Install itself runs without the operation and time budgets, since
+   no other script has run and only the prelude's bounded code can; heap and
+   recursion limits apply to both. */
 int hddvd_engine_invoke(hddvd_engine *, const char *entry, const hddvd_engine_value *args,
                         size_t count, double *result, hddvd_engine_report *);
 #endif

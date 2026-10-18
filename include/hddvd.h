@@ -1201,7 +1201,8 @@ HDDVD_API int hddvd_script_get_instruction(const hddvd_script *, size_t,
 HDDVD_API const char *hddvd_runtime_engine(void);
 /* Heap and recursion come from the config's max_script_heap_bytes and
    max_script_recursion, operations from max_script_instructions, source size
-   from max_script_bytes, and time defaults to one second. */
+   from max_script_bytes, and time defaults to one second. Creating a runtime
+   installs the host objects, which counts against the heap budget only. */
 HDDVD_API void hddvd_runtime_limits_default(hddvd_runtime_limits *);
 HDDVD_API int hddvd_runtime_create(hddvd_runtime **);
 HDDVD_API int hddvd_runtime_create_with_limits(const hddvd_runtime_limits *, hddvd_runtime **);
