@@ -21,10 +21,13 @@ Experimental open-source HD DVD inspection library.
   maps, cell addresses and VOBU maps (`hddvd_vts_open`, `hddvd_vmg_open`)
 - A sandboxed script runtime (`hddvd_runtime`) that runs HDi ECMAScript source,
   UTF-16 as on disc or UTF-8, with heap, recursion, operation and wall-clock
-  budgets, in an optional QuickJS engine. HDi host objects (`Player`,
-  `document`, events, timers) are not provided yet; `docs/hdi-host-api.md`
-  lists the ones disc scripts use. A bounded structural decoder covers the
-  clean-room `HDIS` fixture format only
+  budgets, in an optional QuickJS engine. Scripts get the HDi `document`
+  (elements with their state and style), `application` events, listeners,
+  timers and animations; the host loads markup, sends keys and time, and reads
+  back the focus and the styles with script values applied, for
+  `hddvd_scene_build`. `Player` and the other player objects are not provided
+  yet; `docs/hdi-host-api.md` lists what disc scripts use. A bounded structural
+  decoder covers the clean-room `HDIS` fixture format only
 - Renderer-neutral, damage-tracked display lists with host-decoded premultiplied
   RGBA planes, nested clipping/layout, stable stacking, focus image selection,
   letterbox transforms, and reverse-paint-order hit testing, built directly from
@@ -56,6 +59,12 @@ times to the EVO file, presentation time and sector that play them.
 `hddvd-vtsinfo HVnnnI01.IFO [HVnnnT01.EVO]` prints a Standard Content title
 set or title table and checks its tables; given the title EVO, it checks them
 against the EVO's navigation packs.
+`hddvd-menurun [--before FILE] archive.aca MANIFEST.xmf [STEP...]` runs one
+application in the script runtime: its manifest's scripts, its markup and the
+markup loaded handler, then steps such as `right`, `enter`, `key:0xCE`,
+`wait:1.5` or `event:TYPE`, printing the focus after each and every script
+failure (`--before` first runs a local script, such as stand-ins for host
+objects the runtime lacks).
 `python3 tools/inventory_hdi_scripts.py DIR...` lists the host objects, methods
 and events that the `.js` files under each directory use, without printing any
 source (see `docs/hdi-host-api.md`).
@@ -180,4 +189,4 @@ original synthetic seeds and contain no bytes from the reference archive.
 
 ## Status
 
-This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content command semantics and menus, and the HDi host objects scripts call, are future work.
+This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content command semantics and menus, the `Player` and application host objects scripts call, and markup timing are future work.

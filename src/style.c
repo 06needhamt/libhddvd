@@ -1145,3 +1145,154 @@ int hddvd_xmu_styles_get_unmodeled(const hddvd_xmu_styles *styles, size_t index,
     *result = styles->unmodeled[index];
     return HDDVD_OK;
 }
+
+/* Script overrides (runtime.c). The runtime owns `styles` and keeps an
+   untouched copy opened from the same markup in `pristine`. */
+
+/* Orders by zIndex, then document order, from the current (nearly sorted)
+   order. */
+static void sort_z(hddvd_xmu_styles *styles)
+{
+    size_t i;
+    for (i = 1; i < styles->count; i++)
+    {
+        size_t item = styles->z_order[i];
+        int32_t z = styles->computed[item].public_value.z_index;
+        size_t j = i;
+        while (j)
+        {
+            size_t before = styles->z_order[j - 1];
+            int32_t bz = styles->computed[before].public_value.z_index;
+            if (bz < z || (bz == z && before < item))
+                break;
+            styles->z_order[j] = before;
+            j--;
+        }
+        styles->z_order[j] = item;
+    }
+}
+
+int hddvd_style_override(hddvd_xmu_styles *styles, size_t node, const char *name, const char *value)
+{
+    struct style_value scratch;
+    int rc;
+    if (!styles || !name || !value || node >= styles->count)
+        return HDDVD_EINVAL;
+    if (in_timing(styles->xmu, node))
+        return HDDVD_ENOTSUP;
+    /* Validate first, so a rejected value leaves the node untouched. */
+    value_init(&scratch);
+    rc = parse_property(&scratch, name, value);
+    value_clear(&scratch);
+    if (rc == STYLE_UNKNOWN_PROPERTY || rc == STYLE_UNKNOWN_KEYWORD)
+        return HDDVD_ENOTSUP;
+    if (rc)
+        return rc;
+    rc = parse_property(&styles->computed[node], name, value);
+    if (!rc)
+        rc = resolve_navigation(styles, &styles->computed[node]);
+    if (!rc && !strcmp(name, "zIndex"))
+        sort_z(styles);
+    return rc;
+}
+
+int hddvd_style_restore(hddvd_xmu_styles *styles, const hddvd_xmu_styles *pristine, size_t node)
+{
+    struct style_value fresh;
+    int rc;
+    if (!styles || !pristine || node >= styles->count || pristine->count != styles->count)
+        return HDDVD_EINVAL;
+    value_init(&fresh);
+    rc = overlay(&fresh, &pristine->computed[node]);
+    if (!rc)
+        rc = resolve_navigation(styles, &fresh);
+    if (rc)
+    {
+        value_clear(&fresh);
+        return rc;
+    }
+    value_clear(&styles->computed[node]);
+    styles->computed[node] = fresh;
+    sort_z(styles);
+    return HDDVD_OK;
+}
+
+static const char *own_declaration(const hddvd_xmu *xmu, size_t node, const char *name)
+{
+    hddvd_xmu_node n;
+    hddvd_xmu_attribute attribute;
+    size_t i;
+    if (hddvd_xmu_get_node(xmu, node, &n))
+        return NULL;
+    for (i = 0; i < n.attribute_count; i++)
+        if (!hddvd_xmu_get_attribute(xmu, node, i, &attribute) && attribute.namespace_uri &&
+            !strcmp(attribute.namespace_uri, STYLE_NS) && !strcmp(attribute.name, name))
+            return attribute.value;
+    return NULL;
+}
+
+/* Computed values overlay a node's references in order, each after its own
+   references, and then the node itself; so the last declaration in that
+   order is the node's own, else the latest reference's. Each node's answer
+   is kept in `memo` (state 0 unvisited, 1 in progress, 2 done), so a style
+   referenced along many paths is searched once. */
+struct declared_memo
+{
+    unsigned char *state;
+    const char **value;
+};
+
+static const char *declared(const hddvd_xmu_styles *styles, size_t node, const char *name,
+                            struct declared_memo *memo)
+{
+    const char *references, *cursor, *found;
+    if (memo->state[node])
+        return memo->value[node];
+    memo->state[node] = 1;
+    found = own_declaration(styles->xmu, node, name);
+    references = found ? NULL : style_reference(styles->xmu, node);
+    for (cursor = references; cursor && *cursor;)
+    {
+        const char *start;
+        char *id;
+        size_t referenced;
+        const char *value;
+        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n')
+            cursor++;
+        if (!*cursor)
+            break;
+        start = cursor;
+        while (*cursor && *cursor != ' ' && *cursor != '\t' && *cursor != '\r' && *cursor != '\n')
+            cursor++;
+        id = duplicate_range(start, (size_t)(cursor - start));
+        if (!id)
+            break;
+        referenced = hddvd_xmu_find_id(styles->xmu, id);
+        free(id);
+        if (referenced == SIZE_MAX)
+            continue;
+        value = declared(styles, referenced, name, memo);
+        if (value)
+            found = value;
+    }
+    memo->state[node] = 2;
+    memo->value[node] = found;
+    return found;
+}
+
+const char *hddvd_style_declared(const hddvd_xmu_styles *styles, size_t node, const char *name)
+{
+    struct declared_memo memo;
+    const char *value;
+    if (!styles || !name || node >= styles->count || in_timing(styles->xmu, node))
+        return NULL;
+    value = own_declaration(styles->xmu, node, name);
+    if (value || !style_reference(styles->xmu, node))
+        return value;
+    memo.state = calloc(styles->count, 1);
+    memo.value = calloc(styles->count, sizeof(*memo.value));
+    value = memo.state && memo.value ? declared(styles, node, name, &memo) : NULL;
+    free(memo.state);
+    free(memo.value);
+    return value;
+}

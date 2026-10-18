@@ -1,17 +1,14 @@
-#include "internal.h"
-#include "script_engine.h"
+#include "runtime_internal.h"
 #include <stdlib.h>
 #include <string.h>
 
 /* Engine-neutral half of the script runtime: argument and limit checks,
-   source decoding, and the last outcome. The engine sits behind
-   script_engine.h. */
-struct hddvd_runtime
-{
-    hddvd_engine *engine;
-    hddvd_runtime_limits limits;
-    hddvd_engine_report report;
-};
+   source decoding, the host-object prelude, and the last outcome. The engine
+   sits behind script_engine.h; the host objects' document state is in
+   runtime_dom.c. */
+
+/* hdi_prelude.js, embedded at build time (cmake/EmbedFile.cmake). */
+#include "hdi_prelude.h"
 
 const char *hddvd_runtime_engine(void)
 {
@@ -60,10 +57,16 @@ int hddvd_runtime_create_with_limits(const hddvd_runtime_limits *limits, hddvd_r
     if (!runtime)
         return HDDVD_ENOMEM;
     runtime->limits = *limits;
+    runtime->focus = SIZE_MAX;
     rc = hddvd_engine_create(limits, &runtime->engine);
+    if (!rc)
+        rc = hddvd_engine_install(runtime->engine, (const char *)hddvd_prelude,
+                                  sizeof(hddvd_prelude) - 1, hddvd_runtime_native_names,
+                                  hddvd_runtime_native_count, hddvd_runtime_native, runtime,
+                                  &runtime->report);
     if (rc)
     {
-        free(runtime);
+        hddvd_runtime_destroy(runtime);
         return rc;
     }
     *out = runtime;
@@ -101,6 +104,9 @@ void hddvd_runtime_destroy(hddvd_runtime *runtime)
     if (!runtime)
         return;
     hddvd_engine_destroy(runtime->engine);
+    hddvd_runtime_document_free(runtime);
+    hddvd_runtime_issues_free(runtime);
+    free(runtime->call_exception);
     report_clear(&runtime->report);
     free(runtime);
 }
@@ -295,6 +301,26 @@ int hddvd_runtime_call(hddvd_runtime *runtime, const char *function)
         return HDDVD_EINVAL;
     report_clear(&runtime->report);
     rc = hddvd_engine_call(runtime->engine, function, &runtime->report);
+    runtime->report.status = rc;
+    return rc;
+}
+
+int hddvd_runtime_run_entry(hddvd_runtime *runtime, const char *entry,
+                            const hddvd_engine_value *args, size_t count, double *result)
+{
+    int rc;
+    report_clear(&runtime->report);
+    runtime->call_exceptions = 0;
+    free(runtime->call_exception);
+    runtime->call_exception = NULL;
+    rc = hddvd_engine_invoke(runtime->engine, entry, args, count, result, &runtime->report);
+    /* Listeners and timers catch their own exceptions; report the first. */
+    if (!rc && runtime->call_exceptions)
+    {
+        rc = HDDVD_ESCRIPT;
+        runtime->report.message = runtime->call_exception;
+        runtime->call_exception = NULL;
+    }
     runtime->report.status = rc;
     return rc;
 }

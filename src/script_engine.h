@@ -28,4 +28,41 @@ void hddvd_engine_destroy(hddvd_engine *);
 int hddvd_engine_evaluate(hddvd_engine *, const char *name, const char *source, size_t size,
                           hddvd_engine_report *);
 int hddvd_engine_call(hddvd_engine *, const char *function, hddvd_engine_report *);
+
+/* Host objects. The runtime's prelude (hdi_prelude.js) is a script whose
+   value is a function; install calls it with an object of native functions,
+   one per name, and the global object, and keeps what it returns (an object
+   of entry functions) out of the scripts' reach for invoke. */
+typedef enum hddvd_engine_type
+{
+    HDDVD_ENGINE_UNDEFINED,
+    HDDVD_ENGINE_NULL,
+    HDDVD_ENGINE_BOOLEAN,
+    HDDVD_ENGINE_NUMBER,
+    HDDVD_ENGINE_STRING,
+    /* Objects and functions; no payload. */
+    HDDVD_ENGINE_OTHER
+} hddvd_engine_type;
+/* A string is UTF-8 of `length` bytes and may contain NUL bytes; booleans
+   are numbers 0 and 1. */
+typedef struct hddvd_engine_value
+{
+    hddvd_engine_type type;
+    double number;
+    const char *string;
+    size_t length;
+} hddvd_engine_value;
+/* A native sets *result (undefined when left alone) and returns HDDVD_OK,
+   or returns an error and sets *message, which the engine throws as an
+   Error. Strings in *result and *message must stay valid until the native
+   is called again. */
+typedef int (*hddvd_engine_native_fn)(void *opaque, unsigned index, const hddvd_engine_value *args,
+                                      size_t count, hddvd_engine_value *result,
+                                      const char **message);
+int hddvd_engine_install(hddvd_engine *, const char *source, size_t size, const char *const *names,
+                         size_t count, hddvd_engine_native_fn, void *opaque, hddvd_engine_report *);
+/* Calls the entry function `entry`. A number or boolean it returns is stored
+   in *result when result is not NULL (NaN for anything else). */
+int hddvd_engine_invoke(hddvd_engine *, const char *entry, const hddvd_engine_value *args,
+                        size_t count, double *result, hddvd_engine_report *);
 #endif

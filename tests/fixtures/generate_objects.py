@@ -2,6 +2,7 @@
 """Generate original deterministic HDDVDOBJ and clean-room script fixtures."""
 from pathlib import Path
 import struct
+import zlib
 
 OUT = Path(__file__).resolve().parent / "objects"
 SCRIPTS = Path(__file__).resolve().parent / "scripts"
@@ -292,6 +293,67 @@ hdi_api = {
     "menu.xmu": menu_xmu.encode("utf-8"),
 }
 
+# An HDi application in an ACA archive, for hddvd-menurun: a manifest, a bare
+# UTF-16 script, a script in a clear AACS envelope, and markup with three
+# buttons in a row. Pressing Enter on "two" starts a timer that focuses
+# "three" one second later.
+APP = Path(__file__).resolve().parent / "app"
+
+def aca(members):
+    """An HDDVDACA archive (docs/formats/aca-archive.md) with the members in
+    order, each listed with its offset, size and CRC-32."""
+    directory_size = sum(46 + len(name) for name, _ in members)
+    offset = 32 + directory_size
+    header = b"HDDVDACA" + bytes([0, 0x10, 0, 1]) + struct.pack(">H", len(members)) + b"\0\x35"
+    header += bytes(32 - len(header))
+    directory, data = b"", b""
+    for name, blob in members:
+        directory += struct.pack(">III", offset, len(blob), zlib.crc32(blob)) + bytes([0xff, len(name)])
+        directory += name.encode("ascii") + bytes(32)
+        data += blob
+        offset += len(blob)
+    return header + directory + data
+
+app_xmf = """<?xml version="1.0" encoding="UTF-8"?>
+<Application xmlns="http://www.dvdforum.org/2005/HDDVDVideo/Manifest">
+  <Region x="0" y="0" width="1920" height="1080"/>
+  <Script src="file:///dvddisc/ADV_OBJ/app.aca/lib.js"/>
+  <Script src="file:///dvddisc/ADV_OBJ/app.aca/app.js"/>
+  <Markup src="file:///dvddisc/ADV_OBJ/app.aca/app.xmu"/>
+  <Resource src="file:///dvddisc/ADV_OBJ/app.aca"/>
+</Application>
+"""
+app_lib = """function focus(id) { document.getElementById(id).state.focused = true; }
+"""
+app_js = """var timer;
+function later() { focus("three"); }
+function onKey(evt) {
+    if (evt.key == 0x0D && evt.target.core.id == "two") {
+        timer = createTimer("00:00:01:00", TIMER_APPLICATION, later);
+        timer.autoReset = false;
+        timer.enabled = true;
+    }
+}
+setMarkupLoadedHandler(function () {
+    focus("one");
+    addEventListener("controller_key_down", onKey, false);
+});
+"""
+app_xmu = """<root xmlns="http://www.dvdforum.org/2005/ihd"
+      xmlns:style="http://www.dvdforum.org/2005/ihd#style"><body>
+<button id="one" style:navRight="two"/><button id="two" style:navRight="three"/>
+<button id="three"/></body></root>
+"""
+app = {
+    "app.aca": aca([
+        ("app.xmf", app_xmf.encode("utf-8")),
+        ("lib.js", aacs(0x12, b"\xfe\xff" + app_lib.encode("utf-16-be"), "lib.js.AACS",
+                        bytes(4), bytes_5_6=0)),
+        ("app.js", b"\xfe\xff" + app_js.encode("utf-16-be")),
+        ("app.xmu", app_xmu.encode("utf-8")),
+    ]),
+}
+
 # Seeds for harnesses whose input is not a file format of its own.
 FUZZ = Path(__file__).resolve().parent / "fuzz"
 fuzz_seeds = {
@@ -308,6 +370,20 @@ fuzz_seeds = {
     "runtime/recursion.js": b"function f() { return f(); }",
     "runtime/loop.js": b"function f() { for (;;) {} }",
     "runtime/syntax.js": b"function f( {",
+    # The host objects, against fuzz_runtime.c's document.
+    "runtime/host.js": (
+        "var a = document.getElementById('a'), log = [];\n"
+        "addEventListener('controller_key_down', function (e) {\n"
+        "  log.push(e.key + e.target.core.id); a.style.x = (e.key * 2) + 'px'; }, false);\n"
+        "addEventListener('fuzz', { handleEvent: function (e) { throw e; } }, true);\n"
+        "setMarkupLoadedHandler(function () {\n"
+        "  document.b.style.animateProperty('opacity', '0;1;0.5', 0.5);\n"
+        "  var t = createTimer('00:00:00:20', TIMER_APPLICATION, function () {\n"
+        "    document.field.state.value = log.join(); a.state.focused = 'true'; });\n"
+        "  t.enabled = true; });\n"
+        "function f() { var e = createEvent('x'); e.initEvent('fuzz', true, true);\n"
+        "  dispatchEvent(e); a.style.setProperty('navRight', 'field'); return a.parentNode; }\n"
+    ).encode("utf-8"),
     "uri/disc-file.txt": b"file:///dvddisc/ADV_OBJ/menu.xmf",
     "uri/archive-member.txt": b"file:///dvddisc/ADV_OBJ/menu.aca/menu.xmu",
     "uri/traversal.txt": b"file:///dvddisc/ADV_OBJ/../../etc/passwd",
@@ -402,6 +478,10 @@ for path in STANDARD.iterdir():
     if path.is_file(): path.unlink()
 for name, data in sorted(standard.items()):
     (STANDARD / name).write_bytes(data)
+
+APP.mkdir(exist_ok=True)
+for name, data in sorted(app.items()):
+    (APP / name).write_bytes(data)
 
 for name, data in sorted(fuzz_seeds.items()):
     path = FUZZ / name

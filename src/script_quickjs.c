@@ -3,6 +3,7 @@
 #endif
 #include "internal.h"
 #include "script_engine.h"
+#include <math.h>
 #include <quickjs.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +35,10 @@ struct hddvd_engine
     uint64_t started;
     hddvd_runtime_limit stopped;
     uint64_t random_state;
+    /* Host objects: the prelude's entry object and the natives it calls. */
+    JSValue host;
+    hddvd_engine_native_fn native;
+    void *native_opaque;
 };
 
 const char *hddvd_engine_name(void)
@@ -173,7 +178,10 @@ void hddvd_engine_destroy(hddvd_engine *engine)
     if (!engine)
         return;
     if (engine->context)
+    {
+        JS_FreeValue(engine->context, engine->host);
         JS_FreeContext(engine->context);
+    }
     if (engine->runtime)
         JS_FreeRuntime(engine->runtime);
     free(engine);
@@ -187,6 +195,7 @@ int hddvd_engine_create(const hddvd_runtime_limits *limits, hddvd_engine **out)
         return HDDVD_ENOMEM;
     engine->limits = *limits;
     engine->random_state = UINT64_C(0x9e3779b97f4a7c15);
+    engine->host = JS_UNDEFINED;
     engine->runtime = JS_NewRuntime2(&heap_functions, engine);
     if (engine->runtime)
         engine->context = JS_NewContextRaw(engine->runtime);
@@ -352,4 +361,192 @@ int hddvd_engine_call(hddvd_engine *engine, const char *function, hddvd_engine_r
     JS_FreeValue(context, callee);
     JS_FreeValue(context, global);
     return finish(engine, result, HDDVD_ESCRIPT, report);
+}
+
+/* Converts an argument for a native. Strings are copied into `held`, freed
+   by the caller with JS_FreeCString. */
+static int to_value(JSContext *context, JSValueConst value, hddvd_engine_value *out,
+                    const char **held)
+{
+    memset(out, 0, sizeof(*out));
+    *held = NULL;
+    if (JS_IsUndefined(value))
+        out->type = HDDVD_ENGINE_UNDEFINED;
+    else if (JS_IsNull(value))
+        out->type = HDDVD_ENGINE_NULL;
+    else if (JS_IsBool(value))
+    {
+        out->type = HDDVD_ENGINE_BOOLEAN;
+        out->number = JS_ToBool(context, value) ? 1.0 : 0.0;
+    }
+    else if (JS_IsNumber(value))
+    {
+        out->type = HDDVD_ENGINE_NUMBER;
+        if (JS_ToFloat64(context, &out->number, value))
+            return -1;
+    }
+    else if (JS_IsString(value))
+    {
+        out->type = HDDVD_ENGINE_STRING;
+        *held = JS_ToCStringLen(context, &out->length, value);
+        if (!*held)
+            return -1;
+        out->string = *held;
+    }
+    else
+        out->type = HDDVD_ENGINE_OTHER;
+    return 0;
+}
+
+static JSValue from_value(JSContext *context, const hddvd_engine_value *value)
+{
+    switch (value->type)
+    {
+        case HDDVD_ENGINE_NULL:
+            return JS_NULL;
+        case HDDVD_ENGINE_BOOLEAN:
+            return JS_NewBool(context, value->number != 0.0);
+        case HDDVD_ENGINE_NUMBER:
+            return JS_NewFloat64(context, value->number);
+        case HDDVD_ENGINE_STRING:
+            return JS_NewStringLen(context, value->string ? value->string : "", value->length);
+        default:
+            return JS_UNDEFINED;
+    }
+}
+
+#define MAX_NATIVE_ARGS 4
+
+static JSValue native_call(JSContext *context, JSValueConst self, int argc, JSValueConst *argv,
+                           int magic)
+{
+    hddvd_engine *engine = JS_GetContextOpaque(context);
+    hddvd_engine_value args[MAX_NATIVE_ARGS], result;
+    const char *held[MAX_NATIVE_ARGS] = {NULL};
+    const char *message = NULL;
+    size_t count = argc < MAX_NATIVE_ARGS ? (size_t)argc : MAX_NATIVE_ARGS, i;
+    JSValue out = JS_UNDEFINED;
+    int rc = 0;
+    (void)self;
+    for (i = 0; i < count && !rc; i++)
+        rc = to_value(context, argv[i], &args[i], &held[i]);
+    if (!rc)
+    {
+        memset(&result, 0, sizeof(result));
+        if (engine->native(engine->native_opaque, (unsigned)magic, args, count, &result, &message))
+        {
+            JSValue error = JS_NewError(context);
+            if (!JS_IsException(error))
+                JS_DefinePropertyValueStr(
+                    context, error, "message",
+                    JS_NewString(context, message ? message : "host call failed"),
+                    JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+            out = JS_Throw(context, error);
+        }
+        else
+            out = from_value(context, &result);
+    }
+    else
+        out = JS_EXCEPTION;
+    for (i = 0; i < count; i++)
+        if (held[i])
+            JS_FreeCString(context, held[i]);
+    return out;
+}
+
+int hddvd_engine_install(hddvd_engine *engine, const char *source, size_t size,
+                         const char *const *names, size_t count, hddvd_engine_native_fn native,
+                         void *opaque, hddvd_engine_report *report)
+{
+    JSContext *context = engine->context;
+    JSValue factory, natives, global, args[2], host;
+    size_t i;
+    int rc;
+    if (count > 0x7fff)
+        return HDDVD_EINVAL;
+    begin(engine);
+    engine->native = native;
+    engine->native_opaque = opaque;
+    factory = JS_Eval(context, source, size, "<hdi-prelude>", JS_EVAL_TYPE_GLOBAL);
+    if (JS_IsException(factory))
+        return report_exception(engine, HDDVD_EPARSE, report);
+    natives = JS_NewObject(context);
+    for (i = 0; i < count && !JS_IsException(natives); i++)
+    {
+        JSValue function =
+            JS_NewCFunctionMagic(context, native_call, names[i], 0, JS_CFUNC_generic_magic, (int)i);
+        if (JS_IsException(function) || JS_SetPropertyStr(context, natives, names[i], function) < 0)
+        {
+            JS_FreeValue(context, natives);
+            natives = JS_EXCEPTION;
+        }
+    }
+    if (JS_IsException(natives))
+    {
+        JS_FreeValue(context, factory);
+        return report_exception(engine, HDDVD_ENOMEM, report);
+    }
+    global = JS_GetGlobalObject(context);
+    args[0] = natives;
+    args[1] = global;
+    host = JS_Call(context, factory, JS_UNDEFINED, 2, args);
+    JS_FreeValue(context, factory);
+    JS_FreeValue(context, natives);
+    JS_FreeValue(context, global);
+    if (JS_IsException(host))
+        return report_exception(engine, HDDVD_ESCRIPT, report);
+    if (!JS_IsObject(host))
+    {
+        JS_FreeValue(context, host);
+        report->message = hddvd_strdup("the prelude returned no entry object");
+        return HDDVD_ESCRIPT;
+    }
+    rc = finish(engine, JS_UNDEFINED, HDDVD_ESCRIPT, report);
+    if (rc)
+    {
+        JS_FreeValue(context, host);
+        return rc;
+    }
+    JS_FreeValue(context, engine->host);
+    engine->host = host;
+    return HDDVD_OK;
+}
+
+int hddvd_engine_invoke(hddvd_engine *engine, const char *entry, const hddvd_engine_value *args,
+                        size_t count, double *result, hddvd_engine_report *report)
+{
+    JSContext *context = engine->context;
+    JSValue callee, value, argv[MAX_NATIVE_ARGS];
+    size_t i;
+    int rc;
+    if (result)
+        *result = NAN;
+    if (!JS_IsObject(engine->host) || count > MAX_NATIVE_ARGS)
+        return HDDVD_EINVAL;
+    begin(engine);
+    /* The entry object is the prelude's own; no script can reach it. */
+    callee = JS_GetPropertyStr(context, engine->host, entry);
+    if (JS_IsException(callee))
+        return report_exception(engine, HDDVD_ESCRIPT, report);
+    if (!JS_IsFunction(context, callee))
+    {
+        JS_FreeValue(context, callee);
+        report->message = hddvd_strdup("no such host entry");
+        return HDDVD_ENOTFOUND;
+    }
+    for (i = 0; i < count; i++)
+        argv[i] = from_value(context, &args[i]);
+    value = JS_Call(context, callee, engine->host, (int)count, argv);
+    JS_FreeValue(context, callee);
+    for (i = 0; i < count; i++)
+        JS_FreeValue(context, argv[i]);
+    if (!JS_IsException(value) && result && (JS_IsNumber(value) || JS_IsBool(value)))
+    {
+        if (JS_IsBool(value))
+            *result = JS_ToBool(context, value) ? 1.0 : 0.0;
+        else if (JS_ToFloat64(context, result, value))
+            *result = NAN;
+    }
+    rc = finish(engine, value, HDDVD_ESCRIPT, report);
+    return rc;
 }

@@ -105,6 +105,65 @@ The remaining 14 are Fast & Furious names (`resetMenus`, `switchEnhanced`,
 `focusCorrectSub`, ...) that nothing scanned raises. They are probably raised
 by markup or scripts in archives that were not ripped, or by nothing at all.
 
+## What the runtime provides
+
+`hddvd_runtime` (P4-04) provides `document`, elements with `state` and
+`style`, `application` listeners and dispatch, events, `createTimer()` and
+`animateProperty()`, plus the global functions of the same names and
+`setMarkupLoadedHandler()`. `include/hddvd.h` documents each member.
+`src/hdi_prelude.js` implements them over natives in `src/runtime_dom.c`.
+`Player`, `FileIO`, `XMLParser`, `Network`, `PersistentStorageManager`,
+`Diagnostics` and the application lifecycle members are P4-05. Markup timing
+(cues, `<event>` elements, markup animations and `setXPathVariable()`) is
+not modeled.
+
+### Model choices to confirm against a player
+
+- **Key defaults:** a compass key moves the focus along the focused element's
+  nav property, and Enter sets `state.actioned` while held, unless a listener
+  calls `preventDefault()`.
+- **Timers:** frames in `createTimer("HH:MM:SS:FF", ...)` count at 60000/1001
+  per second, as in playlists. Values up to frame 30 appear on disc, so the
+  rate is above 30. The clock argument (`1`, `2` or `TIMER_APPLICATION`) is
+  ignored, and the value of `TIMER_APPLICATION` is a placeholder.
+- **Animations:** `animateProperty()` spaces its keyframes evenly over the
+  duration. Lengths and numbers interpolate linearly; other values switch at
+  each keyframe.
+- **State properties:**
+  - `state.unsetProperty()` keeps the value. Scripts call it right after
+    setting a value, which suggests it hands the property back to markup
+    timing.
+  - `enabled` defaults to `"true"`.
+- **Initial style values:** `"auto"` for display, `"visible"` for
+  visibility, `"1"` for opacity, and `""` otherwise.
+
+### Found by running disc applications
+
+`hddvd-menurun` ran all 52 applications in the five discs' archives, with a
+throwaway local stand-in for `Player` (kept outside the repository). Every
+readable script evaluates, except 16 that need `PersistentStorageManager`,
+`XMLParser` or a `Player` member at load time. The runs showed these
+behaviors, which the runtime now follows:
+
+- Some scripts dispatch `document.createEvent("type")` directly, without
+  `initEvent()`, so `createEvent()` gives the event its argument as type.
+- Key listeners read `evt.target.core.id`, so a key event's target is the
+  focused element, and elements have a `core` attribute group.
+- Listeners for markup events read `evt.target.attributes.getNamedItem("id").value`.
+- Scripts set `style.x = ""`, which removes the script's value, as in CSS.
+
+These remain open:
+
+- A key listener on one disc (a Toshiba player workaround, per its comment)
+  tests `evt.target.application`, which must be truthy when no element has
+  focus. What that target is remains unconfirmed.
+- The rest of the failures are P4-05 members:
+  - `application.thisAdvancedApplication`, `advancedApplications` and
+    `moveToTop()`;
+  - `Player` playlist and audio members.
+- `document.setXPathVariable()` belongs to markup timing, which is not
+  modeled.
+
 ## What this means for a runtime
 
 - **Menus need** `document`, elements and their state and style, `Player`

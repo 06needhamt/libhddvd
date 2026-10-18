@@ -336,7 +336,7 @@ the backend is disabled.
 
 ### P4-04 — Implement DOM, focus, and event host objects
 
-**Status:** Ready
+**Status:** Complete
 **Depends on:** P3-03, P4-03
 **Likely files:** `src/runtime.c`, `src/runtime_dom.c`, `tests/test_runtime.c`
 
@@ -346,12 +346,38 @@ timers.  Queue host callbacks until runtime locks are released.  The members to
 cover first are the `document`, element, `application`, event and timer entries
 in `docs/hdi-host-api.md`.
 
+The host objects are JavaScript (`src/hdi_prelude.js`, embedded at build time)
+over engine-neutral natives in `src/runtime_dom.c`, reached through two new
+engine-boundary calls (`hddvd_engine_install`, `hddvd_engine_invoke`). The host
+loads markup (`hddvd_runtime_load_markup`), calls the markup loaded handler,
+sends keys, time and events (`hddvd_runtime_key`, `_advance`, `_dispatch`), and
+reads back the focus, a change counter, state and style values, issues
+(listener exceptions and style values the model cannot apply), and the
+document's computed styles with script values applied
+(`hddvd_runtime_styles`), which `hddvd_scene_build` takes as they are. The
+runtime makes no callbacks at all, so none can happen inside the engine.
+`include/hddvd.h` documents every member and model choice; choices no player
+has confirmed (key defaults, timer frame rate, animation timing) are marked
+unconfirmed there and in `docs/hdi-host-api.md`.
+
+`test_runtime_dom.c` covers lookups, state, style, listener ordering and
+removal during dispatch, exceptions, focus cycles and keys, timers (ordering,
+cancellation, one-shot, catch-up), animations, document replacement, budgets
+and replay across two runtimes. `fuzz-runtime` now runs scripts against a
+document and drives keys, time and events. `hddvd-menurun` runs a disc
+application; its CTest runs a generated ACA application. On the five ripped
+discs, all 52 applications load: every readable script evaluates except 16
+that need `PersistentStorageManager`, `XMLParser` or `Player` at load time, and
+the remaining failures are all P4-05 members (`Player`,
+`application.thisAdvancedApplication`, `moveToTop()`) or markup timing
+(`document.setXPathVariable()`).
+
 **Acceptance:** deterministic replay tests cover listener ordering, focus cycles,
 removed nodes/listeners, timer cancellation, exceptions, and budget exhaustion.
 
 ### P4-05 — Implement player and application host objects
 
-**Status:** Blocked on P4-04
+**Status:** Ready
 **Depends on:** P4-04, P6-01
 **Likely files:** `src/runtime_player.c`, `tests/test_runtime_player.c`
 
