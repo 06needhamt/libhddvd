@@ -43,7 +43,7 @@ Tables except the VOBU map start with a 2-byte count, 2 reserved bytes and the 4
 
 **PGC table:** search pointers are **12 bytes** (DVD: 8): category (top bit: entry PGC; second byte: title number), 4 unknown bytes, then the PGC's offset. A PGC has 2-byte program and cell counts at 0 and 2, its playback time at 4, and at **0xa8** four 2-byte offsets: commands, program map, cell playback, cell positions. 0xb0 to 0x130 holds two identical 16-entry palettes. Fields between 8 and 0xa8 differ only between title sets with and without audio, so they are not decoded.
 
-- **Commands:** pre, post and cell command counts (2 bytes each), 2 more bytes, then 8-byte commands. Their semantics are not decoded.
+- **Commands:** pre, post and cell command counts (2 bytes each), the 4-byte offset of the table's last byte, then 8-byte commands (see below). The end offset is 10 + 8n − 1 in all 101 command tables, and the program map follows immediately. The first decoder (October 2026) took the header as 8 bytes, which shifted every command by 2 bytes; the 10-byte header is checked now.
 - **Program map:** 2-byte first cell of each program, strictly increasing from 1.
 - **Cell playback:** **28 bytes** (DVD: 24): category, playback time, first VOBU, first ILVU end, last VOBU and last sector, then 4 bytes: a flags byte (0x10 to 0x70 seen, meaning unknown) and the 1-based cell command run after the cell, or two zero bytes. In all 692 cells, the command number never exceeded the PGC's cell-command count.
 - **Cell position:** EVOB id (2 bytes), a reserved byte, cell id.
@@ -61,6 +61,45 @@ Tables except the VOBU map start with a 2-byte count, 2 reserved bytes and the 4
 - **Entry k:** names the VOBU playing at (k + 1) units from the PGC's start. In `HV006T01.EVO`, VOBU 13 starts at 30 frames = 1.001 s, so 1.000 s is still in VOBU 12, which is what entry 1 names. All 9 entries agree.
 - **Top bit:** set exactly when the next entry is in another cell, or there is none (4,049 of 4,049 entries).
 - **Entry counts:** short PGCs have one entry per whole second. Three long multi-cell PGCs have two fewer, which their missing EVOs cannot explain, so counts are not checked.
+
+### Navigation commands
+
+The 785 commands in the 11 IFOs use DVD-Video's 8-byte encoding, as libdvdnav documents it. The command type is in the top 3 bits of byte 0, the comparison in bits 6 to 4 of byte 1, and the link or jump subset in its low 4 bits. `hddvd-vtsinfo` prints them in that syntax and checks every target it can. Every target is valid in context:
+- link targets are within the PGC's cells and programs, or the title's chapters;
+- jump titles and chapters exist in the title set;
+- each `Goto` line is within its command list.
+
+| Form | Count | Example |
+|---|---:|---|
+| conditional `LinkPTTN` (compare a register with a value) | 308 | `20 b5 00 00 00 03 00 09`: if (GPRM0 != 3) LinkPTTN 9 |
+| set a register (type 3: `=`, `-=`) | 109 | `71 00 00 3f 00 03 00 00`: GPRM63 = 3 |
+| conditional `LinkCN` | 42 | `20 a7 00 03 00 01 00 02`: if (GPRM3 == 1) LinkCN 2 |
+| `JumpVTS_PTT` (32 conditional on two registers) | 34 | `30 55 00 01 00 04 0a 3f`: if (GPRM10 > GPRM63) JumpVTS_PTT 4:1 |
+| `Nop` | 24 | |
+| `JumpTT`, `JumpVTS_TT` | 24 | `30 02 00 00 00 17 00 00`: JumpTT 23 |
+| `SetHL_BTNN` (button = value / 1024), some conditional | 19 | `56 00 00 00 04 00 00 00`: SetHL_BTNN 1 |
+| `LinkPGN`, `LinkPGCN`, `LinkPTTN` | 11 | |
+| conditional `Goto` | 2 | `00 a1 00 02 00 01 00 05`: if (GPRM2 == 1) Goto 5 |
+| jump subset 8, DVD's `CallSS` | 212 | `30 08 00 03 00 b0 00 00` |
+
+- **Registers:** commands use general registers 0 to 3, 10, 11 and 63. GPRM63 is a loop counter: it is set to 3, decremented, and tested with `if (GPRM63 > 0) LinkCN 1`. DVD-Video has only 16 general registers, so HD DVD has at least 64.
+- **Jump subset 8 is unconfirmed.** Read as DVD's `CallSS`, byte 5 (`0xb0` in 210 commands, `0xa3` in 1) asks for a VTS menu, but these title sets have none. Byte 3 (0 to 10) matches no cell number of the cells that run it. `hddvd-vtsinfo` prints these commands raw and counts them as unconfirmed.
+
+### Stream attributes (title set)
+
+| Offset | Size | Field | Evidence |
+|---:|---:|---|---|
+| 0x214 | 4 | video attributes | `2b 08 c0 00` in all 10 sets; bits 7–6 of the first byte are the coding (below) |
+| 0x218 | 2 | number of audio streams | 1 in 9 sets; 0 in `HV006`, whose EVO has no audio |
+| 0x21a | 8 × 8 | audio records | the subpicture count follows exactly 8 records later |
+| 0x25a | 2 | number of subpicture streams | 1 in 4 sets; 0 in `HV006`, whose EVO has none |
+| 0x25c | 6 each | subpicture records | one seen; 6 bytes as in DVD-Video, unconfirmed |
+
+- **Audio records** (also used in the VTI, below): byte 0 is `0x1c` in all 10 records seen. Byte 1 is `0x04` when bytes 4–5 hold a language code ("en") and `0x00` when they are zero. Byte 2 is `0xd4`, `0xc4` or `0xd0`. No EVO with audio is available, so the coding and channel bits are not decoded.
+- **Subpicture records:** the language code is at bytes 2–3 (`21 08 65 6e 00 00`).
+- **Video coding:** 0 is MPEG-2 (`2b…` here; stream `0xe0` in `HV006T01.EVO`). 1 is VC-1 (`6b…` in the VTI; extended stream `0xfd` with id `0x55` in `FBILogo.EVO`). Other values are not decoded.
+
+The library returns the coding, the languages and every record as stored. `hddvd-vtsinfo` checks the coding and both counts against the EVO's streams, when one is given.
 
 ### Navigation packs (Standard Content)
 
@@ -118,7 +157,16 @@ Each record is 0x140 bytes:
 | 0x116 | 2 | attribute record number | 1 and 2 (see below) |
 | 0x11e | 16 | `0xff` bytes | unknown |
 
-The second table, at sector 1, holds two 1024-byte records using the same count, end-address and offset layout, but with the count at offset 0. Their contents look like stream attributes: the record for the feature, which has audio, differs from the record for `FBILogo.EVO`, whose EVO has only a video stream. They are not decoded. In both VTI records the EVOB number equals the attribute record number, so this one file cannot tell the two fields apart.
+The **attribute table**, at the sector named at 0xb8 (sector 1), holds two 1024-byte records. It uses the same end-address and offset layout, but with the count at offset 0. Each record holds:
+
+| Offset | Size | Field | Evidence |
+|---:|---:|---|---|
+| 0 | 2 | unknown | `0x1000` for `FBILogo.EVO`, 0 for the feature |
+| 2 | 4 | video attributes, as in title sets | `6b 10 c0 00` and `6b 00 c0 00`: VC-1, and `FBILogo.EVO` is VC-1 |
+| 0x0e | 2 | number of audio streams | 0 for `FBILogo.EVO`, whose EVO has only video; 1 for the feature |
+| 0x10 | 8 each | audio records, as in title sets | `1c 00 c4 00 00 00 00 00`: no language code |
+
+In both EVOB records, the EVOB number equals the attribute record number, so this one file cannot tell the two fields apart. The library requires every EVOB's attribute number to name a record.
 
 ## MAP (time map)
 
@@ -188,11 +236,11 @@ A clip plays its map from `clipTimeBegin` (default 0). A title time `t` inside t
 ## What remains
 
 - **Standard Content:**
-  - command semantics;
+  - executing commands (a VM), jump subset 8, and the cell command flags;
   - menu PGCs and menu EVOs;
-  - stream attributes (one disc's are all identical);
+  - audio coding and channel bits, and the rest of the video attributes (only one combination seen);
   - frame rates other than 30000/1001;
   - multi-angle and interleaved cells.
-- **The VTI attribute table:** not decoded.
+- **The VTI attribute table:** bytes other than the video attributes and audio records.
 - **Angle and interleaved layouts:** none of the observed maps has them.
 - **Other frame rates:** whether the time-map unit or the playlist clock changes at time bases other than 60fps is unconfirmed.

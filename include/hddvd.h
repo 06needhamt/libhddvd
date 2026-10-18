@@ -573,6 +573,39 @@ typedef struct hddvd_runtime_diagnostic
     /* The engine's call trace, one frame per line. */
     const char *trace;
 } hddvd_runtime_diagnostic;
+/* Something a runtime noticed while running scripts on the host's behalf. */
+typedef enum hddvd_runtime_issue_kind
+{
+    /* A listener, timer, handler or animation step threw; the rest still ran. */
+    HDDVD_RUNTIME_ISSUE_EXCEPTION = 1,
+    /* A script set a style value the style model cannot apply (an unknown
+       property or keyword, or a malformed value). Scripts read it back, but
+       hddvd_runtime_styles does not change. */
+    HDDVD_RUNTIME_ISSUE_STYLE = 2
+} hddvd_runtime_issue_kind;
+/* message is borrowed until hddvd_runtime_clear_issues or destroy. node is
+   the markup node concerned, or SIZE_MAX. */
+typedef struct hddvd_runtime_issue
+{
+    hddvd_runtime_issue_kind kind;
+    size_t node;
+    const char *message;
+} hddvd_runtime_issue;
+/* Controller key codes, as disc scripts define them (VK_*). The runtime acts
+   on these by default; hddvd_runtime_key passes any other code to scripts
+   only. */
+typedef enum hddvd_runtime_key_code
+{
+    HDDVD_KEY_ENTER = 0x0d,
+    HDDVD_KEY_LEFT = 0x25,
+    HDDVD_KEY_UP = 0x26,
+    HDDVD_KEY_RIGHT = 0x27,
+    HDDVD_KEY_DOWN = 0x28,
+    HDDVD_KEY_UP_LEFT = 0x29,
+    HDDVD_KEY_UP_RIGHT = 0x2a,
+    HDDVD_KEY_DOWN_LEFT = 0x2b,
+    HDDVD_KEY_DOWN_RIGHT = 0x2c
+} hddvd_runtime_key_code;
 typedef struct hddvd_rect
 {
     int32_t x;
@@ -968,6 +1001,28 @@ typedef struct hddvd_tmap_entry
 } hddvd_tmap_entry;
 /* Standard Content IFO tables (docs/formats/ifo-map.md). Sectors in a
    title set's tables are relative to the start of its title EVO. */
+/* Stream attributes recorded in a title set IFO or a VTI
+   (docs/formats/ifo-map.md). Only the fields below are decoded; raw is the
+   record as stored, for everything else. */
+typedef enum hddvd_stream_kind
+{
+    HDDVD_STREAM_AUDIO = 0,
+    HDDVD_STREAM_SUBPICTURE = 1
+} hddvd_stream_kind;
+typedef struct hddvd_video_attributes
+{
+    /* Bits 7 and 6 of raw[0]: 0 for MPEG-2 and 1 for VC-1 were seen; other
+       values are not decoded. */
+    unsigned coding;
+    uint8_t raw[4];
+} hddvd_video_attributes;
+typedef struct hddvd_stream_attributes
+{
+    /* The two-letter language code, or "" when the record has none. */
+    char language[3];
+    /* Audio records are 8 bytes; subpicture records 6 (the rest zero). */
+    uint8_t raw[8];
+} hddvd_stream_attributes;
 typedef struct hddvd_vts_info
 {
     /* Last sector of the whole title set (IFO, EVO and backup IFO). */
@@ -1160,14 +1215,16 @@ HDDVD_API int hddvd_script_get_instruction(const hddvd_script *, size_t,
    report no HDDVD_FEATURE_SCRIPT_RUNTIME, hddvd_runtime_engine() returns NULL
    and hddvd_runtime_create* fail with HDDVD_ENOTSUP.
 
-   Scripts see the ECMAScript built-ins only, with no file, network or process
-   access; Math.random is seeded identically in every runtime. HDi host objects
-   are not provided yet. A runtime is single-threaded; separate runtimes may be
-   used on separate threads. */
+   Scripts see the ECMAScript built-ins and the HDi host objects described
+   below, with no file, network or process access; Math.random is seeded
+   identically in every runtime. A runtime is single-threaded and makes no
+   callbacks: after each call the host reads the focus, generation and
+   issues. Separate runtimes may be used on separate threads. */
 HDDVD_API const char *hddvd_runtime_engine(void);
 /* Heap and recursion come from the config's max_script_heap_bytes and
    max_script_recursion, operations from max_script_instructions, source size
-   from max_script_bytes, and time defaults to one second. */
+   from max_script_bytes, and time defaults to one second. Creating a runtime
+   installs the host objects, which counts against the heap budget only. */
 HDDVD_API void hddvd_runtime_limits_default(hddvd_runtime_limits *);
 HDDVD_API int hddvd_runtime_create(hddvd_runtime **);
 HDDVD_API int hddvd_runtime_create_with_limits(const hddvd_runtime_limits *, hddvd_runtime **);
@@ -1185,6 +1242,102 @@ HDDVD_API int hddvd_runtime_evaluate(hddvd_runtime *, const char *name, const vo
    is not a function; otherwise as hddvd_runtime_evaluate. */
 HDDVD_API int hddvd_runtime_call(hddvd_runtime *, const char *function);
 HDDVD_API int hddvd_runtime_get_diagnostic(const hddvd_runtime *, hddvd_runtime_diagnostic *);
+/* HDi host objects (docs/hdi-host-api.md). Every runtime has these globals:
+   - document: getElementById(), body, createEvent(), and each markup id as
+     a property (document.okBtn) unless the name is already a member;
+   - elements: id, core.id, localName, parentNode, firstChild, nextSibling,
+     hasChildNodes(), getAttribute(), attributes.getNamedItem(), state and
+     style;
+   - element.state: focused, enabled, actioned, pointer and value, plus
+     getProperty(), setProperty() and unsetProperty(). Values are strings
+     ("true"/"false" for flags); a value set by script is converted with
+     String(). Setting focused to "true" moves the focus there, and "false"
+     on the focused element clears it. unsetProperty() only validates the
+     name: script values stay until changed, because markup timing, which
+     would take the property back, is not modeled;
+   - element.style: a property per name the style model knows (x, y, width,
+     height, display, visibility, opacity, backgroundImage, backgroundFrame,
+     navUp, ...) plus getProperty(), setProperty(), unsetProperty() and
+     animateProperty(name, "v1;v2;...", seconds). Reads return the script's
+     value, else the markup's text, else "auto" (display), "visible"
+     (visibility), "1" (opacity) or "". unsetProperty(), or setting "",
+     returns to markup.
+     animateProperty() steps through the values over the duration on
+     hddvd_runtime_advance: numbers with the same unit (px, % or none)
+     interpolate linearly, other values switch at each keyframe;
+   - application: addEventListener(), removeEventListener(),
+     dispatchEvent(), createEvent() and createTimer(); the global functions
+     of the same names, and setMarkupLoadedHandler(), act on it too;
+   - events: type, bubbles, cancelable, target, currentTarget,
+     defaultPrevented, initEvent(), stopPropagation() and preventDefault().
+     createEvent(type) gives the event that type (discs dispatch such events
+     without initEvent). Listeners (functions, or objects with handleEvent)
+     run in the order they were added, whatever their capture flag; adding
+     one twice has no effect. A listener added during a dispatch waits for
+     the next one, and one removed during a dispatch does not run. A
+     listener that throws is recorded as an issue, with the error and where
+     it was thrown when the engine records that, and the next one runs;
+   - createTimer("HH:MM:SS:FF", clock, callback): frames count at 60000/1001
+     per second, as in playlists (unconfirmed for timers). A timer starts
+     disabled and repeats (autoReset) until autoReset is set to false;
+     setting enabled to true schedules it one interval after the current
+     time, and false cancels it. Every timer runs on the time given to
+     hddvd_runtime_advance, whatever its clock argument.
+   Player, FileIO, XMLParser, Network and the other host objects are not
+   provided yet. Markup timing (cues, events and animations declared in
+   markup) does not run.
+
+   load_markup makes `xmu` (borrowed; it must outlive the runtime or the
+   next load) the document scripts see, with the focus on its initial focus.
+   Script state and style values of the previous document are discarded and
+   element objects from it throw when used. NULL detaches the document.
+   HDDVD_EPARSE when its styles do not parse. */
+HDDVD_API int hddvd_runtime_load_markup(hddvd_runtime *, const hddvd_xmu *);
+/* Calls the handler given to setMarkupLoadedHandler(), if any. */
+HDDVD_API int hddvd_runtime_markup_loaded(hddvd_runtime *);
+/* The document's computed styles with script values applied, for
+   hddvd_scene_build with hddvd_runtime_focus; NULL with no document. Valid
+   until the next call that runs scripts, load or destroy. */
+HDDVD_API const hddvd_xmu_styles *hddvd_runtime_styles(const hddvd_runtime *);
+/* The focused markup node, or SIZE_MAX. */
+HDDVD_API size_t hddvd_runtime_focus(const hddvd_runtime *);
+/* A state or style value as scripts read it, or NULL for an unknown state
+   name or node. Borrowed until the next call that runs scripts. */
+HDDVD_API const char *hddvd_runtime_get_state(const hddvd_runtime *, size_t, const char *);
+HDDVD_API const char *hddvd_runtime_get_style(const hddvd_runtime *, size_t, const char *);
+/* Increases whenever the focus or a state or style value changes, so the
+   host knows to rebuild its scene. */
+HDDVD_API uint64_t hddvd_runtime_generation(const hddvd_runtime *);
+/* Dispatches controller_key_down (down nonzero) or controller_key_up, with
+   the code in event.key and the focused element (or the application) as
+   event.target, to application listeners. Unless a listener calls
+   preventDefault(), a compass key moves the focus to the focused element's
+   nav property in that direction, and Enter sets its state actioned to
+   "true" (key down) and back to "false" (key up); these defaults are
+   unconfirmed against a player. *prevented (when not NULL) is set when a
+   listener called preventDefault(), so the host should not act on the key
+   either. Returns HDDVD_ESCRIPT when a listener threw (see the issues), and
+   HDDVD_ELIMIT when the operation, time or heap budget ran out; the first two
+   stop the dispatch where it is, default action included. Running out of
+   recursion is an exception in the listener concerned. Budgets apply to each
+   call as a whole. */
+HDDVD_API int hddvd_runtime_key(hddvd_runtime *, uint32_t, int, int *);
+/* Moves the runtime clock forward (HDDVD_EINVAL backwards) and runs the
+   timers due by then in due order (equal times in the order they were
+   scheduled: enabled, or rescheduled after firing), then steps animations.
+   A timer fires at most once per call: a repeating timer that fell behind
+   is rescheduled one interval after the new time. Returns as
+   hddvd_runtime_key. */
+HDDVD_API int hddvd_runtime_advance(hddvd_runtime *, hddvd_time);
+/* Dispatches an event of this type, with no other fields, to application
+   listeners. Returns as hddvd_runtime_key. */
+HDDVD_API int hddvd_runtime_dispatch(hddvd_runtime *, const char *);
+/* Issues are kept in order until cleared; once 256 are held, later ones are
+   only counted. */
+HDDVD_API size_t hddvd_runtime_issue_count(const hddvd_runtime *);
+HDDVD_API int hddvd_runtime_get_issue(const hddvd_runtime *, size_t, hddvd_runtime_issue *);
+HDDVD_API size_t hddvd_runtime_issues_dropped(const hddvd_runtime *);
+HDDVD_API void hddvd_runtime_clear_issues(hddvd_runtime *);
 /* Decoders must return premultiplied RGBA8. The cache calls release exactly
    once after the last display list using a plane is closed. All objects are
    single-threaded and callbacks are made only by cache_get/build calls. */
@@ -1488,6 +1641,15 @@ HDDVD_API size_t hddvd_vti_evob_count(const hddvd_vti *);
 HDDVD_API int hddvd_vti_get_evob(const hddvd_vti *, size_t, hddvd_vti_evob *);
 /* Find the record with this EVOB number; HDDVD_ENOTFOUND if none. */
 HDDVD_API int hddvd_vti_find_evob(const hddvd_vti *, uint16_t, size_t *);
+/* The VTI's attribute records, which EVOBs name by attribute_number (record
+   index + 1): the video attributes and the audio streams of each. A VTI
+   without the table has none. Open rejects a record whose audio streams do
+   not fit in it and an EVOB naming a missing record (HDDVD_EPARSE). */
+HDDVD_API size_t hddvd_vti_attribute_count(const hddvd_vti *);
+HDDVD_API int hddvd_vti_get_video_attributes(const hddvd_vti *, size_t, hddvd_video_attributes *);
+HDDVD_API size_t hddvd_vti_audio_count(const hddvd_vti *, size_t);
+HDDVD_API int hddvd_vti_get_audio_attributes(const hddvd_vti *, size_t, size_t,
+                                             hddvd_stream_attributes *);
 /* Read a time map (MAP file). Besides the header rules above, the entry
    table must lie inside the file and hold at least one entry, and every
    entry must have a non-zero size and playback time and a first reference
@@ -1549,6 +1711,13 @@ HDDVD_API int hddvd_vts_get_vobu(const hddvd_vts *, size_t, uint32_t *sector);
 /* Convert a stored time to the 90 kHz clock: 30 frames per second at
    30000/1001 for rate code 2. Other codes return HDDVD_ENOTSUP. */
 HDDVD_API int hddvd_vts_time_to_ticks(const hddvd_vts_time *, hddvd_time *);
+/* A title set's video attributes and its audio and subpicture streams, in
+   stream number order. Open rejects more than 8 audio or 32 subpicture
+   streams (HDDVD_EPARSE). */
+HDDVD_API int hddvd_vts_get_video_attributes(const hddvd_vts *, hddvd_video_attributes *);
+HDDVD_API size_t hddvd_vts_stream_count(const hddvd_vts *, hddvd_stream_kind);
+HDDVD_API int hddvd_vts_get_stream_attributes(const hddvd_vts *, hddvd_stream_kind, size_t,
+                                              hddvd_stream_attributes *);
 /* Read the disc's title table (HVDVD-VMG100 IFO). Rules as for
    hddvd_vts_open; titles must have at least one angle and chapter, name a
    title set within the title-set count when the IFO gives one, and start

@@ -32,3 +32,28 @@ int hddvd_engine_call(hddvd_engine *engine, const char *function, hddvd_engine_r
     report->status = HDDVD_ENOTSUP;
     return HDDVD_ENOTSUP;
 }
+int hddvd_engine_install(hddvd_engine *engine, const char *source, size_t size,
+                         const char *const *names, size_t count, hddvd_engine_native_fn native,
+                         void *opaque, hddvd_engine_report *report)
+{
+    (void)engine;
+    (void)source;
+    (void)size;
+    (void)names;
+    (void)count;
+    (void)native;
+    (void)opaque;
+    report->status = HDDVD_ENOTSUP;
+    return HDDVD_ENOTSUP;
+}
+int hddvd_engine_invoke(hddvd_engine *engine, const char *entry, const hddvd_engine_value *args,
+                        size_t count, double *result, hddvd_engine_report *report)
+{
+    (void)engine;
+    (void)entry;
+    (void)args;
+    (void)count;
+    (void)result;
+    report->status = HDDVD_ENOTSUP;
+    return HDDVD_ENOTSUP;
+}

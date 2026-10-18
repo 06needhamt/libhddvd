@@ -80,6 +80,44 @@ static void add_stream(hddvd_evo_parser *p, unsigned sid, unsigned sub)
         s->packet_count = 1;
     }
 }
+/* The stream_id_extension of an extended-stream-id (0xfd) packet, from the
+   PES header extension (ISO/IEC 13818-1 amendment 2), or 0 when the header
+   does not carry one within its declared length. */
+static unsigned stream_id_extension(const unsigned char *pes, size_t header_end)
+{
+    unsigned flags = pes[7], extension;
+    size_t at = 9;
+    static const struct
+    {
+        unsigned bit;
+        size_t size;
+    } optional[] = {{0x80, 5}, {0x40, 5}, {0x20, 6}, {0x10, 3}, {0x08, 1}, {0x04, 1}, {0x02, 2}};
+    size_t i;
+    /* PTS, DTS (only after PTS), ESCR, ES rate, trick mode, copy info, CRC. */
+    for (i = 0; i < sizeof(optional) / sizeof(optional[0]); i++)
+        if (flags & optional[i].bit)
+            at += optional[i].size;
+    if (!(flags & 0x01) || at >= header_end)
+        return 0;
+    extension = pes[at++];
+    if (extension & 0x80)
+        at += 16;
+    if (extension & 0x40)
+    {
+        if (at >= header_end)
+            return 0;
+        at += 1u + pes[at];
+    }
+    if (extension & 0x20)
+        at += 2;
+    if (extension & 0x10)
+        at += 2;
+    /* PES_extension_flag_2: a length byte, then the extension id. */
+    if (!(extension & 0x01) || at + 1 >= header_end || !(pes[at] & 0x7f))
+        return 0;
+    return pes[at + 1] & 0x7fu;
+}
+
 static void consume(hddvd_evo_parser *p, size_t n)
 {
     p->size -= n;
@@ -147,8 +185,10 @@ static int parse(hddvd_evo_parser *p, int final)
                 }
                 payload = header;
             }
-            if ((sid == 0xbd || sid == 0xfd) && payload < total)
+            if (sid == 0xbd && payload < total)
                 sub = (unsigned)p->data[payload];
+            else if (sid == 0xfd && total >= 9)
+                sub = stream_id_extension(p->data, payload);
             add_stream(p, sid, sub);
         }
         consume(p, total);

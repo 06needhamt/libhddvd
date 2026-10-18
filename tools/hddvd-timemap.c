@@ -33,6 +33,26 @@ int main(int argc, char **argv)
                (double)(evob.end.ticks - evob.start.ticks) / 90000.0,
                (unsigned long)evob.sector_count, (unsigned)evob.attribute_number);
     }
+    for (i = 0; i < hddvd_vti_attribute_count(vti); i++)
+    {
+        static const char *const codings[] = {"MPEG-2", "VC-1", "unknown", "unknown"};
+        hddvd_video_attributes video;
+        size_t k;
+        hddvd_vti_get_video_attributes(vti, i, &video);
+        printf("attributes %zu video=%s (%02x%02x%02x%02x) audio=%zu", i + 1,
+               codings[video.coding & 3u], video.raw[0], video.raw[1], video.raw[2], video.raw[3],
+               hddvd_vti_audio_count(vti, i));
+        for (k = 0; k < hddvd_vti_audio_count(vti, i); k++)
+        {
+            hddvd_stream_attributes audio;
+            hddvd_vti_get_audio_attributes(vti, i, k, &audio);
+            printf(" [%s %02x%02x%02x%02x%02x%02x%02x%02x]",
+                   audio.language[0] ? audio.language : "-", audio.raw[0], audio.raw[1],
+                   audio.raw[2], audio.raw[3], audio.raw[4], audio.raw[5], audio.raw[6],
+                   audio.raw[7]);
+        }
+        printf("\n");
+    }
     for (a = 2; a < argc; a++)
     {
         hddvd_tmap *tmap = NULL;

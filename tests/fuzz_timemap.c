@@ -31,6 +31,15 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
             if (hddvd_vti_get_evob(vti, i, &evob) == HDDVD_OK && tmap)
                 (void)hddvd_tmap_check_evob(tmap, &evob);
         (void)hddvd_vti_find_evob(vti, hddvd_tmap_evob_number(tmap), &index);
+        for (i = 0; i < hddvd_vti_attribute_count(vti); i++)
+        {
+            hddvd_video_attributes video;
+            hddvd_stream_attributes audio;
+            size_t k;
+            (void)hddvd_vti_get_video_attributes(vti, i, &video);
+            for (k = 0; k < hddvd_vti_audio_count(vti, i); k++)
+                (void)hddvd_vti_get_audio_attributes(vti, i, k, &audio);
+        }
     }
     hddvd_tmap_close(tmap);
     hddvd_vti_close(vti);

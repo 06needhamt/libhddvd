@@ -119,6 +119,7 @@ set(HDDVD_SOURCES
     src/player.c
     src/resource.c
     src/runtime.c
+    src/runtime_dom.c
     src/scene.c
     src/script_decode.c
     src/stream.c
@@ -138,8 +139,22 @@ else()
     list(APPEND HDDVD_SOURCES src/script_none.c)
 endif()
 
+# The script runtime's host objects (src/hdi_prelude.js), compiled in.
+set(HDDVD_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+add_custom_command(
+    OUTPUT ${HDDVD_GENERATED_DIR}/hdi_prelude.h
+    COMMAND ${CMAKE_COMMAND} -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/src/hdi_prelude.js
+        -DOUTPUT=${HDDVD_GENERATED_DIR}/hdi_prelude.h -DNAME=hddvd_prelude
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedFile.cmake
+    DEPENDS src/hdi_prelude.js cmake/EmbedFile.cmake
+    COMMENT "Embedding hdi_prelude.js"
+    VERBATIM)
+add_custom_target(hddvd_generated DEPENDS ${HDDVD_GENERATED_DIR}/hdi_prelude.h)
+
 function(hddvd_configure_library target library_type)
     target_compile_features(${target} PUBLIC c_std_99)
+    add_dependencies(${target} hddvd_generated)
+    target_include_directories(${target} PRIVATE ${HDDVD_GENERATED_DIR})
     target_include_directories(${target} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
@@ -211,13 +226,13 @@ elseif(HDDVD_BUILD_STATIC)
     add_library(hddvd::hddvd_static ALIAS hddvd)
 endif()
 
-foreach(tool info menuinfo acainfo acaextract scriptdump scriptinfo xplinfo timemap locate vtsinfo)
+foreach(tool info menuinfo menurun acainfo acaextract scriptdump scriptinfo xplinfo timemap locate vtsinfo)
     add_executable(hddvd-${tool} tools/hddvd-${tool}.c)
     target_link_libraries(hddvd-${tool} PRIVATE hddvd)
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime vts)
+    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom vts)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         # Test assertions also perform setup and must run in Release builds.
@@ -312,6 +327,23 @@ if(BUILD_TESTING)
         COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HV001I01.IFO
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/timemap/original.vti)
     set_tests_properties(vtsinfo-wrong-evo PROPERTIES WILL_FAIL TRUE)
+    # Commands that link to a cell their PGC lacks.
+    add_test(NAME vtsinfo-bad-link
+        COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/bad-link.IFO)
+    set_tests_properties(vtsinfo-bad-link PROPERTIES WILL_FAIL TRUE)
+    # The generated application runs: both script encodings, markup, the
+    # markup loaded handler, a navigation key, a key listener and its timer.
+    if(HDDVD_SELECTED_ENGINE STREQUAL "quickjs")
+        add_test(NAME menurun-fixture
+            COMMAND hddvd-menurun ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/app/app.aca app.xmf
+                right enter wait:0.5 wait:0.6)
+        set_tests_properties(menurun-fixture PROPERTIES PASS_REGULAR_EXPRESSION
+            "handler\n  focus: one.*right\n  focus: two.*0\\.5\n  focus: two.*0\\.6\n  focus: three")
+        add_test(NAME menurun-bad-step
+            COMMAND hddvd-menurun ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/app/app.aca app.xmf
+                sideways)
+        set_tests_properties(menurun-bad-step PROPERTIES WILL_FAIL TRUE)
+    endif()
 
     # The inventory's library check must pass on the original synthetic
     # playlists before it is trusted on an external corpus.
@@ -375,7 +407,7 @@ endif()
 
 install(TARGETS
         ${hddvd_library_targets}
-        hddvd-info hddvd-menuinfo hddvd-acainfo hddvd-acaextract
+        hddvd-info hddvd-menuinfo hddvd-menurun hddvd-acainfo hddvd-acaextract
         hddvd-scriptdump hddvd-scriptinfo hddvd-xplinfo hddvd-timemap hddvd-locate hddvd-vtsinfo
     EXPORT hddvdTargets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}

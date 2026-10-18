@@ -2,6 +2,7 @@
 """Generate original deterministic HDDVDOBJ and clean-room script fixtures."""
 from pathlib import Path
 import struct
+import zlib
 
 OUT = Path(__file__).resolve().parent / "objects"
 SCRIPTS = Path(__file__).resolve().parent / "scripts"
@@ -88,11 +89,18 @@ def vti():
     record[0x108:0x118] = struct.pack(">HIIIH", 1, TMAP_START,
                                       TMAP_START + tmap_units * 3003 // 8, tmap_sectors, 1)
     table = struct.pack(">HHII", 0, 1, 8 + 4 + len(record) - 1, 12) + bytes(record)
+    # One attribute record, which the EVOB names: VC-1 video and one English
+    # audio stream.
+    attributes = bytearray(1024)
+    attributes[2:6] = bytes([0x6b, 0x10, 0xc0, 0])
+    attributes[0x0e:0x18] = struct.pack(">H", 1) + bytes([0x1c, 0x04, 0xc4, 0]) + b"en" + bytes(2)
+    attribute_table = struct.pack(">HHII", 1, 0, 0x10 + 1024 - 1, 0x10) + bytes(4) + bytes(attributes)
     head = bytearray(2048)
     head[0:12] = b"ADVANCED-VTS"
-    head[0x1c:0x20] = struct.pack(">I", 1)
+    head[0x1c:0x20] = struct.pack(">I", 2)
+    head[0xb8:0xbc] = struct.pack(">I", 2)
     head[0xbc:0xc0] = struct.pack(">I", 1)
-    return bytes(head) + sectors(table)
+    return bytes(head) + sectors(table) + sectors(attribute_table)
 
 timemaps = {"original.map": tmap(), "original.vti": vti()}
 
@@ -121,7 +129,7 @@ def std_table(count, body, count_size=2):
     head = struct.pack(">H", count) + bytes(2) + struct.pack(">I", 8 + len(body) - 1)
     return head + body
 
-def std_vts():
+def std_vts(post_command=bytes([0x30, 0x02, 0, 0, 0, 1, 0, 0])):
     cell_frames = [n * 15 for _, _, _, n in STD_CELLS]
     first = lambda c: STD_CELLS[c][2] * VOBU_SECTORS
     last_vobu = lambda c: (STD_CELLS[c][2] + STD_CELLS[c][3] - 1) * VOBU_SECTORS
@@ -132,9 +140,11 @@ def std_vts():
     pgcs = []
     for number, cells in enumerate(STD_PGCS, 1):
         commands = [bytes([0x71, 0, 0, 1, 0, 0, 0, number])] if number == 1 else []
-        post = [bytes([0x30, 0x02, 0, 0, 0, 1, 0, 0])]
+        post = [post_command]
         cell_commands = [bytes([0x30, 0x06, 0, 0, 0, 1, 0, 0])] if number == 1 else []
-        command_table = (struct.pack(">HHHH", len(commands), len(post), len(cell_commands), 0) +
+        count = len(commands) + len(post) + len(cell_commands)
+        command_table = (struct.pack(">HHHI", len(commands), len(post), len(cell_commands),
+                                     10 + 8 * count - 1) +
                          b"".join(commands + post + cell_commands))
         program_map = b"".join(struct.pack(">H", k + 1) for k in range(len(cells)))
         playback = b""
@@ -185,6 +195,11 @@ def std_vts():
     evo_sectors = vobu_count * VOBU_SECTORS
     head = bytearray(2048)
     head[0:12] = b"STANDARD-VTS"
+    # Stream attributes: MPEG-2 video, one English audio and one English
+    # subpicture stream, as on the observed disc.
+    head[0x214:0x218] = bytes([0x2b, 0x08, 0xc0, 0])
+    head[0x218:0x222] = struct.pack(">H", 1) + bytes([0x1c, 0x04, 0xd4, 0]) + b"en" + bytes([0, 0x1f])
+    head[0x25a:0x262] = struct.pack(">H", 1) + bytes([0x21, 0x08]) + b"en" + bytes(2)
     head[0x0c:0x10] = struct.pack(">I", 2 * ifo_sectors + evo_sectors - 1)
     head[0x1c:0x20] = struct.pack(">I", ifo_sectors - 1)
     head[0x20:0x22] = struct.pack(">H", 0x10)
@@ -194,8 +209,9 @@ def std_vts():
     return bytes(head) + b"".join(sectors(t) for t in tables)
 
 def std_evo():
-    """Nine VOBUs: a navigation pack, then padding packs. The navigation
-    pack's PCI packet has the observed general-information layout."""
+    """Nine VOBUs: a navigation pack, then packs holding a video, an audio and
+    a subpicture packet. The navigation pack's PCI packet has the observed
+    general-information layout."""
     out = bytearray()
     for c, (_, _, first_vobu, count) in enumerate(STD_CELLS):
         evob_start = 27000 if c != 1 else 27000 + 3 * VOBU_TICKS
@@ -218,9 +234,17 @@ def std_evo():
             pack += b"\x00\x00\x01\xbe" + struct.pack(">H", 2048 - len(pack) - 6)
             pack += b"\xff" * (2048 - len(pack))
             out += pack
-            for _ in range(VOBU_SECTORS - 1):
+            # Then a video packet, an AC-3 audio packet and a subpicture
+            # packet (private stream 1 substreams 0xc0 and 0x20).
+            for kind in range(VOBU_SECTORS - 1):
                 filler = bytearray(b"\x00\x00\x01\xba\x44\x00\x04\x00\x04\x01\x01\x89\xc3\xf8")
-                filler += b"\x00\x00\x01\xbe" + struct.pack(">H", 2048 - 14 - 6)
+                if kind == 0:
+                    filler += b"\x00\x00\x01\xe0\x00\x07\x81\x00\x00\x00\x00\x01\xb3"
+                elif kind == 1:
+                    filler += b"\x00\x00\x01\xbd\x00\x05\x81\x00\x00\xc0\x01"
+                elif kind == 2:
+                    filler += b"\x00\x00\x01\xbd\x00\x05\x81\x00\x00\x20\x00"
+                filler += b"\x00\x00\x01\xbe" + struct.pack(">H", 2048 - len(filler) - 6)
                 filler += b"\xff" * (2048 - len(filler))
                 out += filler
     return bytes(out)
@@ -237,7 +261,9 @@ def std_vmg():
     head[0xd0:0xd4] = struct.pack(">I", 2)
     return bytes(head) + sectors(std_table(2, titles)) + sectors(sets)
 
-standard = {"HV000I01.IFO": std_vmg(), "HV001I01.IFO": std_vts(), "HV001T01.EVO": std_evo()}
+standard = {"HV000I01.IFO": std_vmg(), "HV001I01.IFO": std_vts(), "HV001T01.EVO": std_evo(),
+            # LinkCN 9 in PGCs of at most two cells: valid tables, a bad target.
+            "bad-link.IFO": std_vts(post_command=bytes([0x20, 0x07, 0, 0, 0, 0, 0, 9]))}
 
 # Original scripts for tools/inventory_hdi_scripts.py, in each container the
 # tool reads: bare UTF-16 with a byte-order mark, the clear AACS envelope, and
@@ -292,6 +318,67 @@ hdi_api = {
     "menu.xmu": menu_xmu.encode("utf-8"),
 }
 
+# An HDi application in an ACA archive, for hddvd-menurun: a manifest, a bare
+# UTF-16 script, a script in a clear AACS envelope, and markup with three
+# buttons in a row. Pressing Enter on "two" starts a timer that focuses
+# "three" one second later.
+APP = Path(__file__).resolve().parent / "app"
+
+def aca(members):
+    """An HDDVDACA archive (docs/formats/aca-archive.md) with the members in
+    order, each listed with its offset, size and CRC-32."""
+    directory_size = sum(46 + len(name) for name, _ in members)
+    offset = 32 + directory_size
+    header = b"HDDVDACA" + bytes([0, 0x10, 0, 1]) + struct.pack(">H", len(members)) + b"\0\x35"
+    header += bytes(32 - len(header))
+    directory, data = b"", b""
+    for name, blob in members:
+        directory += struct.pack(">III", offset, len(blob), zlib.crc32(blob)) + bytes([0xff, len(name)])
+        directory += name.encode("ascii") + bytes(32)
+        data += blob
+        offset += len(blob)
+    return header + directory + data
+
+app_xmf = """<?xml version="1.0" encoding="UTF-8"?>
+<Application xmlns="http://www.dvdforum.org/2005/HDDVDVideo/Manifest">
+  <Region x="0" y="0" width="1920" height="1080"/>
+  <Script src="file:///dvddisc/ADV_OBJ/app.aca/lib.js"/>
+  <Script src="file:///dvddisc/ADV_OBJ/app.aca/app.js"/>
+  <Markup src="file:///dvddisc/ADV_OBJ/app.aca/app.xmu"/>
+  <Resource src="file:///dvddisc/ADV_OBJ/app.aca"/>
+</Application>
+"""
+app_lib = """function focus(id) { document.getElementById(id).state.focused = true; }
+"""
+app_js = """var timer;
+function later() { focus("three"); }
+function onKey(evt) {
+    if (evt.key == 0x0D && evt.target.core.id == "two") {
+        timer = createTimer("00:00:01:00", TIMER_APPLICATION, later);
+        timer.autoReset = false;
+        timer.enabled = true;
+    }
+}
+setMarkupLoadedHandler(function () {
+    focus("one");
+    addEventListener("controller_key_down", onKey, false);
+});
+"""
+app_xmu = """<root xmlns="http://www.dvdforum.org/2005/ihd"
+      xmlns:style="http://www.dvdforum.org/2005/ihd#style"><body>
+<button id="one" style:navRight="two"/><button id="two" style:navRight="three"/>
+<button id="three"/></body></root>
+"""
+app = {
+    "app.aca": aca([
+        ("app.xmf", app_xmf.encode("utf-8")),
+        ("lib.js", aacs(0x12, b"\xfe\xff" + app_lib.encode("utf-16-be"), "lib.js.AACS",
+                        bytes(4), bytes_5_6=0)),
+        ("app.js", b"\xfe\xff" + app_js.encode("utf-16-be")),
+        ("app.xmu", app_xmu.encode("utf-8")),
+    ]),
+}
+
 # Seeds for harnesses whose input is not a file format of its own.
 FUZZ = Path(__file__).resolve().parent / "fuzz"
 fuzz_seeds = {
@@ -308,6 +395,20 @@ fuzz_seeds = {
     "runtime/recursion.js": b"function f() { return f(); }",
     "runtime/loop.js": b"function f() { for (;;) {} }",
     "runtime/syntax.js": b"function f( {",
+    # The host objects, against fuzz_runtime.c's document.
+    "runtime/host.js": (
+        "var a = document.getElementById('a'), log = [];\n"
+        "addEventListener('controller_key_down', function (e) {\n"
+        "  log.push(e.key + e.target.core.id); a.style.x = (e.key * 2) + 'px'; }, false);\n"
+        "addEventListener('fuzz', { handleEvent: function (e) { throw e; } }, true);\n"
+        "setMarkupLoadedHandler(function () {\n"
+        "  document.b.style.animateProperty('opacity', '0;1;0.5', 0.5);\n"
+        "  var t = createTimer('00:00:00:20', TIMER_APPLICATION, function () {\n"
+        "    document.field.state.value = log.join(); a.state.focused = 'true'; });\n"
+        "  t.enabled = true; });\n"
+        "function f() { var e = createEvent('x'); e.initEvent('fuzz', true, true);\n"
+        "  dispatchEvent(e); a.style.setProperty('navRight', 'field'); return a.parentNode; }\n"
+    ).encode("utf-8"),
     "uri/disc-file.txt": b"file:///dvddisc/ADV_OBJ/menu.xmf",
     "uri/archive-member.txt": b"file:///dvddisc/ADV_OBJ/menu.aca/menu.xmu",
     "uri/traversal.txt": b"file:///dvddisc/ADV_OBJ/../../etc/passwd",
@@ -402,6 +503,10 @@ for path in STANDARD.iterdir():
     if path.is_file(): path.unlink()
 for name, data in sorted(standard.items()):
     (STANDARD / name).write_bytes(data)
+
+APP.mkdir(exist_ok=True)
+for name, data in sorted(app.items()):
+    (APP / name).write_bytes(data)
 
 for name, data in sorted(fuzz_seeds.items()):
     path = FUZZ / name

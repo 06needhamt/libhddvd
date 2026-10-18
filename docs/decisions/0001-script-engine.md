@@ -22,11 +22,18 @@ engine; libxml2 is the only required dependency).
 ## Decision
 
 QuickJS, behind an internal interface (`src/script_engine.h`) that only
-`src/runtime.c` uses. The public API (`hddvd_runtime_*`) names no engine
-type. Builds pick the backend at configure time with `HDDVD_SCRIPT_ENGINE`
-(`auto`, `quickjs`, `none`); `src/script_none.c` makes every create fail with
-`HDDVD_ENOTSUP` and leaves `HDDVD_FEATURE_SCRIPT_RUNTIME` unset. Another engine
-would be a new `src/script_<engine>.c` implementing the same five functions.
+`src/runtime.c` and `src/runtime_dom.c` use. The public API (`hddvd_runtime_*`)
+names no engine type. Builds pick the backend at configure time with
+`HDDVD_SCRIPT_ENGINE` (`auto`, `quickjs`, `none`); `src/script_none.c` makes
+every create fail with `HDDVD_ENOTSUP` and leaves
+`HDDVD_FEATURE_SCRIPT_RUNTIME` unset. Another engine would be a new
+`src/script_<engine>.c` implementing the same seven functions.
+
+The HDi host objects (P4-04) are written in JavaScript
+(`src/hdi_prelude.js`) rather than against an engine's object API, so they
+move to another engine unchanged. A backend only has to install the prelude
+with a table of native functions, passing plain values (undefined, null,
+booleans, numbers and strings), and call its entry functions.
 
 ## License and packaging
 

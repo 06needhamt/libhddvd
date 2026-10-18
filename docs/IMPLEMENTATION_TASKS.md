@@ -336,7 +336,7 @@ the backend is disabled.
 
 ### P4-04 — Implement DOM, focus, and event host objects
 
-**Status:** Ready
+**Status:** Complete
 **Depends on:** P3-03, P4-03
 **Likely files:** `src/runtime.c`, `src/runtime_dom.c`, `tests/test_runtime.c`
 
@@ -346,12 +346,38 @@ timers.  Queue host callbacks until runtime locks are released.  The members to
 cover first are the `document`, element, `application`, event and timer entries
 in `docs/hdi-host-api.md`.
 
+The host objects are JavaScript (`src/hdi_prelude.js`, embedded at build time)
+over engine-neutral natives in `src/runtime_dom.c`, reached through two new
+engine-boundary calls (`hddvd_engine_install`, `hddvd_engine_invoke`). The host
+loads markup (`hddvd_runtime_load_markup`), calls the markup loaded handler,
+sends keys, time and events (`hddvd_runtime_key`, `_advance`, `_dispatch`), and
+reads back the focus, a change counter, state and style values, issues
+(listener exceptions and style values the model cannot apply), and the
+document's computed styles with script values applied
+(`hddvd_runtime_styles`), which `hddvd_scene_build` takes as they are. The
+runtime makes no callbacks at all, so none can happen inside the engine.
+`include/hddvd.h` documents every member and model choice; choices no player
+has confirmed (key defaults, timer frame rate, animation timing) are marked
+unconfirmed there and in `docs/hdi-host-api.md`.
+
+`test_runtime_dom.c` covers lookups, state, style, listener ordering and
+removal during dispatch, exceptions, focus cycles and keys, timers (ordering,
+cancellation, one-shot, catch-up), animations, document replacement, budgets
+and replay across two runtimes. `fuzz-runtime` now runs scripts against a
+document and drives keys, time and events. `hddvd-menurun` runs a disc
+application; its CTest runs a generated ACA application. On the five ripped
+discs, all 52 applications load: every readable script evaluates except 16
+that need `PersistentStorageManager`, `XMLParser` or `Player` at load time, and
+the remaining failures are all P4-05 members (`Player`,
+`application.thisAdvancedApplication`, `moveToTop()`) or markup timing
+(`document.setXPathVariable()`).
+
 **Acceptance:** deterministic replay tests cover listener ordering, focus cycles,
 removed nodes/listeners, timer cancellation, exceptions, and budget exhaustion.
 
 ### P4-05 — Implement player and application host objects
 
-**Status:** Blocked on P4-04
+**Status:** Ready
 **Depends on:** P4-04, P6-01
 **Likely files:** `src/runtime_player.c`, `tests/test_runtime_player.c`
 
@@ -532,7 +558,7 @@ all represented in the conformance report.
 
 ### P6-03 — Decode required IFO and MAP navigation structures
 
-**Status:** Advanced Content time maps, the VTI EVOB table and Standard Content IFO tables decoded and verified against real discs; the VTI attribute table and Standard Content stream attributes, menus and command semantics remain
+**Status:** Advanced Content time maps, the VTI EVOB and attribute tables, and Standard Content IFO tables, command encoding and stream attributes decoded and verified against real discs; Standard Content menus, executing commands and the remaining attribute bits remain
 **Depends on:** P1-01, P6-02
 **Likely files:** `src/ifo.c`, `src/map.c`, `tests/test_ifo.c`, `tests/test_map.c`
 
@@ -581,8 +607,30 @@ open, and `hddvd-vtsinfo` verifies one title set against its complete EVO:
 navigation packs, cell durations and every time-map entry. `test_vts.c` covers
 an original synthetic disc and every rejection, `fuzz-vts` both readers.
 
-Still open: Standard Content IFO tables, the VTI attribute table, angle or
-interleaved maps, and the clock for time bases other than 60fps.
+Fifth slice: commands and stream attributes.
+- **Command table fix:** the command table header is 10 bytes (three counts and
+  a 4-byte end offset), not 8, which the fourth slice had wrong. Every command
+  read through it was shifted by 2 bytes. All 101 tables on the disc agree,
+  and open now checks the end offset.
+- **Command encoding:** the 785 commands follow DVD-Video's encoding.
+  `hddvd-vtsinfo` prints them in that syntax and checks every target: link
+  cells, programs and chapters, jump titles and chapters, and goto lines.
+  None is invalid. Register 63 is used, so HD DVD has at least 64 general
+  registers. One form (jump subset 8, 212 commands) does not fit DVD's
+  `CallSS` and is reported as unconfirmed.
+- **Stream attributes:** `hddvd_vts_get_video_attributes` and
+  `hddvd_vts_get_stream_attributes` return a title set's video coding and its
+  audio and subpicture languages, plus every record as stored.
+  `hddvd_vti_get_video_attributes` and `hddvd_vti_get_audio_attributes` do the
+  same for VTI attribute records. Two discs show that the coding bits
+  distinguish MPEG-2 from VC-1, and that the counts match the EVOs that have
+  no audio or subpictures. `hddvd-vtsinfo` checks the coding and the counts
+  against a title EVO's streams. Synthetic fixtures, mutations in `test_vts.c`
+  and `test_ifo.c`, and both fuzzers cover the new fields.
+
+Still open: Standard Content menus and a command VM, audio coding bits (no EVO
+with audio is available), angle or interleaved maps, and the clock for time
+bases other than 60fps.
 
 ### P6-04 — Harden EVO packet and stream metadata parsing
 
@@ -597,6 +645,14 @@ VLC without decoding elementary streams.
 **Acceptance:** every split position for representative headers is tested;
 truncation and oversized lengths fail safely; packet counters do not double-count
 overlap bytes.
+
+Follow-up (October 2026): extended-stream-id (`0xfd`) packets now take their
+stream from the PES header extension's `stream_id_extension`, not the first
+payload byte. On `FBILogo.EVO` that turns dozens of spurious streams into its
+one VC-1 stream (`0x55`). That EVO is AACS-scrambled, and 23 of its packs
+end with bytes no packet covers. The parser skips them, but the file's last
+pack is one of them, so `finish()` still reports `HDDVD_EPARSE`. What those
+bytes are cannot be told without decryption.
 
 ### P6-05 — Add the deterministic navigation scheduler
 

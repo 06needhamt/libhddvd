@@ -26,7 +26,21 @@
 #define CELL_POSITION 4u
 #define CELL_ADDRESS 12u
 #define COMMAND 8u
+/* Pre, post and cell counts, then the table's last byte (4 bytes). */
+#define COMMAND_HEADER 10u
 #define VMG_TITLE 16u
+/* Stream attributes in the first sector: video, then the audio count and
+   8 audio records, then the subpicture count and 32 records (6 bytes each,
+   as in DVD-Video; only one has been seen). */
+#define VTS_VIDEO_ATTRIBUTES 0x214u
+#define VTS_AUDIO_COUNT 0x218u
+#define VTS_AUDIO_RECORDS 0x21au
+#define AUDIO_RECORD 8u
+#define MAX_AUDIO 8u
+#define VTS_SUBPICTURE_COUNT 0x25au
+#define VTS_SUBPICTURE_RECORDS 0x25cu
+#define SUBPICTURE_RECORD 6u
+#define MAX_SUBPICTURES 32u
 
 typedef struct vts_pgc
 {
@@ -54,6 +68,10 @@ struct hddvd_vts
     hddvd_vts_evob_cell *evob_cells;
     size_t vobu_count;
     uint32_t *vobus;
+    hddvd_video_attributes video;
+    size_t stream_count[2];
+    hddvd_stream_attributes audio[MAX_AUDIO];
+    hddvd_stream_attributes subpictures[MAX_SUBPICTURES];
 };
 
 struct hddvd_vmg
@@ -319,21 +337,23 @@ static int parse_pgc(const ifo *f, const table *t, size_t offset, hddvd_vts *vts
     positions_at = offset + be16(h + PGC_TABLE_OFFSETS + 6);
     if (be16(h + PGC_TABLE_OFFSETS))
     {
-        if (!fits(t, commands_at, TABLE_HEADER))
+        if (!fits(t, commands_at, COMMAND_HEADER))
             return HDDVD_EPARSE;
         pgc->info.pre_command_count = be16(at(f, t, commands_at));
         pgc->info.post_command_count = be16(at(f, t, commands_at + 2));
         pgc->info.cell_command_count = be16(at(f, t, commands_at + 4));
         total = (size_t)pgc->info.pre_command_count + pgc->info.post_command_count +
                 pgc->info.cell_command_count;
-        if (!fits(t, commands_at + TABLE_HEADER, total * COMMAND))
+        /* The end address must agree with the counts. */
+        if (!fits(t, commands_at + COMMAND_HEADER, total * COMMAND) ||
+            be32(at(f, t, commands_at + 6)) != COMMAND_HEADER + total * COMMAND - 1)
             return HDDVD_EPARSE;
         if (total)
         {
             pgc->commands = malloc(total * COMMAND);
             if (!pgc->commands)
                 return HDDVD_ENOMEM;
-            memcpy(pgc->commands, at(f, t, commands_at + TABLE_HEADER), total * COMMAND);
+            memcpy(pgc->commands, at(f, t, commands_at + COMMAND_HEADER), total * COMMAND);
         }
     }
     if (!pgc->info.cell_count)
@@ -498,6 +518,24 @@ static int parse_time_maps(const ifo *f, hddvd_vts *vts)
     return HDDVD_OK;
 }
 
+static int parse_attributes(const ifo *f, hddvd_vts *vts)
+{
+    size_t i;
+    hddvd_decode_video_attributes(f->data + VTS_VIDEO_ATTRIBUTES, &vts->video);
+    vts->stream_count[HDDVD_STREAM_AUDIO] = be16(f->data + VTS_AUDIO_COUNT);
+    vts->stream_count[HDDVD_STREAM_SUBPICTURE] = be16(f->data + VTS_SUBPICTURE_COUNT);
+    if (vts->stream_count[HDDVD_STREAM_AUDIO] > MAX_AUDIO ||
+        vts->stream_count[HDDVD_STREAM_SUBPICTURE] > MAX_SUBPICTURES)
+        return HDDVD_EPARSE;
+    for (i = 0; i < vts->stream_count[HDDVD_STREAM_AUDIO]; i++)
+        hddvd_decode_stream_attributes(f->data + VTS_AUDIO_RECORDS + i * AUDIO_RECORD, AUDIO_RECORD,
+                                       4, &vts->audio[i]);
+    for (i = 0; i < vts->stream_count[HDDVD_STREAM_SUBPICTURE]; i++)
+        hddvd_decode_stream_attributes(f->data + VTS_SUBPICTURE_RECORDS + i * SUBPICTURE_RECORD,
+                                       SUBPICTURE_RECORD, 2, &vts->subpictures[i]);
+    return HDDVD_OK;
+}
+
 int hddvd_vts_open_with_config(hddvd_stream *stream, const hddvd_config_limits *config,
                                hddvd_vts **out)
 {
@@ -523,6 +561,8 @@ int hddvd_vts_open_with_config(hddvd_stream *stream, const hddvd_config_limits *
     vts->info.menu_evo_sector = be32(f.data + VTS_MENU_EVO);
     vts->info.title_evo_sector = be32(f.data + VTS_TITLE_EVO);
     rc = vts->info.title_evo_sector < vts->info.ifo_sectors ? HDDVD_EPARSE : HDDVD_OK;
+    if (!rc)
+        rc = parse_attributes(&f, vts);
     if (!rc)
         rc = parse_vobu_map(&f, vts);
     if (!rc)
@@ -790,5 +830,29 @@ int hddvd_vmg_get_title(const hddvd_vmg *vmg, size_t index, hddvd_vmg_title *out
     if (!vmg || !out || index >= vmg->title_count)
         return HDDVD_EINVAL;
     *out = vmg->titles[index];
+    return HDDVD_OK;
+}
+
+int hddvd_vts_get_video_attributes(const hddvd_vts *vts, hddvd_video_attributes *out)
+{
+    if (!vts || !out)
+        return HDDVD_EINVAL;
+    *out = vts->video;
+    return HDDVD_OK;
+}
+
+size_t hddvd_vts_stream_count(const hddvd_vts *vts, hddvd_stream_kind kind)
+{
+    return vts && (kind == HDDVD_STREAM_AUDIO || kind == HDDVD_STREAM_SUBPICTURE)
+               ? vts->stream_count[kind]
+               : 0;
+}
+
+int hddvd_vts_get_stream_attributes(const hddvd_vts *vts, hddvd_stream_kind kind, size_t index,
+                                    hddvd_stream_attributes *out)
+{
+    if (!vts || !out || index >= hddvd_vts_stream_count(vts, kind))
+        return HDDVD_EINVAL;
+    *out = kind == HDDVD_STREAM_AUDIO ? vts->audio[index] : vts->subpictures[index];
     return HDDVD_OK;
 }

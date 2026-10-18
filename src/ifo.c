@@ -81,3 +81,23 @@ int hddvd_ifo_read_header(hddvd_stream *stream, hddvd_ifo_header *header)
     header->size = size;
     return HDDVD_OK;
 }
+
+void hddvd_decode_video_attributes(const unsigned char *raw, hddvd_video_attributes *out)
+{
+    memset(out, 0, sizeof(*out));
+    memcpy(out->raw, raw, sizeof(out->raw));
+    out->coding = raw[0] >> 6;
+}
+
+void hddvd_decode_stream_attributes(const unsigned char *raw, size_t size, size_t language_at,
+                                    hddvd_stream_attributes *out)
+{
+    memset(out, 0, sizeof(*out));
+    memcpy(out->raw, raw, size < sizeof(out->raw) ? size : sizeof(out->raw));
+    if (raw[language_at] >= 'a' && raw[language_at] <= 'z' && raw[language_at + 1] >= 'a' &&
+        raw[language_at + 1] <= 'z')
+    {
+        out->language[0] = (char)raw[language_at];
+        out->language[1] = (char)raw[language_at + 1];
+    }
+}
