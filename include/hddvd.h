@@ -1271,13 +1271,12 @@ HDDVD_API int hddvd_runtime_get_diagnostic(const hddvd_runtime *, hddvd_runtime_
    - events: type, bubbles, cancelable, target, currentTarget,
      defaultPrevented, initEvent(), stopPropagation() and preventDefault().
      createEvent(type) gives the event that type (discs dispatch such events
-     without initEvent);
-     Listeners (functions, or objects with handleEvent) run in the order
-     they were added, whatever their capture flag; adding one twice has no
-     effect. A listener added during a dispatch waits for the next one, and
-     one removed during a dispatch does not run. A listener that throws is
-     recorded as an issue, with the error and where it was thrown when the
-     engine records that, and the next one runs;
+     without initEvent). Listeners (functions, or objects with handleEvent)
+     run in the order they were added, whatever their capture flag; adding
+     one twice has no effect. A listener added during a dispatch waits for
+     the next one, and one removed during a dispatch does not run. A
+     listener that throws is recorded as an issue, with the error and where
+     it was thrown when the engine records that, and the next one runs;
    - createTimer("HH:MM:SS:FF", clock, callback): frames count at 60000/1001
      per second, as in playlists (unconfirmed for timers). A timer starts
      disabled and repeats (autoReset) until autoReset is set to false;
@@ -1325,9 +1324,10 @@ HDDVD_API uint64_t hddvd_runtime_generation(const hddvd_runtime *);
 HDDVD_API int hddvd_runtime_key(hddvd_runtime *, uint32_t, int, int *);
 /* Moves the runtime clock forward (HDDVD_EINVAL backwards) and runs the
    timers due by then in due order (equal times in the order they were
-   enabled), then steps animations. A timer fires at most once per call: a
-   repeating timer that fell behind is rescheduled one interval after the
-   new time. Returns as hddvd_runtime_key. */
+   scheduled: enabled, or rescheduled after firing), then steps animations.
+   A timer fires at most once per call: a repeating timer that fell behind
+   is rescheduled one interval after the new time. Returns as
+   hddvd_runtime_key. */
 HDDVD_API int hddvd_runtime_advance(hddvd_runtime *, hddvd_time);
 /* Dispatches an event of this type, with no other fields, to application
    listeners. Returns as hddvd_runtime_key. */
