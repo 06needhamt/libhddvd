@@ -129,7 +129,7 @@ static void arguments(void)
                 "expect(document.body === null, 'no body');"
                 "expect(typeof application.createTimer === 'function', 'createTimer');"
                 "expect(typeof TIMER_APPLICATION === 'number', 'TIMER_APPLICATION');"
-                "expect(typeof Player === 'undefined', 'no Player yet');");
+                "expect(typeof Player === 'object', 'Player');");
     assert(hddvd_runtime_markup_loaded(runtime) == HDDVD_OK);
     assert(hddvd_runtime_load_markup(runtime, NULL) == HDDVD_OK);
     hddvd_runtime_destroy(runtime);

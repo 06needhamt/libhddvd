@@ -120,6 +120,7 @@ set(HDDVD_SOURCES
     src/resource.c
     src/runtime.c
     src/runtime_dom.c
+    src/runtime_player.c
     src/scene.c
     src/script_decode.c
     src/stream.c
@@ -232,7 +233,7 @@ foreach(tool info menuinfo menurun acainfo acaextract scriptdump scriptinfo xpli
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom vts)
+    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom runtime_player vts)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         # Test assertions also perform setup and must run in Release builds.
@@ -339,6 +340,13 @@ if(BUILD_TESTING)
                 right enter wait:0.5 wait:0.6)
         set_tests_properties(menurun-fixture PROPERTIES PASS_REGULAR_EXPRESSION
             "handler\n  focus: one.*right\n  focus: two.*0\\.5\n  focus: two.*0\\.6\n  focus: three")
+        # With the playlist: the application's title and a player command.
+        add_test(NAME menurun-playlist
+            COMMAND hddvd-menurun --playlist ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/app/app.xpl
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/app/app.aca app.xmf
+                right enter wait:1.1 enter)
+        set_tests_properties(menurun-playlist PROPERTIES PASS_REGULAR_EXPRESSION
+            "title 1, application 1 of 1.*focus: three.*command: jump title=Feature time=00:00:01:00")
         add_test(NAME menurun-bad-step
             COMMAND hddvd-menurun ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/app/app.aca app.xmf
                 sideways)

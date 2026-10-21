@@ -158,15 +158,31 @@
 
     /* "HH:MM:SS:FF", with frames at 60000/1001 per second as in playlists
        (unconfirmed for timers). */
-    function parseTimecode(text) {
+    function timecodeTicks(text, who) {
         var m = /^(\d+):(\d\d):(\d\d):(\d\d)$/.exec(String(text)), frames, ticks;
         if (!m || +m[2] > 59 || +m[3] > 59 || +m[4] > 59)
-            throw new RangeError('createTimer needs a time as HH:MM:SS:FF');
+            throw new RangeError(who + ' needs a time as HH:MM:SS:FF');
         frames = ((+m[1] * 60 + +m[2]) * 60 + +m[3]) * 60 + +m[4];
         ticks = Math.floor(frames * 3003 / 2);
-        if (!(ticks > 0) || ticks > 9007199254740991)
+        if (ticks > 9007199254740991)
+            throw new RangeError(who + ' needs a smaller time');
+        return ticks;
+    }
+
+    function parseTimecode(text) {
+        var ticks = timecodeTicks(text, 'createTimer');
+        if (!(ticks > 0))
             throw new RangeError('createTimer needs a time above zero');
         return ticks;
+    }
+
+    function formatTimecode(ticks) {
+        var frames = Math.floor(ticks * 2 / 3003), parts, i, out = '';
+        parts = [Math.floor(frames / 216000), Math.floor(frames / 3600) % 60,
+                 Math.floor(frames / 60) % 60, frames % 60];
+        for (i = 0; i < 4; i++)
+            out += (i ? ':' : '') + (parts[i] < 10 ? '0' : '') + parts[i];
+        return out;
     }
 
     function setEnabled(record, enabled) {
@@ -458,6 +474,262 @@
     /* Its value is unconfirmed; createTimer ignores the clock argument. */
     global.TIMER_APPLICATION = 1;
 
+    /* Player and application lifecycle (runtime_player.c). Calls that
+       change playback queue commands for the host; reads return what the
+       host last reported. */
+
+    var COMMAND = {play: 0, pause: 1, jump: 2, audio: 3, subtitle: 4, audioLanguage: 5,
+                   subtitleLanguage: 6, subtitleVisible: 7, activate: 8, inactivate: 9,
+                   toTop: 10, toBottom: 11};
+    var titles = [];
+    var parameters = {};
+
+    function unsupported(name) {
+        return function () {
+            throw new Error(name + ' is not supported');
+        };
+    }
+
+    /* File, XML, network and storage access is denied. */
+    function denied(name) {
+        return function () {
+            throw new Error(name + ' is not available: file and network access are denied');
+        };
+    }
+
+    function stub(name, constants, methods) {
+        var object = {}, key, i;
+        for (key in constants)
+            if (constants.hasOwnProperty(key))
+                object[key] = constants[key];
+        for (i = 0; i < methods.length; i++)
+            object[methods[i]] = denied(name + '.' + methods[i]);
+        return object;
+    }
+
+    function currentPlaylist(object) {
+        if (object._epoch !== native.player(8))
+            throw new Error('the title is no longer in the playlist');
+    }
+
+    function Chapter(epoch, title, index) {
+        hidden(this, '_epoch', epoch);
+        hidden(this, '_title', title);
+        hidden(this, '_index', index);
+    }
+    Chapter.prototype.jump = function (time) {
+        var begin;
+        currentPlaylist(this);
+        begin = native.chapter(this._epoch, this._title, this._index);
+        if (begin < 0)
+            throw new Error('the chapter\'s time base is not supported');
+        native.command(COMMAND.jump, this._title, begin + timecodeTicks(time, 'jump'));
+    };
+    Object.defineProperty(Chapter.prototype, 'number', {
+        get: function () { return this._index + 1; }
+    });
+
+    function TitleAttributes(epoch, index) {
+        hidden(this, '_epoch', epoch);
+        hidden(this, '_index', index);
+    }
+    Object.defineProperties(TitleAttributes.prototype, {
+        id: {enumerable: true, get: function () { return native.title(this._epoch, this._index, 0); }},
+        titleNumber: {enumerable: true, get: function () { return this._index + 1; }},
+        titleDuration: {enumerable: true, get: function () {
+            var ticks = native.title(this._epoch, this._index, 1);
+            return ticks < 0 ? null : formatTimecode(ticks);
+        }}
+    });
+
+    function Title(epoch, index) {
+        var chapters = [], count = native.title(epoch, index, 2), i;
+        for (i = 0; i < count; i++)
+            chapters[i] = new Chapter(epoch, index, i);
+        hidden(this, '_epoch', epoch);
+        hidden(this, '_index', index);
+        hidden(this, 'attributes', new TitleAttributes(epoch, index));
+        hidden(this, 'chapters', chapters);
+    }
+    /* The second argument is accepted and ignored (its meaning is unknown). */
+    Title.prototype.jump = function (time) {
+        currentPlaylist(this);
+        native.command(COMMAND.jump, this._index, timecodeTicks(time, 'jump'));
+    };
+    /* The reported title time, on the current title only. */
+    Object.defineProperty(Title.prototype, 'elapsedTime', {
+        get: function () {
+            return this._epoch === native.player(8) && native.player(0) === this._index
+                ? formatTimecode(native.player(1)) : null;
+        }
+    });
+
+    function trackLanguage(kind, number) {
+        var title = native.player(0);
+        return title < 0 || !number ? null
+            : native.trackLanguage(native.player(8), title, kind, number);
+    }
+
+    var playlist = {
+        PLAYSTATE_STOP: 0,
+        PLAYSTATE_PLAY: 1,
+        PLAYSTATE_PAUSE: 2,
+        play: function () { native.command(COMMAND.play); },
+        pause: function () { native.command(COMMAND.pause); }
+    };
+    Object.defineProperties(playlist, {
+        titles: {enumerable: true, get: function () { return titles; }},
+        currentTitle: {enumerable: true, get: function () {
+            var title = native.player(0);
+            return title < 0 ? null : titles[title];
+        }},
+        currentChapter: {enumerable: true, get: function () {
+            return {number: native.player(2)};
+        }},
+        playState: {enumerable: true, get: function () { return native.player(3); }}
+    });
+
+    var track = {
+        selectAudioTrackNumber: function (n) { native.command(COMMAND.audio, Number(n)); },
+        selectSubtitleTrackNumber: function (n) { native.command(COMMAND.subtitle, Number(n)); },
+        selectAudioLanguage: function (code) {
+            native.command(COMMAND.audioLanguage, String(code));
+        },
+        selectSubtitleLanguage: function (code) {
+            native.command(COMMAND.subtitleLanguage, String(code));
+        }
+    };
+    Object.defineProperties(track, {
+        currentAudioTrackNumber: {enumerable: true, get: function () { return native.player(4); }},
+        currentSubtitleTrackNumber: {enumerable: true,
+                                     get: function () { return native.player(5); }},
+        selectedAudioTrackNumber: {enumerable: true, get: function () { return native.player(4); }},
+        selectedSubtitleTrackNumber: {enumerable: true,
+                                      get: function () { return native.player(5); }},
+        selectedAudioLanguageCode: {enumerable: true,
+                                    get: function () { return trackLanguage(0, native.player(4)); }},
+        selectedSubtitleLanguageCode: {enumerable: true, get: function () {
+            return trackLanguage(1, native.player(5));
+        }}
+    });
+
+    var subtitle = {};
+    Object.defineProperty(subtitle, 'visible', {
+        enumerable: true,
+        get: function () { return native.player(6); },
+        set: function (value) { native.command(COMMAND.subtitleVisible, !!value); }
+    });
+
+    /* Names are kept with a prefix, so no name reaches Object.prototype. */
+    var generalParameters = {
+        getValue: function (name) {
+            var key = '$' + String(name);
+            return parameters.hasOwnProperty(key) ? parameters[key] : null;
+        },
+        setValue: function (name, value) {
+            var key = '$' + String(name);
+            if (value === undefined || value === null)
+                delete parameters[key];
+            else
+                parameters[key] = value;
+        }
+    };
+
+    function audioOutput(name) {
+        return {setVolumes: unsupported(name + '.setVolumes'),
+                setMixing: unsupported(name + '.setMixing')};
+    }
+    var effect = audioOutput('Player.audio.effect');
+    effect.play = unsupported('Player.audio.effect.play');
+    effect.stop = unsupported('Player.audio.effect.stop');
+
+    var Player = {
+        playlist: playlist,
+        track: track,
+        subtitle: subtitle,
+        generalParameters: generalParameters,
+        capabilities: {network: {connected: false}},
+        audio: {main: audioOutput('Player.audio.main'), sub: audioOutput('Player.audio.sub'),
+                effect: effect},
+        video: {main: {changeLayout: unsupported('Player.video.main.changeLayout')},
+                sub: {changeLayout: unsupported('Player.video.sub.changeLayout')}},
+        createVideoScale: unsupported('Player.createVideoScale'),
+        standardContentPlayer: {getSPRM: unsupported('Player.standardContentPlayer.getSPRM')},
+        /* Placeholder values. */
+        FINISHED: 0,
+        FILE_NOT_FOUND: 1,
+        WRONG_FORMAT: 2
+    };
+    Object.defineProperty(Player, 'menuLanguage', {
+        enumerable: true,
+        get: function () { return native.player(7); }
+    });
+    global.Player = Player;
+
+    /* Markup timing, which these drive, is not modeled. */
+    document.setXPathVariable = unsupported('document.setXPathVariable');
+    document.getProperties = unsupported('document.getProperties');
+
+    global.Diagnostics = {
+        TRACE_LEVEL_ERROR: 0,
+        TRACE_LEVEL_WARNING: 1,
+        TRACE_LEVEL_INFO: 2,
+        trace: function (message) { native.issue(4, String(message)); }
+    };
+
+    /* Constants have placeholder values: the stubs never return them. */
+    global.FileIO = stub('FileIO', {SUCCEEDED: 0, FAILED: 1, FILE_NOT_FOUND: 2},
+                         ['openTextFile', 'getFiles', 'getDirectoryInfo', 'createDirectory',
+                          'copy', 'move', 'remove']);
+    global.XMLParser = stub('XMLParser', {OK: 0, READY: 1, PARSING_ERR: 2, UTF8: 0, UTF16: 1},
+                            ['parse', 'parseString', 'write', 'status']);
+    global.Network = stub('Network', {HTTP_GET: 0, HTTP_POST: 1}, ['createHTTPClient']);
+    global.PersistentStorageManager = stub('PersistentStorageManager', {contentId: ''},
+                                           ['getPersistentStorageDevices',
+                                            'callManagementMenu']);
+    global.PersistentStorageDevice = {SUCCEEDED: 0, STORAGE_REQUIRED: 1};
+    global.Node = {ELEMENT_NODE: 1, TEXT_NODE: 3};
+
+    /* Applications, in the z-order the host reports. */
+    function Application(index) {
+        hidden(this, '_index', index);
+    }
+    Object.defineProperties(Application.prototype, {
+        id: {enumerable: true, get: function () { return native.application(this._index); }},
+        zOrder: {enumerable: true, get: function () { return this._index; }}
+    });
+    Application.prototype.activate = function () {
+        native.command(COMMAND.activate, this._index);
+    };
+    Application.prototype.inactivate = function () {
+        native.command(COMMAND.inactivate, this._index);
+    };
+
+    function self() {
+        var index = native.application(-2);
+        if (index < 0)
+            throw new Error('the host has not said which application this is');
+        return index;
+    }
+    application.moveToTop = function () { native.command(COMMAND.toTop, self()); };
+    application.moveToBottom = function () { native.command(COMMAND.toBottom, self()); };
+    Object.defineProperties(application, {
+        advancedApplications: {enumerable: true, get: function () {
+            var list = [], count = native.application(-1), i;
+            for (i = 0; i < count; i++)
+                list[i] = new Application(i);
+            return list;
+        }},
+        thisAdvancedApplication: {enumerable: true, get: function () {
+            var index = native.application(-2);
+            return index < 0 ? null : new Application(index);
+        }},
+        attributes: {enumerable: true, get: function () {
+            var index = native.application(-2);
+            return {id: index < 0 ? null : native.application(index)};
+        }}
+    });
+
     /* Entries for the runtime */
 
     /* Compass keys by nav direction: left, right, up, down, then the
@@ -530,9 +802,21 @@
             runTimers();
             stepAnimations();
         },
+        playlistChanged: function () {
+            var epoch = native.player(8), count = native.titleCount(), i, id;
+            titles = [];
+            for (i = 0; epoch && i < count; i++) {
+                titles[i] = new Title(epoch, i);
+                id = native.title(epoch, i, 0);
+                if (id !== null && !(id in titles))
+                    Object.defineProperty(titles, id, {value: titles[i]});
+            }
+        },
         dispatch: function (type) {
-            var event = new Event();
+            var event = new Event(), count = native.field(-1), i;
             event.initEvent(type, false, false);
+            for (i = 0; i < count; i++)
+                event[native.field(i, 0)] = native.field(i, 1);
             deliver(event);
         }
     };

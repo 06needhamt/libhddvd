@@ -377,7 +377,7 @@ removed nodes/listeners, timer cancellation, exceptions, and budget exhaustion.
 
 ### P4-05 — Implement player and application host objects
 
-**Status:** Ready
+**Status:** Complete
 **Depends on:** P4-04, P6-01
 **Likely files:** `src/runtime_player.c`, `tests/test_runtime_player.c`
 
@@ -390,6 +390,43 @@ filesystem, and process access by default.  `docs/hdi-host-api.md` lists the
 **Acceptance:** the runtime emits typed commands and consumes acknowledgements;
 unsupported calls are visible errors rather than no-ops; no callback occurs while
 an internal lock is held.
+
+The host-operations table took the polling form P4-04 set up, so there are no
+callbacks at all.
+- **Host input:** the host loads the playlist (`hddvd_runtime_load_playlist`)
+  and reports the player state (`hddvd_runtime_set_player`: title, title time,
+  chapter, play state, tracks, subtitle visibility, menu language). It also
+  reports the running applications in z-order (`hddvd_runtime_set_applications`)
+  and dispatches player events with string fields
+  (`hddvd_runtime_dispatch_fields`).
+- **Script objects:** scripts get `Player.playlist` (titles by index and id,
+  chapters, the current title and its elapsed time, play state), `Player.track`,
+  `Player.subtitle`, `Player.generalParameters`, `Diagnostics.trace`, and
+  `application`'s lifecycle members.
+- **Commands:** calls that change playback queue typed commands
+  (`hddvd_runtime_command`: play, pause, jump, track and language selection,
+  subtitle visibility, application activation and stacking). They are bounded
+  at 64 waiting and 64 unacknowledged, and the host takes and acknowledges
+  each. Jumps are checked against the playlist, including the title's
+  duration. Rejected and failed commands become issues.
+- **Unsupported and denied members:** members a player has but this runtime
+  cannot honor throw an Error naming the member. These are audio mixing and
+  effects, video layout, `getSPRM`, `document.setXPathVariable`, and every
+  member of `FileIO`, `XMLParser`, `Network` and `PersistentStorageManager`,
+  whose file and network access is denied. Their constants exist so scripts
+  load.
+- **Tests:** `test_runtime_player.c` covers titles, chapters and stale title
+  objects, the player state, every command type, the queue limits,
+  acknowledgements, applications, parameters, the stubs, traces and events with
+  fields. `fuzz-runtime` loads a playlist, reports state and acknowledges
+  commands.
+- **`hddvd-menurun`:** given a playlist, it finds the title that runs the
+  application and reports it, prints and accepts commands, and a CTest checks
+  a jump.
+- **Disc results:** on the five discs, the remaining failures are all of three
+  kinds: markup timing (`setXPathVariable`), denied XML and storage access,
+  and unsupported audio mixing. The only exceptions are scripts that read a
+  title or bookmark the host never reported.
 
 ### P4-06 — Reach reference-script conformance
 
@@ -656,7 +693,7 @@ bytes are cannot be told without decryption.
 
 ### P6-05 — Add the deterministic navigation scheduler
 
-**Status:** Scheduler complete; script-task integration blocked on P4-05
+**Status:** Scheduler complete; script-task integration ready
 **Depends on:** P4-05, P6-01, P6-02
 **Likely files:** `src/player.c`, `tests/test_player.c`
 
@@ -669,7 +706,7 @@ direction and stream discontinuities without reordering queued events,
 `HDDVD_EVENT_RATE_CHANGE` reports rate changes, and
 `hddvd_nav_cancel_all_timers` discards a closed menu's timers. Fake-clock tests
 in `test_player.c` cover every case in the acceptance criteria. Queuing script
-tasks waits for the runtime (P4-05).
+tasks can now use the runtime's commands and entry points (P4-05).
 
 **Acceptance:** fake-clock tests prove stable ordering and timer behavior across
 pause, seek, rate change, discontinuity, title end, menu close, and reopen.
