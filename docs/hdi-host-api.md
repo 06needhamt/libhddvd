@@ -107,15 +107,28 @@ by markup or scripts in archives that were not ripped, or by nothing at all.
 
 ## What the runtime provides
 
-`hddvd_runtime` (P4-04) provides `document`, elements with `state` and
-`style`, `application` listeners and dispatch, events, `createTimer()` and
-`animateProperty()`, plus the global functions of the same names and
-`setMarkupLoadedHandler()`. `include/hddvd.h` documents each member.
-`src/hdi_prelude.js` implements them over natives in `src/runtime_dom.c`.
-`Player`, `FileIO`, `XMLParser`, `Network`, `PersistentStorageManager`,
-`Diagnostics` and the application lifecycle members are P4-05. Markup timing
-(cues, `<event>` elements, markup animations and `setXPathVariable()`) is
-not modeled.
+`hddvd_runtime` provides:
+- **P4-04:** `document`, elements with `state` and `style`, `application`
+  listeners and dispatch, events, `createTimer()` and `animateProperty()`, plus
+  the global functions of the same names and `setMarkupLoadedHandler()`.
+- **P4-05:** `Player.playlist`, `Player.track`, `Player.subtitle`,
+  `Player.generalParameters`, `Player.menuLanguage`, `Diagnostics.trace()` and
+  `application`'s lifecycle members.
+
+`include/hddvd.h` documents each member. `src/hdi_prelude.js` implements them
+over natives in `src/runtime_dom.c` and `src/runtime_player.c`.
+
+- **Player state:** scripts read what the host last reported.
+- **Commands:** calls that change playback become typed commands the host takes
+  and acknowledges.
+- **Denied:** `FileIO`, `XMLParser`, `Network` and `PersistentStorageManager`
+  have their constants, but every method throws, since file and network access
+  is denied.
+- **Unsupported:** audio mixing and effects, video layout, `getSPRM` and the
+  markup-timing calls throw an error naming the member.
+
+Markup timing (cues, `<event>` elements, markup animations and
+`setXPathVariable()`) is not modeled.
 
 ### Model choices to confirm against a player
 
@@ -136,13 +149,20 @@ not modeled.
   - `enabled` defaults to `"true"`.
 - **Initial style values:** `"auto"` for display, `"visible"` for
   visibility, `"1"` for opacity, and `""` otherwise.
+- **Player constants:** the values of `PLAYSTATE_STOP`/`PLAY`/`PAUSE`
+  (0, 1, 2), `Player.FINISHED` and the stubs' status constants are
+  placeholders. Scripts compare against the names, so only distinctness
+  matters, but a host that passes values through must use these.
+- **Jumps:** a chapter's `jump(time)` jumps to the chapter's start plus
+  `time`. The second argument of `jump()` (always `false` on disc) is
+  ignored.
+- **General parameters:** these live in the runtime and do not persist. A
+  missing name reads as `null`, which is what scripts test for.
 
 ### Found by running disc applications
 
-`hddvd-menurun` ran all 52 applications in the five discs' archives, with a
-throwaway local stand-in for `Player` (kept outside the repository). Every
-readable script evaluates, except 16 that need `PersistentStorageManager`,
-`XMLParser` or a `Player` member at load time. The runs showed these
+`hddvd-menurun` first ran all 52 applications in the five discs' archives
+with a throwaway local stand-in for `Player`. That run showed these
 behaviors, which the runtime now follows:
 
 - Some scripts dispatch `document.createEvent("type")` directly, without
@@ -152,17 +172,25 @@ behaviors, which the runtime now follows:
 - Listeners for markup events read `evt.target.attributes.getNamedItem("id").value`.
 - Scripts set `style.x = ""`, which removes the script's value, as in CSS.
 
-These remain open:
+With the P4-05 objects, it ran them again with no stand-in. Each run used
+the disc's playlist, and the title and application list that the playlist
+gives each application. The results:
+- **Loading:** 186 of the 190 readable scripts load (7 are protected).
+- **Load failures:** 2 call `Player.audio.main.setVolumes` at load (unsupported),
+  and 2 call `XMLParser` (denied).
+- **Runtime failures:** all from things the runtime deliberately does not do,
+  or from state no host reported:
+  - 15 handlers stop at `document.setXPathVariable()` (markup timing);
+  - 4 stop at `XMLParser`;
+  - 12 come from the 8 applications that no playlist title runs, so no
+    current title is reported;
+  - 5 read a bookmark title that a script never set.
+- **Commands:** applications ask to be moved to the top of the stack as they
+  start.
 
-- A key listener on one disc (a Toshiba player workaround, per its comment)
-  tests `evt.target.application`, which must be truthy when no element has
-  focus. What that target is remains unconfirmed.
-- The rest of the failures are P4-05 members:
-  - `application.thisAdvancedApplication`, `advancedApplications` and
-    `moveToTop()`;
-  - `Player` playlist and audio members.
-- `document.setXPathVariable()` belongs to markup timing, which is not
-  modeled.
+One question remains open. A key listener on one disc (a Toshiba player
+workaround, per its comment) tests `evt.target.application`, which must be
+truthy when no element has focus. What that target is remains unconfirmed.
 
 ## What this means for a runtime
 

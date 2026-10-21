@@ -58,6 +58,8 @@ int hddvd_runtime_create_with_limits(const hddvd_runtime_limits *limits, hddvd_r
         return HDDVD_ENOMEM;
     runtime->limits = *limits;
     runtime->focus = SIZE_MAX;
+    runtime->player.title = SIZE_MAX;
+    runtime->application_self = SIZE_MAX;
     rc = hddvd_engine_create(limits, &runtime->engine);
     if (!rc)
         rc = hddvd_engine_install(runtime->engine, (const char *)hddvd_prelude,
@@ -106,6 +108,7 @@ void hddvd_runtime_destroy(hddvd_runtime *runtime)
     hddvd_engine_destroy(runtime->engine);
     hddvd_runtime_document_free(runtime);
     hddvd_runtime_issues_free(runtime);
+    hddvd_runtime_player_free(runtime);
     free(runtime->call_exception);
     report_clear(&runtime->report);
     free(runtime);

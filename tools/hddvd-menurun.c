@@ -6,8 +6,10 @@
 /* Runs one HDi application from an archive in the script runtime: evaluates
    its manifest's scripts in order, loads its first markup, calls the markup
    loaded handler, then performs the steps given and prints the focus after
-   each, plus every issue and failure. --before FILE first evaluates a local
-   script, for example stand-ins for host objects the runtime lacks. */
+   each, plus every issue, failure and player command (each acknowledged as
+   accepted). --before FILE first evaluates a local script, for example
+   stand-ins for host objects the runtime lacks; --playlist FILE.xpl gives
+   scripts the disc's playlist, and --title ID reports that title playing. */
 
 static int read_member(const hddvd_aca *aca, const char *name, void **out, size_t *size)
 {
@@ -86,7 +88,104 @@ static const char *base_name(const char *src)
     return slash ? slash + 1 : src;
 }
 
-static void report(const hddvd_runtime *runtime, const char *what, int rc)
+static const hddvd_xpl *playlist;
+static const char *base_name(const char *src);
+
+static int same_name(const char *a, const char *b)
+{
+    for (; *a && *b; a++, b++)
+        if ((*a >= 'A' && *a <= 'Z' ? *a + 32 : *a) != (*b >= 'A' && *b <= 'Z' ? *b + 32 : *b))
+            return 0;
+    return !*a && !*b;
+}
+
+/* The first title whose applications include this manifest; its
+   applications in z-order (bottom first), and which one is this. */
+static size_t find_title(const hddvd_xpl *xpl, const char *manifest, const char *self_id,
+                         const char **ids, size_t *count, size_t *self)
+{
+    size_t t, a, k;
+    for (t = 0; t < hddvd_xpl_title_count(xpl); t++)
+    {
+        size_t n = hddvd_xpl_application_count(xpl, t), order[63];
+        int32_t z[63];
+        *self = SIZE_MAX;
+        *count = 0;
+        for (a = 0; a < n && *count < 63; a++)
+        {
+            hddvd_xpl_application app;
+            if (hddvd_xpl_get_application(xpl, t, a, &app) || !app.src)
+                continue;
+            /* Insertion by zOrder keeps playlist order among equals. */
+            for (k = *count; k > 0 && z[k - 1] > (app.has_z_order ? app.z_order : 0); k--)
+            {
+                z[k] = z[k - 1];
+                order[k] = order[k - 1];
+            }
+            z[k] = app.has_z_order ? app.z_order : 0;
+            order[k] = a;
+            (*count)++;
+        }
+        for (k = 0; k < *count; k++)
+        {
+            hddvd_xpl_application app;
+            hddvd_xpl_get_application(xpl, t, order[k], &app);
+            ids[k] = "";
+            if (same_name(base_name(app.src), manifest))
+            {
+                *self = k;
+                ids[k] = self_id ? self_id : "";
+            }
+        }
+        if (*self != SIZE_MAX)
+            return t;
+    }
+    *count = 0;
+    return SIZE_MAX;
+}
+
+/* Prints and accepts every command the scripts made. */
+static void commands(hddvd_runtime *runtime)
+{
+    static const char *const names[] = {"play",
+                                        "pause",
+                                        "jump",
+                                        "select-audio",
+                                        "select-subtitle",
+                                        "select-audio-language",
+                                        "select-subtitle-language",
+                                        "subtitle-visible",
+                                        "activate-application",
+                                        "inactivate-application",
+                                        "application-to-top",
+                                        "application-to-bottom"};
+    hddvd_runtime_command command;
+    while (hddvd_runtime_take_command(runtime, &command) == HDDVD_OK)
+    {
+        printf("  command: %s", names[command.type]);
+        if (command.type == HDDVD_RUNTIME_COMMAND_JUMP)
+        {
+            hddvd_xpl_title_info info;
+            uint64_t frames = command.time.ticks * 2u / 3003u;
+            if (playlist && !hddvd_xpl_get_title(playlist, command.title, &info) && info.id)
+                printf(" title=%s", info.id);
+            else
+                printf(" title=%lu", (unsigned long)command.title + 1);
+            printf(" time=%02u:%02u:%02u:%02u", (unsigned)(frames / 216000u),
+                   (unsigned)(frames / 3600u % 60u), (unsigned)(frames / 60u % 60u),
+                   (unsigned)(frames % 60u));
+        }
+        else if (command.text[0])
+            printf(" %s", command.text);
+        else if (command.type != HDDVD_RUNTIME_COMMAND_PLAY &&
+                 command.type != HDDVD_RUNTIME_COMMAND_PAUSE)
+            printf(" %lu", (unsigned long)command.number);
+        printf("\n");
+        hddvd_runtime_acknowledge(runtime, command.id, HDDVD_COMMAND_ACCEPTED);
+    }
+}
+
+static void report(hddvd_runtime *runtime, const char *what, int rc)
 {
     hddvd_runtime_diagnostic d;
     size_t i;
@@ -104,7 +203,8 @@ static void report(const hddvd_runtime *runtime, const char *what, int rc)
     }
     if (hddvd_runtime_issues_dropped(runtime))
         printf("  issues dropped: %lu\n", (unsigned long)hddvd_runtime_issues_dropped(runtime));
-    hddvd_runtime_clear_issues((hddvd_runtime *)runtime);
+    hddvd_runtime_clear_issues(runtime);
+    commands(runtime);
 }
 
 static int read_file(const char *path, void **out, size_t *size)
@@ -204,21 +304,30 @@ int main(int argc, char **argv)
     hddvd_xmf *xmf = NULL;
     hddvd_xmu *xmu = NULL;
     hddvd_runtime *runtime = NULL;
+    hddvd_xpl *xpl = NULL;
     hddvd_time now = {0};
-    void *bytes = NULL, *markup = NULL;
-    size_t size = 0, markup_size = 0, i;
-    const char *id, *src, *before = NULL, *program = argv[0];
+    void *bytes = NULL, *markup = NULL, *xpl_bytes = NULL;
+    size_t size = 0, markup_size = 0, xpl_size = 0, i;
+    const char *id, *src, *before = NULL, *playlist_path = NULL, *title = NULL;
+    const char *program = argv[0];
     int rc, failed = 0;
-    if (argc >= 3 && !strcmp(argv[1], "--before"))
+    while (argc >= 3 && (!strcmp(argv[1], "--before") || !strcmp(argv[1], "--playlist") ||
+                         !strcmp(argv[1], "--title")))
     {
-        before = argv[2];
+        if (!strcmp(argv[1], "--before"))
+            before = argv[2];
+        else if (!strcmp(argv[1], "--playlist"))
+            playlist_path = argv[2];
+        else
+            title = argv[2];
         argv += 2;
         argc -= 2;
     }
-    if (argc < 3)
+    if (argc < 3 || (title && !playlist_path))
     {
         fprintf(stderr,
-                "Usage: %s [--before FILE] archive.aca MANIFEST.xmf [STEP...]\n"
+                "Usage: %s [--before FILE] [--playlist FILE.xpl [--title ID]] archive.aca "
+                "MANIFEST.xmf [STEP...]\n"
                 "Steps: left, right, up, down, enter, key:CODE, wait:SECONDS, event:TYPE\n",
                 program);
         return 2;
@@ -242,6 +351,43 @@ int main(int argc, char **argv)
         free(bytes);
         hddvd_aca_close(aca);
         return 1;
+    }
+    if (playlist_path)
+    {
+        hddvd_runtime_player player;
+        size_t index = SIZE_MAX;
+        printf("playlist %s\n", playlist_path);
+        rc = read_file(playlist_path, &xpl_bytes, &xpl_size);
+        if (!rc)
+            rc = hddvd_xpl_open(xpl_bytes, xpl_size, &xpl);
+        if (!rc)
+            rc = hddvd_runtime_load_playlist(runtime, xpl);
+        if (!rc && title && hddvd_xpl_find_title(xpl, title, &index))
+            rc = HDDVD_ENOTFOUND;
+        if (!rc)
+        {
+            const char *ids[63];
+            size_t count = 0, self = SIZE_MAX;
+            size_t found =
+                find_title(xpl, argv[2], hddvd_xmf_application_id(xmf), ids, &count, &self);
+            if (!title)
+                index = found;
+            if (found != SIZE_MAX)
+                rc = hddvd_runtime_set_applications(runtime, ids, count, self);
+            printf("  title %lu, application %lu of %lu\n",
+                   index == SIZE_MAX ? 0ul : (unsigned long)index + 1,
+                   self == SIZE_MAX ? 0ul : (unsigned long)self + 1, (unsigned long)count);
+        }
+        if (!rc && index != SIZE_MAX)
+        {
+            memset(&player, 0, sizeof(player));
+            player.title = index;
+            player.state = HDDVD_PLAYBACK_PLAYING;
+            rc = hddvd_runtime_set_player(runtime, &player);
+        }
+        playlist = xpl;
+        report(runtime, "not loaded", rc);
+        failed |= rc != 0;
     }
     if (before)
     {
@@ -298,6 +444,8 @@ int main(int argc, char **argv)
         print_focus(runtime, xmu);
     }
     hddvd_runtime_destroy(runtime);
+    hddvd_xpl_close(xpl);
+    free(xpl_bytes);
     hddvd_xmu_close(xmu);
     free(markup);
     hddvd_xmf_close(xmf);

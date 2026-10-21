@@ -28,13 +28,16 @@ enum native_index
     NATIVE_NAVIGATE,
     NATIVE_EPOCH,
     NATIVE_COUNT,
-    NATIVE_ISSUE
+    NATIVE_ISSUE,
+    NATIVE_FIELD
 };
 
 /* In enum native_index order. */
 const char *const hddvd_runtime_native_names[] = {
-    "find",     "relative",   "name",  "id",       "attribute", "getState", "setState", "getStyle",
-    "setStyle", "unsetStyle", "focus", "navigate", "epoch",     "count",    "issue"};
+    "find", "relative", "name", "id", "attribute", "getState", "setState", "getStyle", "setStyle",
+    "unsetStyle", "focus", "navigate", "epoch", "count", "issue", "field",
+    /* runtime_player.c, from HDDVD_RUNTIME_PLAYER_NATIVES. */
+    "titleCount", "title", "chapter", "trackLanguage", "player", "command", "application"};
 const size_t hddvd_runtime_native_count =
     sizeof(hddvd_runtime_native_names) / sizeof(hddvd_runtime_native_names[0]);
 
@@ -82,8 +85,8 @@ void hddvd_runtime_issues_free(hddvd_runtime *runtime)
     runtime->dropped = 0;
 }
 
-static void add_issue(hddvd_runtime *runtime, hddvd_runtime_issue_kind kind, size_t node,
-                      const char *text, size_t length)
+void hddvd_runtime_add_issue(hddvd_runtime *runtime, hddvd_runtime_issue_kind kind, size_t node,
+                             const char *text, size_t length)
 {
     char *message;
     if (length > MAX_MESSAGE)
@@ -233,7 +236,7 @@ static void style_issue(hddvd_runtime *runtime, size_t node, const char *name, c
     char message[MAX_MESSAGE + 1];
     snprintf(message, sizeof(message), "style %s: %s value \"%.200s\"", name,
              rc == HDDVD_ENOTSUP ? "unmodeled" : "malformed", value);
-    add_issue(runtime, HDDVD_RUNTIME_ISSUE_STYLE, node, message, strlen(message));
+    hddvd_runtime_add_issue(runtime, HDDVD_RUNTIME_ISSUE_STYLE, node, message, strlen(message));
 }
 
 static int set_style(hddvd_runtime *runtime, size_t node, const char *name, const char *value)
@@ -499,13 +502,32 @@ int hddvd_runtime_native(void *opaque, unsigned index, const hddvd_engine_value 
             set_number(result, (double)runtime->node_count);
             return HDDVD_OK;
         case NATIVE_ISSUE:
-            if (!arg_number(args, count, 0, &number) || number != HDDVD_RUNTIME_ISSUE_EXCEPTION ||
+            if (!arg_number(args, count, 0, &number) ||
+                (number != HDDVD_RUNTIME_ISSUE_EXCEPTION && number != HDDVD_RUNTIME_ISSUE_TRACE) ||
                 count < 2 || args[1].type != HDDVD_ENGINE_STRING)
                 return fail(message, "invalid issue", HDDVD_EINVAL);
-            add_issue(runtime, HDDVD_RUNTIME_ISSUE_EXCEPTION, SIZE_MAX, args[1].string,
-                      args[1].length);
+            hddvd_runtime_add_issue(runtime, (hddvd_runtime_issue_kind)number, SIZE_MAX,
+                                    args[1].string, args[1].length);
+            return HDDVD_OK;
+        case NATIVE_FIELD:
+            /* field(-1) counts the dispatched event's fields; field(i, 0 or 1)
+               is a name or value. */
+            if (!arg_number(args, count, 0, &number))
+                return fail(message, "invalid field", HDDVD_EINVAL);
+            if (number < 0)
+            {
+                set_number(result, (double)runtime->field_count);
+                return HDDVD_OK;
+            }
+            if (!(number < (double)runtime->field_count) || count < 2)
+                return fail(message, "invalid field", HDDVD_EINVAL);
+            set_string(result, args[1].number != 0.0 ? runtime->field_values[(size_t)number]
+                                                     : runtime->field_names[(size_t)number]);
             return HDDVD_OK;
         default:
+            if (index >= HDDVD_RUNTIME_PLAYER_NATIVES)
+                return hddvd_runtime_player_native(runtime, index - HDDVD_RUNTIME_PLAYER_NATIVES,
+                                                   args, count, result, message);
             return native_node(runtime, index, args, count, result, message);
     }
 }

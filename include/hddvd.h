@@ -581,7 +581,11 @@ typedef enum hddvd_runtime_issue_kind
     /* A script set a style value the style model cannot apply (an unknown
        property or keyword, or a malformed value). Scripts read it back, but
        hddvd_runtime_styles does not change. */
-    HDDVD_RUNTIME_ISSUE_STYLE = 2
+    HDDVD_RUNTIME_ISSUE_STYLE = 2,
+    /* The host rejected or failed a player command (hddvd_runtime_acknowledge). */
+    HDDVD_RUNTIME_ISSUE_COMMAND = 3,
+    /* A script called Diagnostics.trace(). */
+    HDDVD_RUNTIME_ISSUE_TRACE = 4
 } hddvd_runtime_issue_kind;
 /* message is borrowed until hddvd_runtime_clear_issues or destroy. node is
    the markup node concerned, or SIZE_MAX. */
@@ -900,6 +904,54 @@ typedef struct hddvd_command
         uint8_t visible;
     } data;
 } hddvd_command;
+/* Player state as the host reports it to scripts (hddvd_runtime_set_player).
+   Track numbers are 1-based, 0 for none; menu_language is a language code or
+   "". */
+typedef struct hddvd_runtime_player
+{
+    /* Playlist title index, or SIZE_MAX when none is playing. */
+    size_t title;
+    hddvd_time elapsed;
+    /* 1-based, 0 when unknown. */
+    uint32_t chapter;
+    hddvd_playback_state state;
+    uint32_t audio_track;
+    uint32_t subtitle_track;
+    uint8_t subtitle_visible;
+    char menu_language[8];
+} hddvd_runtime_player;
+/* What a script asked the player to do. Fields not named are zero. */
+typedef enum hddvd_runtime_command_type
+{
+    HDDVD_RUNTIME_COMMAND_PLAY = 0,
+    HDDVD_RUNTIME_COMMAND_PAUSE,
+    /* title and time: a title's or a chapter's jump(). */
+    HDDVD_RUNTIME_COMMAND_JUMP,
+    /* number: a track. */
+    HDDVD_RUNTIME_COMMAND_SELECT_AUDIO,
+    HDDVD_RUNTIME_COMMAND_SELECT_SUBTITLE,
+    /* text: a language code. */
+    HDDVD_RUNTIME_COMMAND_SELECT_AUDIO_LANGUAGE,
+    HDDVD_RUNTIME_COMMAND_SELECT_SUBTITLE_LANGUAGE,
+    /* number: 1 to show subtitles, 0 to hide them. */
+    HDDVD_RUNTIME_COMMAND_SUBTITLE_VISIBLE,
+    /* number: an index in the host's application list; text: its id. */
+    HDDVD_RUNTIME_COMMAND_ACTIVATE_APPLICATION,
+    HDDVD_RUNTIME_COMMAND_INACTIVATE_APPLICATION,
+    HDDVD_RUNTIME_COMMAND_APPLICATION_TO_TOP,
+    HDDVD_RUNTIME_COMMAND_APPLICATION_TO_BOTTOM
+} hddvd_runtime_command_type;
+/* text is borrowed until the command is acknowledged or the runtime is
+   destroyed, and is "" when the command has none. */
+typedef struct hddvd_runtime_command
+{
+    hddvd_runtime_command_type type;
+    uint64_t id;
+    size_t title;
+    hddvd_time time;
+    uint32_t number;
+    const char *text;
+} hddvd_runtime_command;
 typedef struct hddvd_nav_limits
 {
     size_t max_events;
@@ -1283,9 +1335,9 @@ HDDVD_API int hddvd_runtime_get_diagnostic(const hddvd_runtime *, hddvd_runtime_
      setting enabled to true schedules it one interval after the current
      time, and false cancels it. Every timer runs on the time given to
      hddvd_runtime_advance, whatever its clock argument.
-   Player, FileIO, XMLParser, Network and the other host objects are not
-   provided yet. Markup timing (cues, events and animations declared in
-   markup) does not run.
+   Player, Diagnostics and the application lifecycle are described below.
+   Markup timing (cues, events and animations declared in markup) does not
+   run.
 
    load_markup makes `xmu` (borrowed; it must outlive the runtime or the
    next load) the document scripts see, with the focus on its initial focus.
@@ -1338,6 +1390,60 @@ HDDVD_API size_t hddvd_runtime_issue_count(const hddvd_runtime *);
 HDDVD_API int hddvd_runtime_get_issue(const hddvd_runtime *, size_t, hddvd_runtime_issue *);
 HDDVD_API size_t hddvd_runtime_issues_dropped(const hddvd_runtime *);
 HDDVD_API void hddvd_runtime_clear_issues(hddvd_runtime *);
+/* Player and application host objects (docs/hdi-host-api.md):
+   - Player.playlist: titles (by index, and by playlist id as a property),
+     each with attributes.id, attributes.titleDuration, chapters (each with
+     jump(time)) and jump(time); currentTitle (whose elapsedTime is the
+     reported title time), currentChapter.number, playState with
+     PLAYSTATE_STOP, PLAYSTATE_PLAY and PLAYSTATE_PAUSE (placeholder
+     values), play() and pause();
+   - Player.track: selectAudioTrackNumber(), selectSubtitleTrackNumber(),
+     selectAudioLanguage(), selectSubtitleLanguage(), and the current and
+     selected track numbers and language codes (from the playlist's tracks);
+   - Player.subtitle.visible (setting it is a command), Player.menuLanguage,
+     Player.capabilities.network.connected (false: network access is denied),
+     Player.generalParameters.getValue()/setValue() (kept in the runtime;
+     getValue of a missing name is null, and setting undefined or null
+     removes it);
+   - application: attributes.id, advancedApplications (id, zOrder,
+     activate(), inactivate()), thisAdvancedApplication, moveToTop() and
+     moveToBottom(), over the list from hddvd_runtime_set_applications;
+   - Diagnostics.trace(message) records a TRACE issue.
+   Times are "HH:MM:SS:FF" strings with frames at 60000/1001 per second, as
+   in playlists; jump()'s second argument is accepted and ignored. Calls that
+   change playback become commands for the host; the player state scripts
+   read changes only when the host reports it. Members a player has but this
+   runtime cannot honor (audio mixing and effects, video layout and scaling,
+   getSPRM, document.setXPathVariable() and getProperties(), which drive
+   markup timing, and every member of FileIO, XMLParser, Network and
+   PersistentStorageManager, which would reach files or the network) throw
+   an Error naming the member; their constants exist so scripts can load.
+
+   load_playlist makes `xpl` (borrowed; it must outlive the runtime or the
+   next load) the playlist scripts see; NULL removes it. Title objects from
+   an earlier playlist throw when used. */
+HDDVD_API int hddvd_runtime_load_playlist(hddvd_runtime *, const hddvd_xpl *);
+/* Reports the player's state. HDDVD_EINVAL for a title the playlist lacks,
+   an unknown state or an unterminated menu language. */
+HDDVD_API int hddvd_runtime_set_player(hddvd_runtime *, const hddvd_runtime_player *);
+/* The running applications in z-order (bottom first), each by its id (NULL
+   or "" when it has none), and which of them this runtime runs; ids are
+   copied. Fewer than 64 applications. */
+HDDVD_API int hddvd_runtime_set_applications(hddvd_runtime *, const char *const *, size_t, size_t);
+/* Commands are queued in the order scripts made them; at most 64 wait to be
+   taken and 64 more to be acknowledged, and a script call beyond that
+   throws. take returns HDDVD_ENOTFOUND when none waits, and HDDVD_ELIMIT
+   while 64 taken commands are unacknowledged. Every command taken
+   must be acknowledged with its id (HDDVD_EINVAL for an id not taken);
+   HDDVD_COMMAND_REJECTED or HDDVD_COMMAND_FAILED records a COMMAND issue. */
+HDDVD_API size_t hddvd_runtime_command_count(const hddvd_runtime *);
+HDDVD_API int hddvd_runtime_take_command(hddvd_runtime *, hddvd_runtime_command *);
+HDDVD_API int hddvd_runtime_acknowledge(hddvd_runtime *, uint64_t, hddvd_command_result);
+/* Dispatches an event of this type with string fields (event.newValue,
+   event.lang, ...); names must be identifiers other than the event's own
+   members. At most 16 fields. Returns as hddvd_runtime_key. */
+HDDVD_API int hddvd_runtime_dispatch_fields(hddvd_runtime *, const char *, const char *const *,
+                                            const char *const *, size_t);
 /* Decoders must return premultiplied RGBA8. The cache calls release exactly
    once after the last display list using a plane is closed. All objects are
    single-threaded and callbacks are made only by cache_get/build calls. */

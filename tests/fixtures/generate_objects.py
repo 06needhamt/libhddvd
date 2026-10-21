@@ -321,7 +321,8 @@ hdi_api = {
 # An HDi application in an ACA archive, for hddvd-menurun: a manifest, a bare
 # UTF-16 script, a script in a clear AACS envelope, and markup with three
 # buttons in a row. Pressing Enter on "two" starts a timer that focuses
-# "three" one second later.
+# "three" one second later; Enter on "three" jumps to the Feature title. The
+# playlist runs the application in its Menu title.
 APP = Path(__file__).resolve().parent / "app"
 
 def aca(members):
@@ -358,6 +359,9 @@ function onKey(evt) {
         timer.autoReset = false;
         timer.enabled = true;
     }
+    if (evt.key == 0x0D && evt.target.core.id == "three" &&
+        Player.playlist.currentTitle.attributes.id == "Menu")
+        Player.playlist.titles["Feature"].jump("00:00:01:00", false);
 }
 setMarkupLoadedHandler(function () {
     focus("one");
@@ -369,7 +373,19 @@ app_xmu = """<root xmlns="http://www.dvdforum.org/2005/ihd"
 <button id="one" style:navRight="two"/><button id="two" style:navRight="three"/>
 <button id="three"/></body></root>
 """
+app_xpl = """<?xml version="1.0" encoding="UTF-8"?>
+<Playlist xmlns="http://www.dvdforum.org/2005/HDDVDVideo/Playlist">
+  <TitleSet timeBase="60fps">
+    <Title id="Menu" titleDuration="00:01:00:00">
+      <ApplicationSegment src="file:///dvddisc/ADV_OBJ/app.aca/app.xmf" autorun="true"
+          titleTimeBegin="00:00:00:00" titleTimeEnd="00:01:00:00"/>
+    </Title>
+    <Title id="Feature" titleDuration="00:10:00:00"/>
+  </TitleSet>
+</Playlist>
+"""
 app = {
+    "app.xpl": app_xpl.encode("utf-8"),
     "app.aca": aca([
         ("app.xmf", app_xmf.encode("utf-8")),
         ("lib.js", aacs(0x12, b"\xfe\xff" + app_lib.encode("utf-16-be"), "lib.js.AACS",
@@ -395,6 +411,17 @@ fuzz_seeds = {
     "runtime/recursion.js": b"function f() { return f(); }",
     "runtime/loop.js": b"function f() { for (;;) {} }",
     "runtime/syntax.js": b"function f( {",
+    # The player objects, against fuzz_runtime.c's playlist.
+    "runtime/player.js": (
+        "var t = Player.playlist.titles;\n"
+        "addEventListener('play_state', function (e) {\n"
+        "  if (e.newValue == Player.playlist.PLAYSTATE_PAUSE) Player.playlist.play(); }, false);\n"
+        "function f() { t.Feature.chapters[1].jump('00:00:01:00', false); t.Menu.jump('00:00:00:00');\n"
+        "  Player.track.selectAudioLanguage('en'); Player.subtitle.visible = false;\n"
+        "  application.advancedApplications[1].activate(); application.moveToTop();\n"
+        "  Player.generalParameters.setValue('k', Player.playlist.currentTitle.elapsedTime);\n"
+        "  Diagnostics.trace(Player.track.selectedAudioLanguageCode); }\n"
+    ).encode("utf-8"),
     # The host objects, against fuzz_runtime.c's document.
     "runtime/host.js": (
         "var a = document.getElementById('a'), log = [];\n"

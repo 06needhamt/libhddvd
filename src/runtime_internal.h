@@ -22,6 +22,17 @@ struct hddvd_runtime_node
     size_t style_count;
 };
 
+#define HDDVD_RUNTIME_MAX_COMMANDS 64
+#define HDDVD_RUNTIME_MAX_APPLICATIONS 64
+#define HDDVD_RUNTIME_MAX_FIELDS 16
+
+/* A command with its own copy of the text. */
+struct hddvd_runtime_pending
+{
+    hddvd_runtime_command command;
+    char *text;
+};
+
 struct hddvd_runtime
 {
     hddvd_engine *engine;
@@ -46,6 +57,24 @@ struct hddvd_runtime
        message (owned). */
     size_t call_exceptions;
     char *call_exception;
+    /* Player objects (runtime_player.c): the borrowed playlist and a count
+       of playlists loaded, so title objects can tell they are stale. */
+    const hddvd_xpl *xpl;
+    uint32_t playlists;
+    hddvd_runtime_player player;
+    char *applications[HDDVD_RUNTIME_MAX_APPLICATIONS];
+    size_t application_count;
+    size_t application_self;
+    /* Commands not yet taken (oldest first) and taken but not acknowledged. */
+    struct hddvd_runtime_pending queued[HDDVD_RUNTIME_MAX_COMMANDS];
+    size_t queued_count;
+    struct hddvd_runtime_pending taken[HDDVD_RUNTIME_MAX_COMMANDS];
+    size_t taken_count;
+    uint64_t next_command;
+    /* The fields of the event being dispatched (borrowed). */
+    const char *const *field_names;
+    const char *const *field_values;
+    size_t field_count;
 };
 
 /* runtime.c: runs a prelude entry with budgets, as one host call. */
@@ -58,4 +87,11 @@ int hddvd_runtime_native(void *opaque, unsigned index, const hddvd_engine_value 
                          hddvd_engine_value *result, const char **message);
 void hddvd_runtime_document_free(hddvd_runtime *);
 void hddvd_runtime_issues_free(hddvd_runtime *);
+void hddvd_runtime_add_issue(hddvd_runtime *, hddvd_runtime_issue_kind, size_t, const char *,
+                             size_t);
+/* runtime_player.c: natives from index HDDVD_RUNTIME_PLAYER_NATIVES on. */
+#define HDDVD_RUNTIME_PLAYER_NATIVES 16u
+int hddvd_runtime_player_native(hddvd_runtime *, unsigned index, const hddvd_engine_value *args,
+                                size_t count, hddvd_engine_value *result, const char **message);
+void hddvd_runtime_player_free(hddvd_runtime *);
 #endif
