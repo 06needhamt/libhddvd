@@ -51,11 +51,13 @@ typedef struct hddvd_runtime hddvd_runtime;
 typedef struct hddvd_image_cache hddvd_image_cache;
 typedef struct hddvd_display_list hddvd_display_list;
 typedef struct hddvd_nav hddvd_nav;
+typedef struct hddvd_runtime_bridge hddvd_runtime_bridge;
 typedef struct hddvd_evo_parser hddvd_evo_parser;
 typedef struct hddvd_vti hddvd_vti;
 typedef struct hddvd_tmap hddvd_tmap;
 typedef struct hddvd_vts hddvd_vts;
 typedef struct hddvd_vmg hddvd_vmg;
+typedef struct hddvd_vm hddvd_vm;
 typedef struct hddvd_title_map hddvd_title_map;
 typedef struct hddvd_scene hddvd_scene;
 typedef void (*hddvd_log_fn)(void *, int, const char *);
@@ -585,7 +587,11 @@ typedef enum hddvd_runtime_issue_kind
     /* The host rejected or failed a player command (hddvd_runtime_acknowledge). */
     HDDVD_RUNTIME_ISSUE_COMMAND = 3,
     /* A script called Diagnostics.trace(). */
-    HDDVD_RUNTIME_ISSUE_TRACE = 4
+    HDDVD_RUNTIME_ISSUE_TRACE = 4,
+    /* Markup timing the runtime cannot run: an expression that does not parse
+       or uses an unsupported function, an unsupported element, or a use=
+       naming no definition. The rest of the timing still runs. */
+    HDDVD_RUNTIME_ISSUE_TIMING = 5
 } hddvd_runtime_issue_kind;
 /* message is borrowed until hddvd_runtime_clear_issues or destroy. node is
    the markup node concerned, or SIZE_MAX. */
@@ -840,8 +846,23 @@ typedef enum hddvd_event_type
     HDDVD_EVENT_COMMAND_ACK,
     HDDVD_EVENT_TIMER,
     HDDVD_EVENT_INPUT,
-    HDDVD_EVENT_RATE_CHANGE
+    HDDVD_EVENT_RATE_CHANGE,
+    /* A title started playing: data.position.title is its playlist index. */
+    HDDVD_EVENT_TITLE_BEGIN,
+    /* Playback entered a chapter: data.position.chapter, 1-based. */
+    HDDVD_EVENT_CHAPTER,
+    /* The host finished a script command (hddvd_runtime_bridge):
+       data.acknowledgement with the runtime command's id. */
+    HDDVD_EVENT_SCRIPT_ACK
 } hddvd_event_type;
+/* HDDVD_EVENT_STREAM_SELECTION's data.stream.stream_type for the tracks
+   scripts see; stream_id is then the 1-based track number, 0 for none. */
+typedef enum hddvd_stream_type
+{
+    HDDVD_STREAM_TYPE_OTHER = 0,
+    HDDVD_STREAM_TYPE_AUDIO,
+    HDDVD_STREAM_TYPE_SUBTITLE
+} hddvd_stream_type;
 typedef enum hddvd_command_type
 {
     HDDVD_COMMAND_PLAY = 0,
@@ -891,6 +912,11 @@ typedef struct hddvd_event
             int32_t numerator;
             uint32_t denominator;
         } rate;
+        struct
+        {
+            uint32_t title;
+            uint32_t chapter;
+        } position;
     } data;
 } hddvd_event;
 typedef struct hddvd_command
@@ -986,6 +1012,7 @@ typedef struct hddvd_config_limits
 } hddvd_config_limits;
 typedef void (*hddvd_event_fn)(void *, const hddvd_event *);
 typedef void (*hddvd_command_fn)(void *, const hddvd_command *);
+typedef void (*hddvd_runtime_command_fn)(void *, const hddvd_runtime_command *);
 
 typedef struct hddvd_map_info
 {
@@ -1157,6 +1184,85 @@ typedef struct hddvd_vts_evob_cell
     uint32_t first_sector;
     uint32_t last_sector;
 } hddvd_vts_evob_cell;
+/* A menu language unit: the menus for one language (title set menus at
+   IFO offset 0xd0, VMG menus at 0xc8; docs/formats/ifo-map.md). */
+typedef struct hddvd_menu_unit
+{
+    /* ISO 639 code as stored, "" when none. */
+    char language[3];
+    /* The byte after the code and the menu existence flags, stored. */
+    uint8_t language_extension;
+    uint8_t existence;
+    uint16_t pgc_count;
+} hddvd_menu_unit;
+/* A menu PGC's search-pointer category. menu_id is the second byte's high
+   nibble: 2 on the VMG's title menu and 3 on title sets' root menus, DVD's
+   numbers for those menus. */
+typedef struct hddvd_menu_pgc
+{
+    uint8_t entry;
+    uint8_t menu_id;
+    uint8_t category[4];
+} hddvd_menu_pgc;
+/* What a run of navigation commands ended with (hddvd_vm_run). */
+typedef enum hddvd_vm_action
+{
+    /* The last command ran, or Break: the PGC goes on (to its cells, or to
+       its post commands). */
+    HDDVD_VM_END = 0,
+    /* A link within the domain: link and target. */
+    HDDVD_VM_LINK,
+    /* JumpTT: target is a VMG title number. */
+    HDDVD_VM_JUMP_TITLE,
+    /* JumpVTS_TT: target is a title of the current title set. */
+    HDDVD_VM_JUMP_VTS_TITLE,
+    /* JumpVTS_PTT: target title, chapter. */
+    HDDVD_VM_JUMP_VTS_CHAPTER,
+    /* JumpSS and CallSS: domain and target (CallSS also resume_cell). */
+    HDDVD_VM_JUMP_SYSTEM,
+    HDDVD_VM_CALL_SYSTEM,
+    HDDVD_VM_EXIT,
+    /* A command in a form the VM does not run; nothing of it was done.
+       line names it, so a host may skip it and run on from there. */
+    HDDVD_VM_UNSUPPORTED
+} hddvd_vm_action;
+/* Link subsets, numbered as in the command. */
+typedef enum hddvd_vm_link
+{
+    HDDVD_VM_LINK_NONE = 0,
+    /* target: the LinkSIns instruction (DVD's LinkTopCell, NextPG, ...). */
+    HDDVD_VM_LINK_INSTRUCTION = 1,
+    HDDVD_VM_LINK_PGC = 4,
+    HDDVD_VM_LINK_CHAPTER = 5,
+    HDDVD_VM_LINK_PROGRAM = 6,
+    HDDVD_VM_LINK_CELL = 7
+} hddvd_vm_link;
+/* JumpSS and CallSS destinations: the first-play PGC, a VMG menu (target:
+   menu id), a title set menu (target: menu id) or a VMG menu PGC (target:
+   1-based PGC number in the menu language unit). */
+typedef enum hddvd_vm_domain
+{
+    HDDVD_VM_FIRST_PLAY = 0,
+    HDDVD_VM_VMG_MENU,
+    HDDVD_VM_VTS_MENU,
+    HDDVD_VM_VMG_PGC
+} hddvd_vm_domain;
+typedef struct hddvd_vm_result
+{
+    hddvd_vm_action action;
+    hddvd_vm_link link;
+    hddvd_vm_domain domain;
+    uint16_t target;
+    uint16_t chapter;
+    uint8_t resume_cell;
+    /* The highlight button the deciding command set (1-based), else 0. */
+    uint16_t button;
+    /* 1-based command that ended the run; 0 when it ran off the end. */
+    size_t line;
+    /* Commands executed. */
+    size_t steps;
+    uint8_t command[8];
+} hddvd_vm_result;
 /* A title from the disc's title table (HV000I01.IFO). */
 typedef struct hddvd_vmg_title
 {
@@ -1304,16 +1410,16 @@ HDDVD_API int hddvd_runtime_get_diagnostic(const hddvd_runtime *, hddvd_runtime_
      getProperty(), setProperty() and unsetProperty(). Values are strings
      ("true"/"false" for flags); a value set by script is converted with
      String(). Setting focused to "true" moves the focus there, and "false"
-     on the focused element clears it. unsetProperty() only validates the
-     name: script values stay until changed, because markup timing, which
-     would take the property back, is not modeled;
+     on the focused element clears it. A value a script sets overrides markup
+     timing until unsetProperty(), which keeps the value but lets timing
+     change it again;
    - element.style: a property per name the style model knows (x, y, width,
      height, display, visibility, opacity, backgroundImage, backgroundFrame,
      navUp, ...) plus getProperty(), setProperty(), unsetProperty() and
      animateProperty(name, "v1;v2;...", seconds). Reads return the script's
      value, else the markup's text, else "auto" (display), "visible"
      (visibility), "1" (opacity) or "". unsetProperty(), or setting "",
-     returns to markup.
+     returns to markup timing or markup. Script values override timing ones.
      animateProperty() steps through the values over the duration on
      hddvd_runtime_advance: numbers with the same unit (px, % or none)
      interpolate linearly, other values switch at each keyframe;
@@ -1335,9 +1441,30 @@ HDDVD_API int hddvd_runtime_get_diagnostic(const hddvd_runtime *, hddvd_runtime_
      setting enabled to true schedules it one interval after the current
      time, and false cancels it. Every timer runs on the time given to
      hddvd_runtime_advance, whatever its clock argument.
+   - markup timing: the <timing> element's par and cue containers (seq and
+     excl run as par) with begin and end offsets ("500ms", "2s", "12f",
+     "HH:MM:SS:FF") or conditions, dur and fill="hold"; their set, animate
+     (linear, or calcMode="discrete") and event actions, directly or through
+     use= of a <defs> g, set, animate or event; and an XPath subset for
+     conditions and select: id(), class(), defaultNode(), //name, @name,
+     $variables from document.setXPathVariable(), state:NAME() and
+     style:NAME() of the context element, not(), true(), false(),
+     boolean(), number(), string(), count(), contains(), starts-with(),
+     substring-before(), substring-after(), concat(), predicates,
+     comparisons, and, or and |. A container begins at its offset from its
+     parent's begin or each time its condition becomes true, and ends after
+     dur, at its end offset, when its end condition is true, or with its
+     parent. Active cues set their actions' values on their selected
+     elements (without select, the elements their begin condition matched;
+     held after the end with fill="hold" until the parent ends;
+     the cue that began last wins), and dispatch each event action, with its
+     params as event fields and the first selected element as target, when
+     they begin. Timing runs on hddvd_runtime_advance time from markup load,
+     and at the end of every call that runs scripts, repeatedly while its
+     values or events change something (at most 8 rounds). All of this
+     follows SMIL and is unconfirmed against a player; what cannot run is
+     reported as a TIMING issue.
    Player, Diagnostics and the application lifecycle are described below.
-   Markup timing (cues, events and animations declared in markup) does not
-   run.
 
    load_markup makes `xmu` (borrowed; it must outlive the runtime or the
    next load) the document scripts see, with the focus on its initial focus.
@@ -1414,8 +1541,7 @@ HDDVD_API void hddvd_runtime_clear_issues(hddvd_runtime *);
    change playback become commands for the host; the player state scripts
    read changes only when the host reports it. Members a player has but this
    runtime cannot honor (audio mixing and effects, video layout and scaling,
-   getSPRM, document.setXPathVariable() and getProperties(), which drive
-   markup timing, and every member of FileIO, XMLParser, Network and
+   getSPRM, document.getProperties(), and every member of FileIO, XMLParser, Network and
    PersistentStorageManager, which would reach files or the network) throw
    an Error naming the member; their constants exist so scripts can load.
 
@@ -1719,6 +1845,33 @@ HDDVD_API int hddvd_nav_discontinuity(hddvd_nav *, hddvd_time);
 HDDVD_API size_t hddvd_nav_cancel_all_timers(hddvd_nav *);
 HDDVD_API size_t hddvd_nav_pump(hddvd_nav *, size_t);
 HDDVD_API int hddvd_nav_command(hddvd_nav *, const hddvd_command *, uint64_t *);
+/* Runs a script runtime's work as navigation-queue tasks: the host's
+   hddvd_event_fn passes every pumped event to hddvd_runtime_bridge_event,
+   so scripts run in queue order with clocks, input, timers and
+   acknowledgements. For each event the bridge:
+   - moves the runtime clock forward by the scheduler time that passed since
+     the previous event (none across an HDDVD_EVENT_DISCONTINUITY), running
+     script timers and animations, and reports the event's time as the
+     current title's elapsed time;
+   - INPUT: hddvd_runtime_key;
+   - PLAYBACK_STATE, TITLE_BEGIN, CHAPTER and STREAM_SELECTION (audio and
+     subtitle types): reports the new player state, then dispatches
+     play_state, title_begin, chapter, audio_track or subtitle_track;
+     TITLE_END dispatches title_end;
+   - SCRIPT_ACK: hddvd_runtime_acknowledge.
+   Then it hands every command scripts made to the callback, in order. The
+   host must answer each, accepted or not, by posting HDDVD_EVENT_SCRIPT_ACK
+   with the command's id; with no callback the bridge rejects them itself.
+   Commands beyond the runtime's 64 unacknowledged wait for acknowledgements.
+   The runtime is borrowed and must outlive the bridge; the host may still
+   set the playlist, applications and markup between events. Returns the
+   first failure of the calls made (as hddvd_runtime_key); the rest of the
+   event is still handled. HDDVD_EINVAL for a title the playlist lacks.
+   Event names and the clock model are unconfirmed against a player. */
+HDDVD_API int hddvd_runtime_bridge_create(hddvd_runtime *, hddvd_runtime_command_fn, void *,
+                                          hddvd_runtime_bridge **);
+HDDVD_API void hddvd_runtime_bridge_destroy(hddvd_runtime_bridge *);
+HDDVD_API int hddvd_runtime_bridge_event(hddvd_runtime_bridge *, const hddvd_event *);
 /* The incremental EVO parser accepts arbitrarily split input. finish()
    reports a truncated PES packet; metadata remains queryable afterward. */
 HDDVD_API int hddvd_evo_parser_create(hddvd_evo_parser **);
@@ -1837,6 +1990,53 @@ HDDVD_API uint32_t hddvd_vmg_last_sector(const hddvd_vmg *);
 HDDVD_API size_t hddvd_vmg_title_set_count(const hddvd_vmg *);
 HDDVD_API size_t hddvd_vmg_title_count(const hddvd_vmg *);
 HDDVD_API int hddvd_vmg_get_title(const hddvd_vmg *, size_t, hddvd_vmg_title *);
+/* Menus. Menu PGCs read as title PGCs do; their cells, if any, are checked
+   against their own table only (no menu EVO has been seen). Indexes are
+   0-based. The VMG's first-play PGC (byte offset at 0x84, within the
+   header) has commands only on observed discs; HDDVD_ENOTFOUND when the
+   VMG has none. */
+HDDVD_API size_t hddvd_vts_menu_unit_count(const hddvd_vts *);
+HDDVD_API int hddvd_vts_get_menu_unit(const hddvd_vts *, size_t unit, hddvd_menu_unit *);
+HDDVD_API int hddvd_vts_get_menu_pgc(const hddvd_vts *, size_t unit, size_t pgc, hddvd_menu_pgc *,
+                                     hddvd_vts_pgc *);
+HDDVD_API int hddvd_vts_get_menu_command(const hddvd_vts *, size_t unit, size_t pgc,
+                                         hddvd_vts_command_kind, size_t index, uint8_t command[8]);
+HDDVD_API int hddvd_vts_get_menu_cell(const hddvd_vts *, size_t unit, size_t pgc, size_t cell,
+                                      hddvd_vts_cell *);
+HDDVD_API size_t hddvd_vmg_menu_unit_count(const hddvd_vmg *);
+HDDVD_API int hddvd_vmg_get_menu_unit(const hddvd_vmg *, size_t unit, hddvd_menu_unit *);
+HDDVD_API int hddvd_vmg_get_menu_pgc(const hddvd_vmg *, size_t unit, size_t pgc, hddvd_menu_pgc *,
+                                     hddvd_vts_pgc *);
+HDDVD_API int hddvd_vmg_get_menu_command(const hddvd_vmg *, size_t unit, size_t pgc,
+                                         hddvd_vts_command_kind, size_t index, uint8_t command[8]);
+HDDVD_API int hddvd_vmg_get_menu_cell(const hddvd_vmg *, size_t unit, size_t pgc, size_t cell,
+                                      hddvd_vts_cell *);
+HDDVD_API int hddvd_vmg_get_first_play(const hddvd_vmg *, hddvd_vts_pgc *);
+HDDVD_API int hddvd_vmg_get_first_play_command(const hddvd_vmg *, hddvd_vts_command_kind,
+                                               size_t index, uint8_t command[8]);
+/* Navigation command VM: DVD-Video's 8-byte encoding as HD DVD discs use it
+   (docs/formats/ifo-map.md), with 64 general registers (GPRMs, register
+   numbers 0 to 63) and 32 system registers (SPRMs, numbers 0x80 to 0x9f),
+   all 16 bits and 0 at create. seed starts the generator rnd uses.
+   run executes commands[first ..] (count 8-byte commands) until a link,
+   jump, Exit or Break, the end of the list, or a command it does not run:
+   - conditions compare a register with a value or register: &, ==, !=,
+     >=, >, <=, <;
+   - Nop, Goto (1-based line), Break; links and jumps (a link's button
+     field, and SetHL_BTNN, set SPRM8 to the button times 1024);
+   - set a GPRM, with an optional condition: =, swap, +=, -=, *=, /=, %=,
+     rnd (1 to the value; 1 for 0), &=, |=, ^=; as libdvdnav does it, results
+     saturate at 0 and 0xffff, and division or remainder by 0 give 0xffff;
+   - SetSTN (SPRM1 audio, SPRM2 subpicture, SPRM3 angle) and SetHL_BTNN.
+   Other forms stop the run with HDDVD_VM_UNSUPPORTED and HDDVD_OK.
+   HDDVD_EPARSE for a register or Goto line out of range (the run stops at
+   that command, line set), HDDVD_ELIMIT after 65536 commands (a loop). */
+HDDVD_API int hddvd_vm_create(uint32_t seed, hddvd_vm **);
+HDDVD_API void hddvd_vm_destroy(hddvd_vm *);
+HDDVD_API int hddvd_vm_get_register(const hddvd_vm *, unsigned, uint16_t *);
+HDDVD_API int hddvd_vm_set_register(hddvd_vm *, unsigned, uint16_t);
+HDDVD_API int hddvd_vm_run(hddvd_vm *, const uint8_t *commands, size_t count, size_t first,
+                           hddvd_vm_result *);
 /* Convert a playlist time to title time on the 90 kHz clock. A "60fps"
    timeBase counts at 60000/1001 frames per second (docs/formats/ifo-map.md);
    other rates are unconfirmed and return HDDVD_ENOTSUP. Results that do not

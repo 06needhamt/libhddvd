@@ -10,7 +10,8 @@
    Given the title EVO, it checks the IFO against the EVO's navigation packs
    (docs/formats/ifo-map.md): the VOBU map, cell durations and elapsed times,
    and every time-map entry; and the stream attributes against the EVO's
-   streams. */
+   streams. For the VMG it prints the title table, the first-play PGC and
+   where its commands lead (hddvd_vm_run), and the menus' commands. */
 
 #define SECTOR 2048u
 
@@ -209,8 +210,14 @@ static void check_evo(const hddvd_vts *vts, const char *path)
    Registers below 0x80 are general (HD DVD uses up to 63), the rest system. */
 typedef struct command_context
 {
+    /* The title set, or NULL for the VMG's PGCs. */
     const hddvd_vts *vts;
     const hddvd_vts_pgc *pgc;
+    /* PGCs LinkPGCN can name: the title set's, or the menu unit's. */
+    size_t pgc_count;
+    /* VMG titles JumpTT can name, when known. */
+    size_t title_count;
+    int menu;
     size_t group_count;
     int unconfirmed;
 } command_context;
@@ -218,6 +225,10 @@ typedef struct command_context
 static const char *const comparisons[] = {"", "&", "==", "!=", ">=", ">", "<=", "<"};
 static const char *const set_ops[] = {
     "", "=", "<->", "+=", "-=", "*=", "/=", "%=", "rnd", "&=", "|=", "^=", "?", "?", "?", "?"};
+static const char *const domains[] = {"first-play", "vmg-menu", "vts-menu", "vmg-pgc"};
+static const char *const actions[] = {
+    "end",         "link",        "jump-title", "jump-vts-title", "jump-vts-chapter",
+    "jump-system", "call-system", "exit",       "unsupported"};
 
 static size_t append(char *out, size_t size, size_t used, const char *format, ...)
 #if defined(__GNUC__)
@@ -264,8 +275,9 @@ static size_t condition(char *out, size_t size, size_t used, const uint8_t *c, u
 
 static size_t chapters_of(const hddvd_vts *vts, size_t title)
 {
-    return title && title <= hddvd_vts_title_count(vts) ? hddvd_vts_chapter_count(vts, title - 1)
-                                                        : 0;
+    return vts && title && title <= hddvd_vts_title_count(vts)
+               ? hddvd_vts_chapter_count(vts, title - 1)
+               : 0;
 }
 
 /* The link part of type 1 to 3 commands: subset in byte 1, target in bytes
@@ -283,13 +295,14 @@ static size_t link_part(char *out, size_t size, size_t used, const uint8_t *c, c
         case 1:
             return append(out, size, used, "LinkSIns %u (button %u)", c[7] & 0x1fu, c[6] >> 2);
         case 4:
-            check((target & 0x7fffu) >= 1 && (target & 0x7fffu) <= hddvd_vts_pgc_count(ctx->vts),
-                  "LinkPGCN target", target & 0x7fffu, hddvd_vts_pgc_count(ctx->vts));
+            check((target & 0x7fffu) >= 1 && (target & 0x7fffu) <= ctx->pgc_count,
+                  "LinkPGCN target", target & 0x7fffu, ctx->pgc_count);
             return append(out, size, used, "LinkPGCN %u", target & 0x7fffu);
         case 5:
-            check((target & 0x3ffu) >= 1 &&
-                      (target & 0x3ffu) <= chapters_of(ctx->vts, ctx->pgc->title),
-                  "LinkPTTN target", target & 0x3ffu, chapters_of(ctx->vts, ctx->pgc->title));
+            if (!ctx->menu)
+                check((target & 0x3ffu) >= 1 &&
+                          (target & 0x3ffu) <= chapters_of(ctx->vts, ctx->pgc->title),
+                      "LinkPTTN target", target & 0x3ffu, chapters_of(ctx->vts, ctx->pgc->title));
             return append(out, size, used, "LinkPTTN %u (button %u)", target & 0x3ffu, c[6] >> 2);
         case 6:
             check((c[7] & 0x7fu) >= 1 && (c[7] & 0x7fu) <= ctx->pgc->program_count,
@@ -303,6 +316,22 @@ static size_t link_part(char *out, size_t size, size_t used, const uint8_t *c, c
             ctx->unconfirmed++;
             return append(out, size, used, "link%u?", subset);
     }
+}
+
+/* JumpSS and CallSS: the domain in byte 5's bits 5 and 4; a menu id in its
+   low nibble or a VMG PGC in bytes 2 and 3. Bit 7 of byte 5 is unexplained. */
+static size_t system_jump(char *out, size_t size, size_t used, const uint8_t *c)
+{
+    unsigned domain = (c[5] >> 4) & 3u;
+    used = append(out, size, used, "%s %s", (c[1] & 0x0fu) == 6 ? "JumpSS" : "CallSS",
+                  domains[domain]);
+    if (domain == 3)
+        used = append(out, size, used, " %u", (unsigned)(c[2] << 8 | c[3]) & 0x7fffu);
+    else if (domain)
+        used = append(out, size, used, " %u", c[5] & 0x0fu);
+    if ((c[1] & 0x0fu) == 8)
+        used = append(out, size, used, " (resume cell %u)", c[4]);
+    return used;
 }
 
 static void disassemble(const uint8_t *c, command_context *ctx, char *out, size_t size)
@@ -343,22 +372,29 @@ static void disassemble(const uint8_t *c, command_context *ctx, char *out, size_
                         append(out, size, used, "Exit");
                         return;
                     case 2:
-                        check(title >= 1, "JumpTT target", title, 0);
+                        check(title >= 1 && (!ctx->title_count || title <= ctx->title_count),
+                              "JumpTT target", title, ctx->title_count);
                         append(out, size, used, "JumpTT %u", title);
                         return;
                     case 3:
-                        check(title >= 1 && title <= hddvd_vts_title_count(ctx->vts),
-                              "JumpVTS_TT target", title, hddvd_vts_title_count(ctx->vts));
+                        if (ctx->vts)
+                            check(title >= 1 && title <= hddvd_vts_title_count(ctx->vts),
+                                  "JumpVTS_TT target", title, hddvd_vts_title_count(ctx->vts));
                         append(out, size, used, "JumpVTS_TT %u", title);
                         return;
                     case 5:
                     {
                         unsigned chapter = (unsigned)(c[2] << 8 | c[3]) & 0x3ffu;
-                        check(chapter >= 1 && chapter <= chapters_of(ctx->vts, title),
-                              "JumpVTS_PTT target", chapter, chapters_of(ctx->vts, title));
+                        if (ctx->vts)
+                            check(chapter >= 1 && chapter <= chapters_of(ctx->vts, title),
+                                  "JumpVTS_PTT target", chapter, chapters_of(ctx->vts, title));
                         append(out, size, used, "JumpVTS_PTT %u:%u", title, chapter);
                         return;
                     }
+                    case 6:
+                    case 8:
+                        system_jump(out, size, used, c);
+                        return;
                     default:
                         break;
                 }
@@ -368,29 +404,51 @@ static void disassemble(const uint8_t *c, command_context *ctx, char *out, size_
             link_part(out, size, used, c, ctx, 0);
             return;
         case 2:
-            /* Only SetHL_BTNN was seen; buttons count in units of 1024. */
+            /* SetSTN and SetHL_BTNN; buttons count in units of 1024. */
             used = condition(out, size, used, c, op, 0, 6, 6);
-            if (sub == 6 && c[0] & 0x10)
+            if (sub == 6)
             {
-                used = append(out, size, used, "SetHL_BTNN %u", (unsigned)(c[4] << 8 | c[5]) >> 10);
-                if (c[1] & 0x0fu)
-                    link_part(out, size, append(out, size, used, "; "), c, ctx, 1);
-                return;
-            }
-            break;
-        case 3:
-            if (!(c[1] & 0x7fu))
-            {
-                used = reg(out, size, used, c[3]);
-                used = append(out, size, used, " %s ", set_ops[sub]);
                 if (c[0] & 0x10)
-                    append(out, size, used, "%u", (unsigned)(c[4] << 8 | c[5]));
+                    used = append(out, size, used, "SetHL_BTNN %u",
+                                  (unsigned)(c[4] << 8 | c[5]) >> 10);
                 else
-                    reg(out, size, used, c[5]);
-                if (sub && sub <= 11)
-                    return;
+                    used = reg(out, size, append(out, size, used, "SetHL_BTNN "), c[5]);
             }
-            break;
+            else if (sub == 1)
+            {
+                static const char *const names[] = {"audio", "subpicture", "angle"};
+                unsigned i;
+                used = append(out, size, used, "SetSTN");
+                for (i = 0; i < 3; i++)
+                {
+                    if (!(c[3 + i] & 0x80))
+                        continue;
+                    used = append(out, size, used, " %s=", names[i]);
+                    if (c[0] & 0x10)
+                        used = append(out, size, used, "%u", c[3 + i] & 0x7fu);
+                    else
+                        used = reg(out, size, used, c[3 + i] & 0x0fu);
+                }
+            }
+            else
+                break;
+            if (c[1] & 0x0fu)
+                link_part(out, size, append(out, size, used, "; "), c, ctx, 1);
+            return;
+        case 3:
+            /* An optional condition on the register in byte 2. */
+            if (!sub || sub > 11 || (sub == 2 && c[0] & 0x10))
+                break;
+            used = condition(out, size, used, c, op, immediate, 2, 6);
+            used = reg(out, size, used, c[3]);
+            used = append(out, size, used, " %s ", set_ops[sub]);
+            if (c[0] & 0x10)
+                used = append(out, size, used, "%u", (unsigned)(c[4] << 8 | c[5]));
+            else
+                used = reg(out, size, used, c[5]);
+            if (c[1] & 0x0fu)
+                link_part(out, size, append(out, size, used, "; "), c, ctx, 1);
+            return;
         default:
             break;
     }
@@ -400,31 +458,180 @@ static void disassemble(const uint8_t *c, command_context *ctx, char *out, size_
              c[4], c[5], c[6], c[7]);
 }
 
-static int print_commands(const hddvd_vts *vts, size_t p, const hddvd_vts_pgc *pgc)
+/* Fetches a command of the PGC being printed. */
+typedef int (*command_fn)(const void *owner, size_t unit, size_t pgc, hddvd_vts_command_kind kind,
+                          size_t index, uint8_t command[8]);
+
+static int title_command(const void *owner, size_t unit, size_t pgc, hddvd_vts_command_kind kind,
+                         size_t index, uint8_t command[8])
+{
+    (void)unit;
+    return hddvd_vts_get_command(owner, pgc, kind, index, command);
+}
+
+static int vts_menu_command(const void *owner, size_t unit, size_t pgc, hddvd_vts_command_kind kind,
+                            size_t index, uint8_t command[8])
+{
+    return hddvd_vts_get_menu_command(owner, unit, pgc, kind, index, command);
+}
+
+static int vmg_menu_command(const void *owner, size_t unit, size_t pgc, hddvd_vts_command_kind kind,
+                            size_t index, uint8_t command[8])
+{
+    return hddvd_vmg_get_menu_command(owner, unit, pgc, kind, index, command);
+}
+
+static int first_play_command(const void *owner, size_t unit, size_t pgc,
+                              hddvd_vts_command_kind kind, size_t index, uint8_t command[8])
+{
+    (void)unit;
+    (void)pgc;
+    return hddvd_vmg_get_first_play_command(owner, kind, index, command);
+}
+
+static int print_commands(command_context *ctx, command_fn fetch, const void *owner, size_t unit,
+                          size_t p)
 {
     static const char *const names[] = {"pre", "post", "cell"};
-    const unsigned counts[] = {pgc->pre_command_count, pgc->post_command_count,
-                               pgc->cell_command_count};
-    command_context ctx;
+    const unsigned counts[] = {ctx->pgc->pre_command_count, ctx->pgc->post_command_count,
+                               ctx->pgc->cell_command_count};
     unsigned kind;
     size_t i;
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.vts = vts;
-    ctx.pgc = pgc;
     for (kind = 0; kind < 3; kind++)
     {
-        ctx.group_count = counts[kind];
+        ctx->group_count = counts[kind];
         for (i = 0; i < counts[kind]; i++)
         {
             uint8_t command[8];
             char text[160];
-            if (hddvd_vts_get_command(vts, p, (hddvd_vts_command_kind)kind, i, command))
+            if (fetch(owner, unit, p, (hddvd_vts_command_kind)kind, i, command))
                 continue;
-            disassemble(command, &ctx, text, sizeof(text));
+            disassemble(command, ctx, text, sizeof(text));
             printf("  %s %zu: %s\n", names[kind], i + 1, text);
         }
     }
-    return ctx.unconfirmed;
+    return ctx->unconfirmed;
+}
+
+static void print_menu_pgc(size_t u, size_t p, const hddvd_menu_pgc *category,
+                           const hddvd_vts_pgc *pgc)
+{
+    printf("menu %zu pgc %zu entry=%u menu-id=%u category=%02x%02x%02x%02x programs=%u cells=%u "
+           "commands=%u/%u/%u\n",
+           u + 1, p + 1, (unsigned)category->entry, (unsigned)category->menu_id,
+           category->category[0], category->category[1], category->category[2],
+           category->category[3], (unsigned)pgc->program_count, (unsigned)pgc->cell_count,
+           (unsigned)pgc->pre_command_count, (unsigned)pgc->post_command_count,
+           (unsigned)pgc->cell_command_count);
+}
+
+static void print_menu_unit(size_t u, const hddvd_menu_unit *unit)
+{
+    printf("menu %zu language=%s extension=%u existence=0x%02x pgcs=%u\n", u + 1,
+           unit->language[0] ? unit->language : "-", (unsigned)unit->language_extension,
+           (unsigned)unit->existence, (unsigned)unit->pgc_count);
+}
+
+static size_t print_vts_menus(const hddvd_vts *vts)
+{
+    size_t u, p, unconfirmed = 0;
+    for (u = 0; u < hddvd_vts_menu_unit_count(vts); u++)
+    {
+        hddvd_menu_unit unit;
+        hddvd_vts_get_menu_unit(vts, u, &unit);
+        print_menu_unit(u, &unit);
+        for (p = 0; p < unit.pgc_count; p++)
+        {
+            hddvd_menu_pgc category;
+            hddvd_vts_pgc pgc;
+            command_context ctx;
+            hddvd_vts_get_menu_pgc(vts, u, p, &category, &pgc);
+            print_menu_pgc(u, p, &category, &pgc);
+            memset(&ctx, 0, sizeof(ctx));
+            ctx.vts = vts;
+            ctx.pgc = &pgc;
+            ctx.pgc_count = unit.pgc_count;
+            ctx.menu = 1;
+            unconfirmed += (size_t)print_commands(&ctx, vts_menu_command, vts, u, p);
+        }
+    }
+    return unconfirmed;
+}
+
+/* Runs the first-play PGC's pre commands from cleared registers and prints
+   where they lead. */
+static void trace_first_play(const hddvd_vmg *vmg, const hddvd_vts_pgc *pgc)
+{
+    uint8_t *commands = malloc((size_t)pgc->pre_command_count * 8u + 8u);
+    hddvd_vm *vm = NULL;
+    hddvd_vm_result r;
+    size_t i;
+    int rc;
+    if (!commands || hddvd_vm_create(1, &vm))
+    {
+        free(commands);
+        return;
+    }
+    for (i = 0; i < pgc->pre_command_count; i++)
+        hddvd_vmg_get_first_play_command(vmg, HDDVD_VTS_PRE_COMMAND, i, commands + i * 8u);
+    rc = hddvd_vm_run(vm, commands, pgc->pre_command_count, 0, &r);
+    printf("first-play run: status=%s action=%s domain=%s target=%u line=%zu steps=%zu\n",
+           hddvd_strerror(rc), actions[r.action], domains[r.domain], (unsigned)r.target, r.line,
+           r.steps);
+    check(rc == HDDVD_OK && r.action != HDDVD_VM_UNSUPPORTED, "first-play run", r.line, 0);
+    hddvd_vm_destroy(vm);
+    free(commands);
+}
+
+static void print_vmg(const hddvd_vmg *vmg)
+{
+    size_t i, u, p, unconfirmed = 0;
+    hddvd_vts_pgc pgc;
+    command_context ctx;
+    printf("vmg last-sector=%lu title-sets=%zu titles=%zu\n",
+           (unsigned long)hddvd_vmg_last_sector(vmg), hddvd_vmg_title_set_count(vmg),
+           hddvd_vmg_title_count(vmg));
+    for (i = 0; i < hddvd_vmg_title_count(vmg); i++)
+    {
+        hddvd_vmg_title title;
+        hddvd_vmg_get_title(vmg, i, &title);
+        printf("title %zu title-set=%u/%u chapters=%u angles=%u sector=%lu type=0x%02x\n", i + 1,
+               (unsigned)title.title_set, (unsigned)title.title_set_title,
+               (unsigned)title.chapter_count, (unsigned)title.angle_count,
+               (unsigned long)title.title_set_sector, (unsigned)title.playback_type);
+    }
+    if (!hddvd_vmg_get_first_play(vmg, &pgc))
+    {
+        printf("first-play programs=%u cells=%u commands=%u/%u/%u\n", (unsigned)pgc.program_count,
+               (unsigned)pgc.cell_count, (unsigned)pgc.pre_command_count,
+               (unsigned)pgc.post_command_count, (unsigned)pgc.cell_command_count);
+        memset(&ctx, 0, sizeof(ctx));
+        ctx.pgc = &pgc;
+        ctx.menu = 1;
+        ctx.title_count = hddvd_vmg_title_count(vmg);
+        ctx.pgc_count = hddvd_vmg_menu_unit_count(vmg) ? SIZE_MAX : 0;
+        unconfirmed += (size_t)print_commands(&ctx, first_play_command, vmg, 0, 0);
+        trace_first_play(vmg, &pgc);
+    }
+    for (u = 0; u < hddvd_vmg_menu_unit_count(vmg); u++)
+    {
+        hddvd_menu_unit unit;
+        hddvd_vmg_get_menu_unit(vmg, u, &unit);
+        print_menu_unit(u, &unit);
+        for (p = 0; p < unit.pgc_count; p++)
+        {
+            hddvd_menu_pgc category;
+            hddvd_vmg_get_menu_pgc(vmg, u, p, &category, &pgc);
+            print_menu_pgc(u, p, &category, &pgc);
+            memset(&ctx, 0, sizeof(ctx));
+            ctx.pgc = &pgc;
+            ctx.pgc_count = unit.pgc_count;
+            ctx.title_count = hddvd_vmg_title_count(vmg);
+            ctx.menu = 1;
+            unconfirmed += (size_t)print_commands(&ctx, vmg_menu_command, vmg, u, p);
+        }
+    }
+    printf("commands unconfirmed=%zu\n", unconfirmed);
 }
 
 static const char *const video_codings[] = {"MPEG-2", "VC-1", "unknown", "unknown"};
@@ -500,6 +707,7 @@ static void print_vts(const hddvd_vts *vts)
 {
     hddvd_vts_info info;
     size_t t, c, p, k, unconfirmed = 0;
+    command_context ctx;
     hddvd_vts_get_info(vts, &info);
     printf("title-set last-sector=%lu ifo-sectors=%lu menu-evo=%lu title-evo=%lu+%lu "
            "vobus=%zu evob-cells=%zu\n",
@@ -544,7 +752,11 @@ static void print_vts(const hddvd_vts *vts)
                    (unsigned long)cell.last_vobu_sector, (unsigned)cell.command);
         }
         check(sum == ticks(&pgc.playback_time), "PGC time against its cells", p + 1, 0);
-        unconfirmed += (size_t)print_commands(vts, p, &pgc);
+        memset(&ctx, 0, sizeof(ctx));
+        ctx.vts = vts;
+        ctx.pgc = &pgc;
+        ctx.pgc_count = hddvd_vts_pgc_count(vts);
+        unconfirmed += (size_t)print_commands(&ctx, title_command, vts, 0, p);
         if (!hddvd_vts_get_time_map(vts, p, &unit, &entries))
         {
             printf("  time-map unit=%us entries=%zu\n", (unsigned)unit, entries);
@@ -567,6 +779,7 @@ static void print_vts(const hddvd_vts *vts)
             }
         }
     }
+    unconfirmed += print_vts_menus(vts);
     printf("commands unconfirmed=%zu\n", unconfirmed);
 }
 
@@ -597,20 +810,10 @@ int main(int argc, char **argv)
     }
     if (vmg)
     {
-        printf("vmg last-sector=%lu title-sets=%zu titles=%zu\n",
-               (unsigned long)hddvd_vmg_last_sector(vmg), hddvd_vmg_title_set_count(vmg),
-               hddvd_vmg_title_count(vmg));
-        for (i = 0; i < hddvd_vmg_title_count(vmg); i++)
-        {
-            hddvd_vmg_title title;
-            hddvd_vmg_get_title(vmg, i, &title);
-            printf("title %zu title-set=%u/%u chapters=%u angles=%u sector=%lu type=0x%02x\n",
-                   i + 1, (unsigned)title.title_set, (unsigned)title.title_set_title,
-                   (unsigned)title.chapter_count, (unsigned)title.angle_count,
-                   (unsigned long)title.title_set_sector, (unsigned)title.playback_type);
-        }
+        print_vmg(vmg);
         hddvd_vmg_close(vmg);
-        return 0;
+        printf("summary %s\n", failures ? "MISMATCH" : "ok");
+        return failures ? 1 : 0;
     }
     print_vts(vts);
     if (argc == 3)

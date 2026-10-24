@@ -375,6 +375,29 @@ the remaining failures are all P4-05 members (`Player`,
 **Acceptance:** deterministic replay tests cover listener ordering, focus cycles,
 removed nodes/listeners, timer cancellation, exceptions, and budget exhaustion.
 
+**Markup timing** now runs too (`src/hdi_prelude.js`, over timing layers in
+`src/runtime_dom.c`). It covers what the five discs' markup uses:
+- `par` and `cue` containers that begin at an offset or when a condition
+  becomes true, and end after `dur`, at an end offset, on an end condition,
+  or with their parent;
+- `fill="hold"`;
+- `set`, `animate` (linear or discrete) and `event` (with `param`s as event
+  fields), directly or through `use=` of `<defs>`;
+- an XPath subset for conditions and `select`: `id()`, `class()`,
+  `defaultNode()`, `//name`, `@name`, `$variables` from
+  `document.setXPathVariable()`, `state:` and `style:` functions,
+  predicates, comparisons, `and`, `or` and `|`.
+
+Timing values sit below script style values and held script state values;
+`state.unsetProperty()` now hands a property back to timing. Unparsable
+expressions and unsupported elements become `HDDVD_RUNTIME_ISSUE_TIMING`
+issues. `test_runtime_timing.c` covers offsets, fill, conditions, events,
+focus set by timing, variables, definitions, animation, precedence, restarts,
+issues and document replacement; `fuzz-runtime` also runs each input as the
+contents of a `<timing>` element. Every disc expression parses and no disc
+application reports a timing issue. The model follows SMIL and is unconfirmed
+against a player.
+
 ### P4-05 — Implement player and application host objects
 
 **Status:** Complete
@@ -411,7 +434,7 @@ callbacks at all.
   duration. Rejected and failed commands become issues.
 - **Unsupported and denied members:** members a player has but this runtime
   cannot honor throw an Error naming the member. These are audio mixing and
-  effects, video layout, `getSPRM`, `document.setXPathVariable`, and every
+  effects, video layout, `getSPRM`, `document.getProperties`, and every
   member of `FileIO`, `XMLParser`, `Network` and `PersistentStorageManager`,
   whose file and network access is denied. Their constants exist so scripts
   load.
@@ -423,10 +446,11 @@ callbacks at all.
 - **`hddvd-menurun`:** given a playlist, it finds the title that runs the
   application and reports it, prints and accepts commands, and a CTest checks
   a jump.
-- **Disc results:** on the five discs, the remaining failures are all of three
-  kinds: markup timing (`setXPathVariable`), denied XML and storage access,
-  and unsupported audio mixing. The only exceptions are scripts that read a
-  title or bookmark the host never reported.
+- **Disc results:** on the five discs, the remaining failures are all of two
+  kinds: denied XML and storage access, and unsupported audio mixing. The only
+  exceptions are scripts that read a title or bookmark the host never
+  reported, or state that a denied call left unset. (Markup timing, the third
+  kind before, now runs; see P4-04.)
 
 ### P4-06 — Reach reference-script conformance
 
@@ -595,7 +619,7 @@ all represented in the conformance report.
 
 ### P6-03 — Decode required IFO and MAP navigation structures
 
-**Status:** Advanced Content time maps, the VTI EVOB and attribute tables, and Standard Content IFO tables, command encoding and stream attributes decoded and verified against real discs; Standard Content menus, executing commands and the remaining attribute bits remain
+**Status:** Complete (attribute bits, angle layouts and other time bases that no available disc shows are listed below)
 **Depends on:** P1-01, P6-02
 **Likely files:** `src/ifo.c`, `src/map.c`, `tests/test_ifo.c`, `tests/test_map.c`
 
@@ -665,9 +689,36 @@ Fifth slice: commands and stream attributes.
   against a title EVO's streams. Synthetic fixtures, mutations in `test_vts.c`
   and `test_ifo.c`, and both fuzzers cover the new fields.
 
-Still open: Standard Content menus and a command VM, audio coding bits (no EVO
-with audio is available), angle or interleaved maps, and the clock for time
-bases other than 60fps.
+Sixth slice: menus, first play and command execution.
+- **Menus:** the menu PGC unit tables (title set 0xd0, VMG 0xc8) hold language
+  units of command-only PGCs. `hddvd_vts_get_menu_*` and
+  `hddvd_vmg_get_menu_*` read them; the category's menu id names the VMG
+  title menu (2) and each set's root menu (3). The VMG's first-play PGC lies in
+  its header at the byte offset in 0x84 (`hddvd_vmg_get_first_play*`). All 11
+  IFOs open: 9 menu tables, 18 menu PGCs and 1 first play.
+- **Domain fix:** jump subset 8 is `CallSS`. Its domain is in bits 5 and 4 of
+  byte 5, as for `JumpSS`, which the fifth slice read wrong. All 212 `CallSS`
+  commands and 6 `JumpSS` name VMG PGCs that exist, or a root menu its set
+  has. `hddvd-vtsinfo` now confirms all 1,094 commands but one, a `SetSystem`
+  sub-operation DVD does not define. It also decodes conditional sets and
+  `SetSTN`, prints both menu tables and the first play, and runs the first play.
+- **VM:** `hddvd_vm` runs command lists with libdvdnav's semantics: 64 general
+  and 32 system registers, conditions, `Goto`/`Break`, sets, `SetSTN`,
+  `SetHL_BTNN`, links and jumps. It returns the link or jump for the host to
+  follow. It never runs an unknown form; it reports it, and bad registers or
+  lines fail with `HDDVD_EPARSE`. `HDDVD_ELIMIT` stops a loop after 65,536
+  commands.
+- **Coverage:** `test_vm.c` covers every operation and rejection. `test_vts.c`
+  reads the synthetic menus and first play, rejects bad pointers, and runs the
+  fixture VMG's first play through its menus. `fuzz-vts` walks the menus and
+  runs its input as commands, from a new seed.
+
+Not decoded, for lack of evidence (no disc with them is available):
+- audio coding and channel bits (no EVO with audio);
+- menu EVOs and menu cells;
+- angle and interleaved maps;
+- the clock for time bases other than 60fps;
+- the cell command flags and bit 7 of the `JumpSS`/`CallSS` domain byte.
 
 ### P6-04 — Harden EVO packet and stream metadata parsing
 
@@ -693,7 +744,7 @@ bytes are cannot be told without decryption.
 
 ### P6-05 — Add the deterministic navigation scheduler
 
-**Status:** Scheduler complete; script-task integration ready
+**Status:** Complete
 **Depends on:** P4-05, P6-01, P6-02
 **Likely files:** `src/player.c`, `tests/test_player.c`
 
@@ -705,8 +756,28 @@ Timers run on title time. `hddvd_nav_discontinuity` handles seeks in either
 direction and stream discontinuities without reordering queued events,
 `HDDVD_EVENT_RATE_CHANGE` reports rate changes, and
 `hddvd_nav_cancel_all_timers` discards a closed menu's timers. Fake-clock tests
-in `test_player.c` cover every case in the acceptance criteria. Queuing script
-tasks can now use the runtime's commands and entry points (P4-05).
+in `test_player.c` cover every case in the acceptance criteria.
+
+Script tasks run on the same queue through `hddvd_runtime_bridge`
+(`src/runtime_bridge.c`). The host passes every pumped event to
+`hddvd_runtime_bridge_event`, which:
+- moves the runtime clock by the scheduler time that passed, so script timers
+  and animations follow title time and do not move across a seek;
+- turns input into key events;
+- reports title, chapter, play state and track changes as player state and
+  dispatches `title_begin`, `title_end`, `chapter`, `play_state`,
+  `audio_track` and `subtitle_track` (new event types `HDDVD_EVENT_TITLE_BEGIN`,
+  `HDDVD_EVENT_CHAPTER`, and `hddvd_stream_type` for stream selections);
+- hands the commands scripts made to the host in order, and takes the host's
+  answers back as `HDDVD_EVENT_SCRIPT_ACK` events, so acknowledgements are
+  ordered with everything else. Commands beyond the runtime's 64
+  unacknowledged wait for answers.
+
+`test_runtime_bridge.c` runs a scheduler with a runtime and checks event
+order and the state listeners see, timers across a seek, the command round
+trip (including rejection, an unknown id and the 64-command limit), a title
+the playlist lacks, a throwing listener and a bridge without a callback.
+`fuzz-runtime` drives every event type through a bridge.
 
 **Acceptance:** fake-clock tests prove stable ordering and timer behavior across
 pause, seek, rate change, discontinuity, title end, menu close, and reopen.

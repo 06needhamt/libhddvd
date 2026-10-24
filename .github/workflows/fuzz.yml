@@ -42,7 +42,7 @@ jobs:
             xpl) cp tests/fixtures/playlist_full.xpl corpus/ ;;
             script) cp tests/fixtures/scripts/*.hdis corpus/ ;;
             timemap) cp tests/fixtures/timemap/* corpus/ ;;
-            vts) cp tests/fixtures/standard/*.IFO corpus/ ;;
+            vts) cp tests/fixtures/standard/*.IFO tests/fixtures/fuzz/vts/* corpus/ ;;
             uri|titlemap|display|runtime) cp tests/fixtures/fuzz/${{ matrix.harness }}/* corpus/ ;;
           esac
       - name: Fuzz

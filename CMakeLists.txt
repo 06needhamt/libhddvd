@@ -121,6 +121,7 @@ set(HDDVD_SOURCES
     src/runtime.c
     src/runtime_dom.c
     src/runtime_player.c
+    src/runtime_bridge.c
     src/scene.c
     src/script_decode.c
     src/stream.c
@@ -130,6 +131,7 @@ set(HDDVD_SOURCES
     src/util.c
     src/vti.c
     src/vts.c
+    src/vm.c
     src/xmf.c
     src/xmu.c
     src/xpl.c
@@ -233,7 +235,7 @@ foreach(tool info menuinfo menurun acainfo acaextract scriptdump scriptinfo xpli
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom runtime_player vts)
+    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom runtime_player runtime_bridge runtime_timing vts vm)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         # Test assertions also perform setup and must run in Release builds.
@@ -328,6 +330,11 @@ if(BUILD_TESTING)
         COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HV001I01.IFO
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/timemap/original.vti)
     set_tests_properties(vtsinfo-wrong-evo PROPERTIES WILL_FAIL TRUE)
+    # The VMG's first play runs to its title menu; its menus disassemble.
+    add_test(NAME vtsinfo-vmg
+        COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HV000I01.IFO)
+    set_tests_properties(vtsinfo-vmg PROPERTIES PASS_REGULAR_EXPRESSION
+        "first-play run: status=success action=jump-system domain=vmg-menu target=2.*CallSS vts-menu 3 \\(resume cell 1\\).*commands unconfirmed=0.*summary ok")
     # Commands that link to a cell their PGC lacks.
     add_test(NAME vtsinfo-bad-link
         COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/bad-link.IFO)

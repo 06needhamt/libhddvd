@@ -3,8 +3,8 @@
 #include <string.h>
 
 /* The document state behind the HDi host objects (hdi_prelude.js): the
-   focus, script state and style values per markup node, and the natives the
-   prelude calls. Everything here is engine-neutral. */
+   focus, script and markup timing state and style values per markup node,
+   and the natives the prelude calls. Everything here is engine-neutral. */
 
 #define STATE_NS "http://www.dvdforum.org/2005/ihd#state"
 #define STATE_FOCUSED 0
@@ -29,13 +29,18 @@ enum native_index
     NATIVE_EPOCH,
     NATIVE_COUNT,
     NATIVE_ISSUE,
-    NATIVE_FIELD
+    NATIVE_FIELD,
+    NATIVE_ATTRIBUTE_AT,
+    NATIVE_UNSET_STATE,
+    NATIVE_TIMING_STATE,
+    NATIVE_TIMING_STYLE
 };
 
 /* In enum native_index order. */
 const char *const hddvd_runtime_native_names[] = {
     "find", "relative", "name", "id", "attribute", "getState", "setState", "getStyle", "setStyle",
-    "unsetStyle", "focus", "navigate", "epoch", "count", "issue", "field",
+    "unsetStyle", "focus", "navigate", "epoch", "count", "issue", "field", "attributeAt",
+    "unsetState", "timingState", "timingStyle",
     /* runtime_player.c, from HDDVD_RUNTIME_PLAYER_NATIVES. */
     "titleCount", "title", "chapter", "trackLanguage", "player", "command", "application"};
 const size_t hddvd_runtime_native_count =
@@ -47,17 +52,27 @@ static const char *const state_names[HDDVD_RUNTIME_STATE_COUNT] = {"focused", "e
 static const char *const state_defaults[HDDVD_RUNTIME_STATE_COUNT] = {"false", "true", "false",
                                                                       "false", ""};
 
+static void styles_free(struct hddvd_runtime_style *styles, size_t count)
+{
+    size_t i;
+    for (i = 0; i < count; i++)
+    {
+        free(styles[i].name);
+        free(styles[i].value);
+    }
+    free(styles);
+}
+
 static void node_free(struct hddvd_runtime_node *node)
 {
     size_t i;
     for (i = 0; i < HDDVD_RUNTIME_STATE_COUNT; i++)
-        free(node->state[i]);
-    for (i = 0; i < node->style_count; i++)
     {
-        free(node->styles[i].name);
-        free(node->styles[i].value);
+        free(node->state[i]);
+        free(node->timing_state[i]);
     }
-    free(node->styles);
+    styles_free(node->styles, node->style_count);
+    styles_free(node->timing_styles, node->timing_style_count);
 }
 
 void hddvd_runtime_document_free(hddvd_runtime *runtime)
@@ -152,53 +167,99 @@ static const char *markup_attribute(const hddvd_xmu *xmu, size_t node, const cha
 
 static const char *get_state(const hddvd_runtime *runtime, size_t node, int index)
 {
+    const struct hddvd_runtime_node *n = &runtime->nodes[node];
     const char *value;
     if (index == STATE_FOCUSED)
         return runtime->focus == node ? "true" : "false";
-    if (runtime->nodes[node].state[index])
-        return runtime->nodes[node].state[index];
+    if (n->state[index] && n->state_held[index])
+        return n->state[index];
+    if (n->timing_state[index])
+        return n->timing_state[index];
+    if (n->state[index])
+        return n->state[index];
     value = markup_attribute(runtime->xmu, node, STATE_NS, state_names[index]);
     return value ? value : state_defaults[index];
 }
 
-/* Flags hold "true" or "false"; anything but "true" is false. */
-static int set_state(hddvd_runtime *runtime, size_t node, int index, const char *value)
+/* Stores a copy in *slot (NULL clears it). */
+static int replace(char **slot, const char *value)
 {
-    char *copy;
-    if (index == STATE_FOCUSED)
-    {
-        if (!strcmp(value, "true"))
-            set_focus(runtime, node);
-        else if (runtime->focus == node)
-            set_focus(runtime, SIZE_MAX);
-        return HDDVD_OK;
-    }
-    if (index != STATE_VALUE)
-        value = strcmp(value, "true") ? "false" : "true";
-    if (!strcmp(get_state(runtime, node, index), value))
-        return HDDVD_OK;
-    copy = hddvd_strdup(value);
-    if (!copy)
+    char *copy = NULL;
+    if (value && !(copy = hddvd_strdup(value)))
         return HDDVD_ENOMEM;
-    free(runtime->nodes[node].state[index]);
-    runtime->nodes[node].state[index] = copy;
-    changed(runtime);
+    free(*slot);
+    *slot = copy;
     return HDDVD_OK;
 }
 
-static struct hddvd_runtime_style *find_style(struct hddvd_runtime_node *node, const char *name)
+/* Flags hold "true" or "false"; anything but "true" is false. A script
+   value is held until unsetProperty; a timing value (timing set) sits
+   below held script values, and NULL removes it. Focus moves either way,
+   and a timing value of "false" for focused does nothing (cues end by
+   removing their values, which leaves the focus where it is). */
+static int set_state(hddvd_runtime *runtime, size_t node, int index, const char *value, int timing)
+{
+    struct hddvd_runtime_node *n = &runtime->nodes[node];
+    char **slot, *before;
+    int rc = HDDVD_OK;
+    if (index == STATE_FOCUSED)
+    {
+        if (value && !strcmp(value, "true"))
+            set_focus(runtime, node);
+        else if (value && !timing && runtime->focus == node)
+            set_focus(runtime, SIZE_MAX);
+        return HDDVD_OK;
+    }
+    if (value && index != STATE_VALUE)
+        value = strcmp(value, "true") ? "false" : "true";
+    slot = timing ? &n->timing_state[index] : &n->state[index];
+    if ((value ? *slot && !strcmp(*slot, value) : !*slot) && (timing || n->state_held[index]))
+        return HDDVD_OK;
+    /* The value scripts read may live in the slot replaced below. */
+    before = hddvd_strdup(get_state(runtime, node, index));
+    if (!before)
+        return HDDVD_ENOMEM;
+    if (value ? !*slot || strcmp(*slot, value) : *slot != NULL)
+        rc = replace(slot, value);
+    if (!rc && !timing)
+        n->state_held[index] = 1;
+    if (!rc && strcmp(before, get_state(runtime, node, index)))
+        changed(runtime);
+    free(before);
+    return rc;
+}
+
+/* unsetProperty: the script value stays as the base value, below timing. */
+static void unset_state(hddvd_runtime *runtime, size_t node, int index)
+{
+    struct hddvd_runtime_node *n = &runtime->nodes[node];
+    const char *before;
+    if (index == STATE_FOCUSED || !n->state_held[index])
+        return;
+    before = get_state(runtime, node, index);
+    n->state_held[index] = 0;
+    if (strcmp(before, get_state(runtime, node, index)))
+        changed(runtime);
+}
+
+static struct hddvd_runtime_style *find_style(struct hddvd_runtime_style *styles, size_t count,
+                                              const char *name)
 {
     size_t i;
-    for (i = 0; i < node->style_count; i++)
-        if (!strcmp(node->styles[i].name, name))
-            return &node->styles[i];
+    for (i = 0; i < count; i++)
+        if (!strcmp(styles[i].name, name))
+            return &styles[i];
     return NULL;
 }
 
 static const char *get_style(const hddvd_runtime *runtime, size_t node, const char *name)
 {
-    const struct hddvd_runtime_style *style = find_style(&runtime->nodes[node], name);
+    struct hddvd_runtime_node *n = &runtime->nodes[node];
+    const struct hddvd_runtime_style *style = find_style(n->styles, n->style_count, name);
     const char *declared;
+    if (style)
+        return style->value;
+    style = find_style(n->timing_styles, n->timing_style_count, name);
     if (style)
         return style->value;
     declared = hddvd_style_declared(runtime->pristine, node, name);
@@ -214,19 +275,30 @@ static const char *get_style(const hddvd_runtime *runtime, size_t node, const ch
     return "";
 }
 
-/* Recomputes a node from markup plus its script values; a value the model
-   rejects leaves its property as markup had it. */
-static int rebuild(hddvd_runtime *runtime, size_t node)
+static int apply_styles(hddvd_runtime *runtime, size_t node, const struct hddvd_runtime_style *list,
+                        size_t count)
 {
-    struct hddvd_runtime_node *n = &runtime->nodes[node];
     size_t i;
-    int rc = hddvd_style_restore(runtime->styles, runtime->pristine, node);
-    for (i = 0; !rc && i < n->style_count; i++)
+    int rc = HDDVD_OK;
+    for (i = 0; !rc && i < count; i++)
     {
-        rc = hddvd_style_override(runtime->styles, node, n->styles[i].name, n->styles[i].value);
+        rc = hddvd_style_override(runtime->styles, node, list[i].name, list[i].value);
         if (rc == HDDVD_ENOTSUP || rc == HDDVD_EPARSE)
             rc = HDDVD_OK;
     }
+    return rc;
+}
+
+/* Recomputes a node from markup plus its timing and then script values; a
+   value the model rejects leaves its property as it was below. */
+static int rebuild(hddvd_runtime *runtime, size_t node)
+{
+    struct hddvd_runtime_node *n = &runtime->nodes[node];
+    int rc = hddvd_style_restore(runtime->styles, runtime->pristine, node);
+    if (!rc)
+        rc = apply_styles(runtime, node, n->timing_styles, n->timing_style_count);
+    if (!rc)
+        rc = apply_styles(runtime, node, n->styles, n->style_count);
     return rc;
 }
 
@@ -239,10 +311,14 @@ static void style_issue(hddvd_runtime *runtime, size_t node, const char *name, c
     hddvd_runtime_add_issue(runtime, HDDVD_RUNTIME_ISSUE_STYLE, node, message, strlen(message));
 }
 
-static int set_style(hddvd_runtime *runtime, size_t node, const char *name, const char *value)
+/* Sets a script value, or a timing value (timing nonzero). */
+static int set_style(hddvd_runtime *runtime, size_t node, const char *name, const char *value,
+                     int timing)
 {
     struct hddvd_runtime_node *n = &runtime->nodes[node];
-    struct hddvd_runtime_style *style = find_style(n, name);
+    struct hddvd_runtime_style **list = timing ? &n->timing_styles : &n->styles;
+    size_t *count = timing ? &n->timing_style_count : &n->style_count;
+    struct hddvd_runtime_style *style = find_style(*list, *count, name);
     char *copy;
     int rc;
     if (style && !strcmp(style->value, value))
@@ -254,37 +330,43 @@ static int set_style(hddvd_runtime *runtime, size_t node, const char *name, cons
     {
         struct hddvd_runtime_style *grown;
         char *name_copy = hddvd_strdup(name);
-        grown = name_copy ? realloc(n->styles, (n->style_count + 1) * sizeof(*grown)) : NULL;
+        grown = name_copy ? realloc(*list, (*count + 1) * sizeof(*grown)) : NULL;
         if (!grown)
         {
             free(name_copy);
             free(copy);
             return HDDVD_ENOMEM;
         }
-        n->styles = grown;
-        style = &n->styles[n->style_count++];
+        *list = grown;
+        style = &grown[(*count)++];
         style->name = name_copy;
         style->value = NULL;
     }
     free(style->value);
     style->value = copy;
     changed(runtime);
+    /* A timing value under a script value takes effect when the script
+       value goes. */
+    if (timing && find_style(n->styles, n->style_count, name))
+        return HDDVD_OK;
     rc = hddvd_style_override(runtime->styles, node, name, value);
     if (rc == HDDVD_ENOTSUP || rc == HDDVD_EPARSE)
         style_issue(runtime, node, name, value, rc);
-    /* Bring back a value an earlier script set for this property. */
+    /* Bring back the value below for this property. */
     return rc ? rebuild(runtime, node) : HDDVD_OK;
 }
 
-static int unset_style(hddvd_runtime *runtime, size_t node, const char *name)
+static int unset_style(hddvd_runtime *runtime, size_t node, const char *name, int timing)
 {
     struct hddvd_runtime_node *n = &runtime->nodes[node];
-    struct hddvd_runtime_style *style = find_style(n, name);
+    struct hddvd_runtime_style *list = timing ? n->timing_styles : n->styles;
+    size_t *count = timing ? &n->timing_style_count : &n->style_count;
+    struct hddvd_runtime_style *style = find_style(list, *count, name);
     if (!style)
         return HDDVD_OK;
     free(style->name);
     free(style->value);
-    *style = n->styles[--n->style_count];
+    *style = list[--*count];
     changed(runtime);
     return rebuild(runtime, node);
 }
@@ -410,7 +492,7 @@ static int native_node(hddvd_runtime *runtime, unsigned index, const hddvd_engin
 {
     hddvd_xmu_node node;
     const char *name, *value;
-    double which;
+    double which, part;
     size_t at;
     int state, rc;
     if (!arg_node(runtime, args, count, &at, message))
@@ -448,8 +530,53 @@ static int native_node(hddvd_runtime *runtime, unsigned index, const hddvd_engin
             }
             if (!arg_string(args, count, 3, &value))
                 return fail(message, "invalid state value", HDDVD_EINVAL);
-            rc = set_state(runtime, at, state, value);
+            rc = set_state(runtime, at, state, value, 0);
             return rc ? fail(message, "out of memory", rc) : HDDVD_OK;
+        case NATIVE_UNSET_STATE:
+            if (!arg_string(args, count, 2, &name) || (state = state_index(name)) < 0)
+                return fail(message, "unknown state property", HDDVD_EINVAL);
+            unset_state(runtime, at, state);
+            return HDDVD_OK;
+        case NATIVE_TIMING_STATE:
+        case NATIVE_TIMING_STYLE:
+            /* (name, value), or (name, null) to remove the timing value. */
+            if (!arg_string(args, count, 2, &name) || !*name ||
+                (index == NATIVE_TIMING_STATE && (state = state_index(name)) < 0))
+                return fail(message,
+                            index == NATIVE_TIMING_STATE ? "unknown state property"
+                                                         : "invalid style property",
+                            HDDVD_EINVAL);
+            value = NULL;
+            if (count < 4 || args[3].type != HDDVD_ENGINE_NULL)
+            {
+                if (!arg_string(args, count, 3, &value))
+                    return fail(message, "invalid timing value", HDDVD_EINVAL);
+            }
+            if (index == NATIVE_TIMING_STATE)
+                rc = set_state(runtime, at, state, value, 1);
+            else
+                rc = value ? set_style(runtime, at, name, value, 1)
+                           : unset_style(runtime, at, name, 1);
+            return rc ? fail(message, "out of memory", rc) : HDDVD_OK;
+        case NATIVE_ATTRIBUTE_AT:
+        {
+            /* attributeAt(-1) counts the attributes; attributeAt(i, part)
+               gives the namespace URI (or null), local name or value. */
+            hddvd_xmu_attribute a;
+            if (!arg_number(args, count, 2, &which))
+                return fail(message, "invalid attribute", HDDVD_EINVAL);
+            if (which < 0)
+            {
+                set_number(result, (double)node.attribute_count);
+                return HDDVD_OK;
+            }
+            if (!(which < (double)node.attribute_count) || which != (double)(size_t)which ||
+                !arg_number(args, count, 3, &part) ||
+                hddvd_xmu_get_attribute(runtime->xmu, at, (size_t)which, &a))
+                return fail(message, "invalid attribute", HDDVD_EINVAL);
+            set_string(result, part == 0 ? a.namespace_uri : part == 1 ? a.name : a.value);
+            return HDDVD_OK;
+        }
         case NATIVE_GET_STYLE:
         case NATIVE_SET_STYLE:
         case NATIVE_UNSET_STYLE:
@@ -463,11 +590,11 @@ static int native_node(hddvd_runtime *runtime, unsigned index, const hddvd_engin
             /* As in CSS, setting "" removes the script's value. */
             if (index == NATIVE_UNSET_STYLE ||
                 (count > 3 && args[3].type == HDDVD_ENGINE_STRING && args[3].length == 0))
-                rc = unset_style(runtime, at, name);
+                rc = unset_style(runtime, at, name, 0);
             else if (!arg_string(args, count, 3, &value))
                 return fail(message, "invalid style value", HDDVD_EINVAL);
             else
-                rc = set_style(runtime, at, name, value);
+                rc = set_style(runtime, at, name, value, 0);
             return rc ? fail(message, "out of memory", rc) : HDDVD_OK;
         default:
             return fail(message, "unknown host function", HDDVD_EINVAL);
@@ -503,7 +630,8 @@ int hddvd_runtime_native(void *opaque, unsigned index, const hddvd_engine_value 
             return HDDVD_OK;
         case NATIVE_ISSUE:
             if (!arg_number(args, count, 0, &number) ||
-                (number != HDDVD_RUNTIME_ISSUE_EXCEPTION && number != HDDVD_RUNTIME_ISSUE_TRACE) ||
+                (number != HDDVD_RUNTIME_ISSUE_EXCEPTION && number != HDDVD_RUNTIME_ISSUE_TRACE &&
+                 number != HDDVD_RUNTIME_ISSUE_TIMING) ||
                 count < 2 || args[1].type != HDDVD_ENGINE_STRING)
                 return fail(message, "invalid issue", HDDVD_EINVAL);
             hddvd_runtime_add_issue(runtime, (hddvd_runtime_issue_kind)number, SIZE_MAX,
