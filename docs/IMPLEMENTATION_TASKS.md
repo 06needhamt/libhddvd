@@ -375,6 +375,29 @@ the remaining failures are all P4-05 members (`Player`,
 **Acceptance:** deterministic replay tests cover listener ordering, focus cycles,
 removed nodes/listeners, timer cancellation, exceptions, and budget exhaustion.
 
+**Markup timing** now runs too (`src/hdi_prelude.js`, over timing layers in
+`src/runtime_dom.c`). It covers what the five discs' markup uses:
+- `par` and `cue` containers that begin at an offset or when a condition
+  becomes true, and end after `dur`, at an end offset, on an end condition,
+  or with their parent;
+- `fill="hold"`;
+- `set`, `animate` (linear or discrete) and `event` (with `param`s as event
+  fields), directly or through `use=` of `<defs>`;
+- an XPath subset for conditions and `select`: `id()`, `class()`,
+  `defaultNode()`, `//name`, `@name`, `$variables` from
+  `document.setXPathVariable()`, `state:` and `style:` functions,
+  predicates, comparisons, `and`, `or` and `|`.
+
+Timing values sit below script style values and held script state values;
+`state.unsetProperty()` now hands a property back to timing. Unparsable
+expressions and unsupported elements become `HDDVD_RUNTIME_ISSUE_TIMING`
+issues. `test_runtime_timing.c` covers offsets, fill, conditions, events,
+focus set by timing, variables, definitions, animation, precedence, restarts,
+issues and document replacement; `fuzz-runtime` also runs each input as the
+contents of a `<timing>` element. Every disc expression parses and no disc
+application reports a timing issue. The model follows SMIL and is unconfirmed
+against a player.
+
 ### P4-05 — Implement player and application host objects
 
 **Status:** Complete
@@ -411,7 +434,7 @@ callbacks at all.
   duration. Rejected and failed commands become issues.
 - **Unsupported and denied members:** members a player has but this runtime
   cannot honor throw an Error naming the member. These are audio mixing and
-  effects, video layout, `getSPRM`, `document.setXPathVariable`, and every
+  effects, video layout, `getSPRM`, `document.getProperties`, and every
   member of `FileIO`, `XMLParser`, `Network` and `PersistentStorageManager`,
   whose file and network access is denied. Their constants exist so scripts
   load.
@@ -423,10 +446,11 @@ callbacks at all.
 - **`hddvd-menurun`:** given a playlist, it finds the title that runs the
   application and reports it, prints and accepts commands, and a CTest checks
   a jump.
-- **Disc results:** on the five discs, the remaining failures are all of three
-  kinds: markup timing (`setXPathVariable`), denied XML and storage access,
-  and unsupported audio mixing. The only exceptions are scripts that read a
-  title or bookmark the host never reported.
+- **Disc results:** on the five discs, the remaining failures are all of two
+  kinds: denied XML and storage access, and unsupported audio mixing. The only
+  exceptions are scripts that read a title or bookmark the host never
+  reported, or state that a denied call left unset. (Markup timing, the third
+  kind before, now runs; see P4-04.)
 
 ### P4-06 — Reach reference-script conformance
 

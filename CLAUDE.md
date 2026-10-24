@@ -121,7 +121,9 @@ Layered, bottom-up (see `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the full desi
    and failing stubs for file, XML, network and storage objects are in the same prelude
    over `runtime_player.c`, which keeps the borrowed playlist, the player state and
    application list the host reports, and a bounded queue of typed commands the host
-   takes and acknowledges. `runtime_bridge.c` runs a runtime as navigation-queue tasks
+   takes and acknowledges. Markup timing (`<timing>` par/cue containers, set/animate/event
+   actions, an XPath subset) also runs in the prelude; its values go to timing layers in
+   `runtime_dom.c` that sit below script values. `runtime_bridge.c` runs a runtime as navigation-queue tasks
    (`hddvd_runtime_bridge_event`: scheduler events become key, clock and player events,
    and commands go to the host and come back as `HDDVD_EVENT_SCRIPT_ACK`). `docs/hdi-host-api.md` lists what discs use
    (`tools/inventory_hdi_scripts.py`) and `hddvd-menurun` runs a disc application. `script_decode.c` is a bounded structural

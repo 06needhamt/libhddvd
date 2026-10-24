@@ -30,7 +30,9 @@ Experimental open-source HD DVD inspection library.
   `hddvd_scene_build`. `Player` reads the playlist and the player state the
   host reports, and turns playback calls into typed commands the host takes
   and acknowledges; file, XML, network and storage objects are denied, and
-  unsupported members throw. `hddvd_runtime_bridge` runs a runtime as tasks
+  unsupported members throw. Markup timing runs: `par`/`cue` containers,
+  `set`, `animate` and `event` actions and the XPath subset discs use.
+  `hddvd_runtime_bridge` runs a runtime as tasks
   on the navigation queue, so scripts see input, time, player events and
   command answers in queue order. `docs/hdi-host-api.md` lists what disc scripts
   use. A bounded structural decoder covers the clean-room `HDIS` fixture
@@ -198,4 +200,4 @@ original synthetic seeds and contain no bytes from the reference archive.
 
 ## Status
 
-This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content command semantics and menus, markup timing, and conformance against a real player's behavior are future work.
+This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content command semantics and menus, and conformance against a real player's behavior are future work.

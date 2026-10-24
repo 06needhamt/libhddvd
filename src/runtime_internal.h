@@ -14,12 +14,19 @@ struct hddvd_runtime_style
     char *value;
 };
 
-/* Script values for one markup node; NULL state slots hold no script value. */
+/* Script and markup timing values for one markup node; NULL state slots
+   hold no value. A script state value overrides markup timing while held,
+   from setProperty until unsetProperty; after that it is the base value
+   timing overrides. Script style values always override timing ones. */
 struct hddvd_runtime_node
 {
     char *state[HDDVD_RUNTIME_STATE_COUNT];
+    unsigned char state_held[HDDVD_RUNTIME_STATE_COUNT];
+    char *timing_state[HDDVD_RUNTIME_STATE_COUNT];
     struct hddvd_runtime_style *styles;
     size_t style_count;
+    struct hddvd_runtime_style *timing_styles;
+    size_t timing_style_count;
 };
 
 #define HDDVD_RUNTIME_MAX_COMMANDS 64
@@ -90,7 +97,7 @@ void hddvd_runtime_issues_free(hddvd_runtime *);
 void hddvd_runtime_add_issue(hddvd_runtime *, hddvd_runtime_issue_kind, size_t, const char *,
                              size_t);
 /* runtime_player.c: natives from index HDDVD_RUNTIME_PLAYER_NATIVES on. */
-#define HDDVD_RUNTIME_PLAYER_NATIVES 16u
+#define HDDVD_RUNTIME_PLAYER_NATIVES 20u
 int hddvd_runtime_player_native(hddvd_runtime *, unsigned index, const hddvd_engine_value *args,
                                 size_t count, hddvd_engine_value *result, const char **message);
 void hddvd_runtime_player_free(hddvd_runtime *);

@@ -307,8 +307,8 @@ static void parameters_and_stubs(void)
        "expect(throws(function () { Player.standardContentPlayer.getSPRM(16); },"
        "  /not supported/), 'SPRM');"
        "expect(Node.ELEMENT_NODE === 1, 'Node');"
-       "expect(throws(function () { document.setXPathVariable('Focus', ''); },"
-       "  /document.setXPathVariable is not supported/), 'markup timing');"
+       "expect(throws(function () { document.getProperties(); },"
+       "  /document.getProperties is not supported/), 'properties');"
        "Diagnostics.trace('menu ready', Diagnostics.TRACE_LEVEL_INFO);");
     assert(hddvd_runtime_command_count(runtime) == 0);
     assert(hddvd_runtime_issue_count(runtime) == 1);

@@ -124,11 +124,41 @@ over natives in `src/runtime_dom.c` and `src/runtime_player.c`.
 - **Denied:** `FileIO`, `XMLParser`, `Network` and `PersistentStorageManager`
   have their constants, but every method throws, since file and network access
   is denied.
-- **Unsupported:** audio mixing and effects, video layout, `getSPRM` and the
-  markup-timing calls throw an error naming the member.
+- **Unsupported:** audio mixing and effects, video layout, `getSPRM` and
+  `document.getProperties()` throw an error naming the member.
+- **Markup timing:** the `<timing>` element runs, with `setXPathVariable()`
+  supplying its variables. See below.
 
-Markup timing (cues, `<event>` elements, markup animations and
-`setXPathVariable()`) is not modeled.
+### Markup timing
+
+Disc markup puts `par` containers in `<timing>`, with `cue` children whose
+`set`, `animate` and `event` actions act on the elements a `select`
+expression names. 1,698 cues on the three readable discs use:
+- **times:** offsets such as `500ms`, `2s`, `1.5s` and `12f`, and `dur`;
+- **conditions:** XPath expressions on `begin` and `end`, mostly
+  `id('x')[state:focused()=true()]` and `defaultNode()[...]`, plus `class()`,
+  `//button[...]`, `@id`, `$variables`, `not()`, `substring-before()` and the
+  `style:` functions;
+- **`fill="hold"`**, and `use=` of `<defs>` groups.
+
+The runtime runs all of it (`include/hddvd.h` lists the subset):
+- A container begins at its offset from its parent's begin, or each time
+  its begin condition becomes true.
+- It ends after `dur`, at its end offset, when its end condition is true,
+  or with its parent.
+- While a cue is active, its values apply to its selected elements, or,
+  with no `select`, to the elements its begin condition matched. With
+  `fill="hold"` they stay until the parent ends. Of several cues, the one
+  that began last wins.
+- An `event` action dispatches its name when the cue begins, with its
+  `param`s as event fields (`evt.bt_id`) and the first target as
+  `evt.target`.
+- Timing values sit below script style values and held script state values.
+  `state.unsetProperty()` keeps the script's value but lets timing change it
+  again, which explains why scripts call it right after setting a value.
+
+Timing runs at the end of every call that runs scripts, so variables set by
+a script take effect at the next host call.
 
 ### Model choices to confirm against a player
 
@@ -143,10 +173,14 @@ Markup timing (cues, `<event>` elements, markup animations and
   duration. Lengths and numbers interpolate linearly; other values switch at
   each keyframe.
 - **State properties:**
-  - `state.unsetProperty()` keeps the value. Scripts call it right after
-    setting a value, which suggests it hands the property back to markup
-    timing.
+  - `state.unsetProperty()` keeps the value but hands the property back to
+    markup timing.
   - `enabled` defaults to `"true"`.
+- **Markup timing:** the SMIL reading above: begin on a condition's rise,
+  end conditions checked while active, `fill="hold"` until the parent ends,
+  last-begun cue wins, discrete animation steps evenly, frames (`f`) count at
+  60000/1001, the page clock starts at markup load, and timing set to
+  `focused="true"` moves the focus when the value first applies.
 - **Initial style values:** `"auto"` for display, `"visible"` for
   visibility, `"1"` for opacity, and `""` otherwise.
 - **Player constants:** the values of `PLAYSTATE_STOP`/`PLAY`/`PAUSE`
@@ -180,13 +214,18 @@ gives each application. The results:
   and 2 call `XMLParser` (denied).
 - **Runtime failures:** all from things the runtime deliberately does not do,
   or from state no host reported:
-  - 15 handlers stop at `document.setXPathVariable()` (markup timing);
+  - 15 handlers stopped at `document.setXPathVariable()` before markup timing
+    ran; they now run, and every timing expression on the discs parses;
   - 4 stop at `XMLParser`;
   - 12 come from the 8 applications that no playlist title runs, so no
     current title is reported;
   - 5 read a bookmark title that a script never set.
 - **Commands:** applications ask to be moved to the top of the stack as they
   start.
+- **With markup timing:** focus and action cues dispatch the discs' markup
+  events (`GotFocus`, `ButtonActioned`, ...) to their listeners. A few
+  listeners then fail on state that a denied `XMLParser` or storage call
+  left unset.
 
 One question remains open. A key listener on one disc (a Toshiba player
 workaround, per its comment) tests `evt.target.application`, which must be

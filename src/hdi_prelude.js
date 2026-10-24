@@ -322,10 +322,9 @@
     State.prototype.setProperty = function (name, value) {
         native.setState(this._epoch, this._node, String(name), String(value));
     };
-    /* Markup timing, which would take the property back, is not modeled;
-       the name is still checked. */
+    /* The script's value stays, but markup timing may change it again. */
     State.prototype.unsetProperty = function (name) {
-        native.getState(this._epoch, this._node, String(name));
+        native.unsetState(this._epoch, this._node, String(name));
     };
 
     function Style(epoch, node) {
@@ -428,6 +427,725 @@
                 cancelAnimation(a.node, a.name);
                 fault('an animation of ' + a.name, e);
             }
+        }
+    }
+
+    /* Markup timing: the <timing> element's par and cue containers, their
+       set, animate and event actions, and the XPath expressions their
+       begin, end and select attributes use. The model follows SMIL as HDi
+       markup uses it and is unconfirmed throughout (docs/hdi-host-api.md):
+       - a container begins at an offset from its parent's begin, or when
+         its begin condition becomes true (and again on each later rise);
+       - it ends after dur, at an end offset from its parent's begin, when
+         its end condition is true, or with its parent;
+       - a cue's set and animate values apply to its selected elements (or,
+         without select, to those its begin condition matched, else to its
+         parent's default node) while it is active, and after it ends when fill="hold", until its parent
+         ends; the cue that began last wins;
+       - an event action dispatches its name, with its params as event
+         fields and the cue's first selected element as target, when the
+         cue begins.
+       Timing values sit below script style values and held script state
+       values. */
+
+    var STYLE_NS = 'http://www.dvdforum.org/2005/ihd#style';
+    var STATE_NS = 'http://www.dvdforum.org/2005/ihd#state';
+    var ISSUE_TIMING = 5;
+    /* Rounds of timing updates per host call while values or events change
+       other conditions. */
+    var TIMING_ROUNDS = 8;
+    var variables = {};
+    var timing = null;
+    var compiled = {};
+
+    function timingIssue(text) {
+        native.issue(ISSUE_TIMING, text);
+    }
+
+    /* Ticks for "500ms", "2s", "1.5s", "12f" (frames at 60000/1001 per
+       second, as in playlists) or "HH:MM:SS:FF"; Infinity for "indefinite";
+       NaN for anything else. */
+    function timeValue(text) {
+        var m = /^\s*(\d+(?:\.\d+)?)(ms|s|f)\s*$/.exec(text);
+        if (m)
+            return Math.round(+m[1] * (m[2] === 'ms' ? 90 : m[2] === 's' ? TICKS_PER_SECOND :
+                                                                           1501.5));
+        if (/^\s*indefinite\s*$/.test(text))
+            return Infinity;
+        try {
+            return timecodeTicks(text.replace(/^\s+|\s+$/g, ''), 'timing');
+        } catch (e) {
+            return NaN;
+        }
+    }
+
+    /* XPath: the subset disc markup uses. Values are booleans, numbers,
+       strings and node sets ({nodes: [...]}). */
+
+    function tokenize(text) {
+        var tokens = [], i = 0, m, rest,
+            pattern = /^(?:\s+|'([^']*)'|"([^"]*)"|(\d+(?:\.\d+)?|\.\d+)|(\$?[A-Za-z_][\w.]*(?:-[A-Za-z_][\w.]*)*(?::[A-Za-z_][\w.]*(?:-[A-Za-z_][\w.]*)*)?)|(\/\/|!=|<=|>=|[\/\[\](),@=<>|*-]))/;
+        while (i < text.length) {
+            rest = text.substring(i);
+            m = pattern.exec(rest);
+            if (!m)
+                throw new SyntaxError('unexpected "' + rest.charAt(0) + '"');
+            i += m[0].length;
+            if (m[1] !== undefined || m[2] !== undefined)
+                tokens.push({t: 'str', v: m[1] !== undefined ? m[1] : m[2]});
+            else if (m[3] !== undefined)
+                tokens.push({t: 'num', v: +m[3]});
+            else if (m[4] !== undefined)
+                tokens.push(m[4].charAt(0) === '$' ? {t: 'var', v: m[4].substring(1)}
+                                                   : {t: 'name', v: m[4]});
+            else if (m[5] !== undefined)
+                tokens.push({t: 'op', v: m[5]});
+        }
+        return tokens;
+    }
+
+    function parseXPath(text) {
+        var tokens = tokenize(text), at = 0, tree;
+        function peek(v) {
+            var t = tokens[at];
+            return t && (t.t === 'op' || t.t === 'name') && t.v === v;
+        }
+        function take(v) {
+            if (!peek(v))
+                throw new SyntaxError('expected "' + v + '"');
+            at++;
+        }
+        function binary(next, ops, kind) {
+            return function () {
+                var left = next(), op;
+                for (;;) {
+                    op = null;
+                    for (var i = 0; i < ops.length; i++)
+                        if (peek(ops[i]))
+                            op = ops[i];
+                    if (op === null)
+                        return left;
+                    at++;
+                    left = {k: kind, op: op, a: left, b: next()};
+                }
+            };
+        }
+        function predicates(base) {
+            while (peek('[')) {
+                at++;
+                base = {k: 'filter', a: base, p: or()};
+                take(']');
+            }
+            return base;
+        }
+        function primary() {
+            var t = tokens[at], args;
+            if (!t)
+                throw new SyntaxError('unexpected end');
+            if (t.t === 'str' || t.t === 'num') {
+                at++;
+                return {k: 'lit', v: t.v};
+            }
+            if (t.t === 'var') {
+                at++;
+                return {k: 'var', v: t.v};
+            }
+            if (peek('(')) {
+                at++;
+                args = or();
+                take(')');
+                return args;
+            }
+            if (peek('@')) {
+                at++;
+                t = tokens[at++];
+                if (!t || t.t !== 'name')
+                    throw new SyntaxError('expected an attribute name');
+                return {k: 'attr', v: t.v};
+            }
+            if (peek('//')) {
+                at++;
+                t = tokens[at++];
+                if (!t || !(t.t === 'name' || (t.t === 'op' && t.v === '*')))
+                    throw new SyntaxError('expected an element name');
+                return {k: 'all', v: t.v};
+            }
+            if (t.t === 'name' && tokens[at + 1] && tokens[at + 1].v === '(' &&
+                tokens[at + 1].t === 'op') {
+                at += 2;
+                args = [];
+                if (!peek(')')) {
+                    args.push(or());
+                    while (peek(',')) {
+                        at++;
+                        args.push(or());
+                    }
+                }
+                take(')');
+                return {k: 'call', v: t.v, args: args};
+            }
+            throw new SyntaxError('unexpected "' + t.v + '"');
+        }
+        function unary() {
+            if (peek('-')) {
+                at++;
+                return {k: 'neg', a: unary()};
+            }
+            return binary(function () { return predicates(primary()); }, ['|'], 'union')();
+        }
+        var relational = binary(unary, ['<=', '>=', '<', '>'], 'cmp');
+        var equality = binary(relational, ['=', '!='], 'cmp');
+        var and = binary(equality, ['and'], 'and');
+        var or = binary(and, ['or'], 'or');
+        tree = or();
+        if (at !== tokens.length)
+            throw new SyntaxError('unexpected "' + tokens[at].v + '"');
+        return tree;
+    }
+
+    /* A compiled expression, or null (with one issue) when it does not
+       parse. */
+    function compile(text) {
+        if (compiled.hasOwnProperty(text))
+            return compiled[text];
+        try {
+            compiled[text] = {text: text, tree: parseXPath(text), failed: false};
+        } catch (e) {
+            timingIssue('expression "' + text + '": ' + e.message);
+            compiled[text] = null;
+        }
+        return compiled[text];
+    }
+
+    function isNodes(value) {
+        return value !== null && typeof value === 'object';
+    }
+
+    function toBoolean(value) {
+        if (isNodes(value))
+            return value.nodes.length > 0;
+        if (typeof value === 'number')
+            return value === value && value !== 0;
+        if (typeof value === 'string')
+            return value.length > 0;
+        return !!value;
+    }
+
+    function toNumber(value) {
+        if (isNodes(value))
+            return NaN;
+        if (typeof value === 'string')
+            return /^\s*-?(\d+(\.\d*)?|\.\d+)\s*$/.test(value) ? +value : NaN;
+        return +value;
+    }
+
+    function toString(value) {
+        if (isNodes(value))
+            return value.nodes.length ? native.id(timing.epoch, value.nodes[0]) || '' : '';
+        if (typeof value === 'boolean')
+            return value ? 'true' : 'false';
+        return String(value);
+    }
+
+    function compare(op, a, b) {
+        var x, y;
+        if (isNodes(a) || isNodes(b)) {
+            /* Only against booleans: the markup compares node sets no other
+               way. */
+            if (typeof a !== 'boolean' && typeof b !== 'boolean')
+                return false;
+        }
+        if (op === '=' || op === '!=') {
+            if (typeof a === 'boolean' || typeof b === 'boolean') {
+                x = toBoolean(a);
+                y = toBoolean(b);
+            } else if (typeof a === 'number' || typeof b === 'number') {
+                x = toNumber(a);
+                y = toNumber(b);
+            } else {
+                x = toString(a);
+                y = toString(b);
+            }
+            return op === '=' ? x === y : x !== y;
+        }
+        x = toNumber(a);
+        y = toNumber(b);
+        return op === '<' ? x < y : op === '>' ? x > y : op === '<=' ? x <= y : x >= y;
+    }
+
+    function idNodes(value) {
+        var out = [], ids, i, node;
+        if (isNodes(value))
+            return value.nodes;
+        ids = toString(value).split(/\s+/);
+        for (i = 0; i < ids.length; i++)
+            if (ids[i] && (node = native.find(ids[i])) >= 0)
+                out.push(node);
+        return out;
+    }
+
+    function call(name, args, context) {
+        var node = context.node, a, b, i;
+        if (name.substring(0, 6) === 'state:' && args.length === 0) {
+            if (node < 0)
+                return false;
+            a = native.getState(timing.epoch, node, name.substring(6));
+            return name === 'state:value' ? a : a === 'true';
+        }
+        if (name.substring(0, 6) === 'style:' && args.length === 0)
+            return node < 0 ? '' : native.getStyle(timing.epoch, node, name.substring(6));
+        for (i = 0; i < args.length; i++)
+            args[i] = evaluate(args[i], context);
+        a = args[0];
+        b = args[1];
+        switch (name + '/' + args.length) {
+            case 'id/1':
+                return {nodes: idNodes(a)};
+            case 'class/1':
+                return {nodes: timing.classes[toString(a)] || []};
+            case 'defaultNode/0':
+                return {nodes: context.def >= 0 ? [context.def] : []};
+            case 'true/0':
+                return true;
+            case 'false/0':
+                return false;
+            case 'not/1':
+                return !toBoolean(a);
+            case 'boolean/1':
+                return toBoolean(a);
+            case 'number/1':
+                return toNumber(a);
+            case 'string/1':
+                return toString(a);
+            case 'count/1':
+                return isNodes(a) ? a.nodes.length : NaN;
+            case 'contains/2':
+                return toString(a).indexOf(toString(b)) >= 0;
+            case 'starts-with/2':
+                return toString(a).indexOf(toString(b)) === 0;
+            case 'substring-before/2':
+                a = toString(a);
+                i = a.indexOf(toString(b));
+                return i < 0 ? '' : a.substring(0, i);
+            case 'substring-after/2':
+                a = toString(a);
+                i = a.indexOf(toString(b));
+                return i < 0 ? '' : a.substring(i + toString(b).length);
+            case 'concat/2':
+                return toString(a) + toString(b);
+        }
+        throw new Error('unsupported function ' + name + '()');
+    }
+
+    function evaluate(tree, context) {
+        var a, b, i, out, saved;
+        switch (tree.k) {
+            case 'lit':
+                return tree.v;
+            case 'var':
+                return variables.hasOwnProperty(tree.v) ? variables[tree.v] : '';
+            case 'attr':
+                a = context.node < 0 ? null : native.attribute(timing.epoch, context.node, tree.v);
+                return a === null ? {nodes: []} : a;
+            case 'all':
+                return {nodes: tree.v === '*' ? timing.elements : timing.names[tree.v] || []};
+            case 'call':
+                return call(tree.v, tree.args.slice(), context);
+            case 'neg':
+                return -toNumber(evaluate(tree.a, context));
+            case 'or':
+                return toBoolean(evaluate(tree.a, context)) || toBoolean(evaluate(tree.b, context));
+            case 'and':
+                return toBoolean(evaluate(tree.a, context)) && toBoolean(evaluate(tree.b, context));
+            case 'cmp':
+                return compare(tree.op, evaluate(tree.a, context), evaluate(tree.b, context));
+            case 'union':
+                a = evaluate(tree.a, context);
+                b = evaluate(tree.b, context);
+                if (!isNodes(a) || !isNodes(b))
+                    throw new Error('| needs node sets');
+                return {nodes: a.nodes.concat(b.nodes)};
+            case 'filter':
+                a = evaluate(tree.a, context);
+                if (!isNodes(a))
+                    throw new Error('a predicate needs a node set');
+                out = [];
+                saved = context.node;
+                for (i = 0; i < a.nodes.length; i++) {
+                    context.node = a.nodes[i];
+                    b = evaluate(tree.p, context);
+                    if (typeof b === 'number' ? b === i + 1 : toBoolean(b))
+                        out.push(a.nodes[i]);
+                }
+                context.node = saved;
+                return {nodes: out};
+        }
+        throw new Error('bad expression');
+    }
+
+    /* An expression's value in a context; an expression that fails reports
+       one issue and is false from then on. */
+    function run(expression, def) {
+        if (expression === null || expression.failed)
+            return false;
+        try {
+            return evaluate(expression.tree, {node: -1, def: def});
+        } catch (e) {
+            expression.failed = true;
+            timingIssue('expression "' + expression.text + '": ' + e.message);
+            return false;
+        }
+    }
+
+    function selected(expression, def) {
+        var value = run(expression, def);
+        return isNodes(value) ? value.nodes : [];
+    }
+
+    /* Building the timing tree from markup. */
+
+    function children(epoch, node) {
+        var out = [], child = native.relative(epoch, node, 1);
+        while (child >= 0) {
+            out.push(child);
+            child = native.relative(epoch, child, 2);
+        }
+        return out;
+    }
+
+    /* A begin or end attribute: an offset (ticks) or a condition. */
+    function moment(epoch, node, name) {
+        var text = native.attribute(epoch, node, name), ticks;
+        if (text === null)
+            return null;
+        ticks = timeValue(text);
+        if (ticks === ticks)
+            return {time: ticks};
+        return {condition: compile(text)};
+    }
+
+    function action(epoch, node) {
+        var name = native.name(epoch, node), count, i, ns, prop, value, out, params;
+        if (name === 'event') {
+            params = [];
+            out = {kind: 'event', name: native.attribute(epoch, node, 'name'), params: params};
+            if (!out.name) {
+                timingIssue('an event without a name');
+                return null;
+            }
+            children(epoch, node).forEach(function (child) {
+                if (native.name(epoch, child) === 'param')
+                    params.push([native.attribute(epoch, child, 'name') || '',
+                                 native.attribute(epoch, child, 'value') || '']);
+            });
+            return out;
+        }
+        if (name !== 'set' && name !== 'animate') {
+            timingIssue('<' + name + '> is not supported in a cue');
+            return null;
+        }
+        out = {kind: name, props: [],
+               discrete: native.attribute(epoch, node, 'calcMode') === 'discrete'};
+        count = native.attributeAt(epoch, node, -1);
+        for (i = 0; i < count; i++) {
+            ns = native.attributeAt(epoch, node, i, 0);
+            if (ns !== STYLE_NS && ns !== STATE_NS)
+                continue;
+            prop = native.attributeAt(epoch, node, i, 1);
+            value = native.attributeAt(epoch, node, i, 2);
+            out.props.push({state: ns === STATE_NS, name: prop, discrete: out.discrete,
+                            keys: name === 'animate' ? value.split(';') : [value]});
+        }
+        return out;
+    }
+
+    function container(epoch, node, defs) {
+        var name = native.name(epoch, node), dur, item, use, i;
+        if (name !== 'par' && name !== 'seq' && name !== 'excl' && name !== 'cue') {
+            timingIssue('<' + name + '> is not supported in timing');
+            return null;
+        }
+        if (name === 'seq' || name === 'excl')
+            timingIssue('<' + name + '> runs as <par>');
+        dur = native.attribute(epoch, node, 'dur');
+        item = {
+            cue: name === 'cue', node: node, begin: moment(epoch, node, 'begin'),
+            end: moment(epoch, node, 'end'), dur: dur === null ? null : timeValue(dur),
+            hold: native.attribute(epoch, node, 'fill') === 'hold',
+            select: name === 'cue' && native.attribute(epoch, node, 'select') !== null
+                ? compile(native.attribute(epoch, node, 'select')) : null,
+            actions: [], items: [], active: false, held: false, started: false,
+            rising: false, begun: 0, ended: 0, order: 0, def: -1, targets: []
+        };
+        if (item.dur !== null && !(item.dur === item.dur)) {
+            timingIssue('dur "' + dur + '" is not a time');
+            item.dur = null;
+        }
+        if (item.begin && item.begin.condition === undefined && item.begin.time === Infinity)
+            item.begin = {condition: null};
+        if (!item.begin)
+            item.begin = {time: 0};
+        children(epoch, node).forEach(function (child) {
+            var made = item.cue ? action(epoch, child) : container(epoch, child, defs);
+            if (made)
+                (item.cue ? item.actions : item.items).push(made);
+        });
+        use = native.attribute(epoch, node, 'use');
+        if (item.cue && use !== null) {
+            use = use.split(/\s+/);
+            for (i = 0; i < use.length; i++) {
+                if (!use[i])
+                    continue;
+                if (defs.hasOwnProperty(use[i]))
+                    item.actions = item.actions.concat(defs[use[i]]);
+                else
+                    timingIssue('use="' + use[i] + '" names no definition');
+            }
+        }
+        return item;
+    }
+
+    function buildTiming(epoch) {
+        var count = native.count(), i, node = -1, name, defs = {}, items = [], cls, names = {},
+            classes = {}, elements = [], j;
+        for (i = 0; i < count; i++) {
+            name = native.name(epoch, i);
+            if (name === 'timing' && node < 0)
+                node = i;
+            elements.push(i);
+            (names[name] = names[name] || []).push(i);
+            cls = native.attribute(epoch, i, 'class');
+            if (cls !== null) {
+                cls = cls.split(/\s+/);
+                for (j = 0; j < cls.length; j++)
+                    if (cls[j])
+                        (classes[cls[j]] = classes[cls[j]] || []).push(i);
+            }
+        }
+        if (node < 0)
+            return null;
+        timing = {epoch: epoch, names: names, classes: classes, elements: elements};
+        children(epoch, node).forEach(function (child) {
+            if (native.name(epoch, child) !== 'defs')
+                return;
+            children(epoch, child).forEach(function (d) {
+                var id = native.attribute(epoch, d, 'id'), list = [];
+                if (id === null)
+                    return;
+                if (native.name(epoch, d) === 'g')
+                    children(epoch, d).forEach(function (a) {
+                        var made = action(epoch, a);
+                        if (made)
+                            list.push(made);
+                    });
+                else if ((list[0] = action(epoch, d)) === null)
+                    list = [];
+                defs[id] = list;
+            });
+        });
+        children(epoch, node).forEach(function (child) {
+            var made;
+            if (native.name(epoch, child) === 'defs')
+                return;
+            made = container(epoch, child, defs);
+            if (made)
+                items.push(made);
+        });
+        timing.items = items;
+        timing.start = now;
+        timing.order = 0;
+        timing.applied = {};
+        timing.events = [];
+        return timing;
+    }
+
+    /* Running the tree. */
+
+    function reset(item) {
+        var i;
+        item.active = item.held = item.started = item.rising = false;
+        for (i = 0; i < item.items.length; i++)
+            reset(item.items[i]);
+    }
+
+    /* matched: the elements a begin condition matched, if any. */
+    function start(item, at, def, matched) {
+        var i;
+        for (i = 0; i < item.items.length; i++)
+            reset(item.items[i]);
+        item.active = item.started = true;
+        item.held = false;
+        item.begun = at;
+        item.order = ++timing.order;
+        if (item.cue) {
+            item.targets = item.select ? selected(item.select, def)
+                                       : matched.length ? matched : def >= 0 ? [def] : [];
+            item.def = item.targets.length ? item.targets[0] : def;
+            for (i = 0; i < item.actions.length; i++)
+                if (item.actions[i].kind === 'event')
+                    timing.events.push({action: item.actions[i],
+                                        target: item.targets.length ? item.targets[0] : -1});
+        } else {
+            item.def = matched.length ? matched[0] : def;
+        }
+    }
+
+    function finish(item, at) {
+        var i;
+        item.active = false;
+        item.ended = at;
+        item.held = item.cue && item.hold;
+        for (i = 0; i < item.items.length; i++)
+            reset(item.items[i]);
+    }
+
+    /* The default node a cue's conditions see before it begins: its first
+       selected element, else its parent's. */
+    function contextNode(item, def) {
+        var nodes;
+        if (item.active || item.held)
+            return item.def;
+        if (!item.select)
+            return def;
+        nodes = selected(item.select, def);
+        return nodes.length ? nodes[0] : def;
+    }
+
+    function update(items, begun, def) {
+        var i, item, value, rise, endAt;
+        for (i = 0; i < items.length; i++) {
+            item = items[i];
+            if (item.begin.condition !== undefined) {
+                value = run(item.begin.condition, contextNode(item, def));
+                rise = toBoolean(value);
+                if (rise && !item.rising)
+                    start(item, now, def, isNodes(value) ? value.nodes : []);
+                item.rising = rise;
+            } else if (!item.started && now >= begun + item.begin.time) {
+                start(item, begun + item.begin.time, def, []);
+            }
+            if (!item.active)
+                continue;
+            endAt = item.dur === null ? Infinity : item.begun + item.dur;
+            if (item.end && item.end.time !== undefined)
+                endAt = Math.min(endAt, begun + item.end.time);
+            if (now >= endAt)
+                finish(item, Math.max(endAt, item.begun));
+            else if (item.end && item.end.condition !== undefined &&
+                     toBoolean(run(item.end.condition, item.def)))
+                finish(item, now);
+            if (item.active)
+                update(item.items, item.begun, item.def);
+        }
+    }
+
+    function sample(prop, item) {
+        var keys = prop.keys, position, k, t;
+        if (keys.length === 1)
+            return keys[0];
+        if (!item.active)
+            return keys[keys.length - 1];
+        if (!(item.dur > 0) || item.dur === Infinity)
+            return keys[0];
+        t = Math.min(1, (now - item.begun) / item.dur);
+        if (prop.discrete) {
+            k = Math.min(keys.length - 1, Math.floor(t * keys.length));
+            return keys[k];
+        }
+        position = t * (keys.length - 1);
+        k = Math.min(keys.length - 2, Math.floor(position));
+        return interpolate(keys[k], keys[k + 1], position - k);
+    }
+
+    function contributions(items, out) {
+        var i, item;
+        for (i = 0; i < items.length; i++) {
+            item = items[i];
+            if (item.cue && (item.active || item.held))
+                out.push(item);
+            if (item.active)
+                contributions(item.items, out);
+        }
+        return out;
+    }
+
+    /* Sends the timing values that changed to the runtime; true when any
+       did. */
+    function applyTiming() {
+        var cues = contributions(timing.items, []), values = {}, keys = [], changed = false,
+            i, j, n, a, p, cue, key, before, entry;
+        cues.sort(function (x, y) { return x.order - y.order; });
+        for (i = 0; i < cues.length; i++) {
+            cue = cues[i];
+            for (j = 0; j < cue.actions.length; j++) {
+                a = cue.actions[j];
+                if (a.kind === 'event')
+                    continue;
+                for (p = 0; p < a.props.length; p++)
+                    for (n = 0; n < cue.targets.length; n++) {
+                        key = cue.targets[n] + (a.props[p].state ? ' state ' : ' style ') +
+                              a.props[p].name;
+                        if (!values.hasOwnProperty(key))
+                            keys.push(key);
+                        values[key] = {node: cue.targets[n], prop: a.props[p],
+                                       value: sample(a.props[p], cue)};
+                    }
+            }
+        }
+        for (key in timing.applied)
+            if (timing.applied.hasOwnProperty(key) && !values.hasOwnProperty(key)) {
+                entry = timing.applied[key];
+                delete timing.applied[key];
+                changed = true;
+                setTiming(entry.node, entry.prop, null);
+            }
+        for (i = 0; i < keys.length; i++) {
+            entry = values[keys[i]];
+            before = timing.applied[keys[i]];
+            if (before && before.value === entry.value)
+                continue;
+            timing.applied[keys[i]] = entry;
+            changed = true;
+            setTiming(entry.node, entry.prop, entry.value);
+        }
+        return changed;
+    }
+
+    function setTiming(node, prop, value) {
+        try {
+            if (prop.state)
+                native.timingState(timing.epoch, node, prop.name, value);
+            else
+                native.timingStyle(timing.epoch, node, prop.name, value);
+        } catch (e) {
+            timingIssue('state or style "' + prop.name + '": ' + e.message);
+        }
+    }
+
+    function timingEvent(entry) {
+        var event = new Event(), i;
+        event.initEvent(entry.action.name, false, false);
+        for (i = 0; i < entry.action.params.length; i++)
+            event[entry.action.params[i][0]] = entry.action.params[i][1];
+        deliver(event, entry.target >= 0 ? element(timing.epoch, entry.target) : null);
+    }
+
+    /* Runs at the end of every host call: until nothing changes (or for
+       TIMING_ROUNDS rounds), updates the tree, applies its values and
+       dispatches the events of the cues that began. */
+    function runTiming() {
+        var round, events, i, changed;
+        for (round = 0; round < TIMING_ROUNDS; round++) {
+            if (!timing || timing.epoch !== native.epoch())
+                return;
+            update(timing.items, timing.start, -1);
+            changed = applyTiming();
+            events = timing.events;
+            timing.events = [];
+            for (i = 0; i < events.length; i++)
+                timingEvent(events[i]);
+            if (!changed && !events.length)
+                return;
         }
     }
 
@@ -667,7 +1385,10 @@
     global.Player = Player;
 
     /* Markup timing, which these drive, is not modeled. */
-    document.setXPathVariable = unsupported('document.setXPathVariable');
+    /* Variables markup timing expressions read as $name. */
+    document.setXPathVariable = function (name, value) {
+        variables[String(name)] = value === undefined || value === null ? '' : String(value);
+    };
     document.getProperties = unsupported('document.getProperties');
 
     global.Diagnostics = {
@@ -760,6 +1481,8 @@
             idProperties = [];
             wrappers = [];
             animations = [];
+            timing = null;
+            compiled = {};
             for (i = 0; epoch && i < count; i++) {
                 id = native.id(epoch, i);
                 if (id === null || id in document)
@@ -767,6 +1490,10 @@
                 Object.defineProperty(document, id, {configurable: true, enumerable: true,
                                                      get: idProperty(epoch, i)});
                 idProperties[idProperties.length] = id;
+            }
+            if (epoch) {
+                buildTiming(epoch);
+                runTiming();
             }
         },
         markupLoaded: function () {
@@ -777,6 +1504,7 @@
                     fault('the markup loaded handler', e);
                 }
             }
+            runTiming();
         },
         /* The event's target is the focused element, if any (discs read
            evt.target.core.id in key listeners). */
@@ -795,12 +1523,14 @@
                         native.setState(native.epoch(), focus, 'actioned', down ? 'true' : 'false');
                 }
             }
+            runTiming();
             return proceed ? 0 : 1;
         },
         advance: function (ticks) {
             now = ticks;
             runTimers();
             stepAnimations();
+            runTiming();
         },
         playlistChanged: function () {
             var epoch = native.player(8), count = native.titleCount(), i, id;
@@ -811,6 +1541,7 @@
                 if (id !== null && !(id in titles))
                     Object.defineProperty(titles, id, {value: titles[i]});
             }
+            runTiming();
         },
         dispatch: function (type) {
             var event = new Event(), count = native.field(-1), i;
@@ -818,6 +1549,7 @@
             for (i = 0; i < count; i++)
                 event[native.field(i, 0)] = native.field(i, 1);
             deliver(event);
+            runTiming();
         }
     };
 })

@@ -234,7 +234,7 @@ foreach(tool info menuinfo menurun acainfo acaextract scriptdump scriptinfo xpli
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom runtime_player runtime_bridge vts)
+    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom runtime_player runtime_bridge runtime_timing vts)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         # Test assertions also perform setup and must run in Release builds.

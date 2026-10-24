@@ -435,6 +435,19 @@ fuzz_seeds = {
         "var t = createTimer('00:00:00:01', 1, function () { Player.playlist.play(); });\n"
         "t.enabled = true;\n"
     ).encode("utf-8"),
+    # Markup timing, which fuzz_runtime.c also runs inside <timing>.
+    "runtime/timing.xml": (
+        "<defs><g id='g'><set style:x='5px' state:value='w'/><event name='e'/></g>"
+        "<animate id='m' calcMode='discrete' style:backgroundFrame='0;1;2'/></defs>"
+        "<par begin=\"id('page')[$V='a']\" end=\"id('page')[$V!='a']\">"
+        "<cue begin=\"class('b')[state:focused() and not(state:actioned())]\""
+        " end=\"defaultNode()[not(state:focused())]\" use='g'/>"
+        "<cue begin='10ms' dur='3f' fill='hold' select=\"id('a') | //input\" use='m'>"
+        "<animate style:opacity='0;1'/><event name='f'><param name='p' value='1'/></event></cue>"
+        "<cue begin=\"//button[@id='b' and substring-before(style:x(),'px')>-1]\" dur='1s'"
+        " select=\"id('b')\"><set state:focused='true' style:y='3px'/></cue></par>"
+        "<seq begin='1s' end='00:00:02:00'><cue dur='indefinite'/></seq>"
+    ).encode("utf-8"),
     # The host objects, against fuzz_runtime.c's document.
     "runtime/host.js": (
         "var a = document.getElementById('a'), log = [];\n"

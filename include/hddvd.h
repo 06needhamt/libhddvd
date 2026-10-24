@@ -586,7 +586,11 @@ typedef enum hddvd_runtime_issue_kind
     /* The host rejected or failed a player command (hddvd_runtime_acknowledge). */
     HDDVD_RUNTIME_ISSUE_COMMAND = 3,
     /* A script called Diagnostics.trace(). */
-    HDDVD_RUNTIME_ISSUE_TRACE = 4
+    HDDVD_RUNTIME_ISSUE_TRACE = 4,
+    /* Markup timing the runtime cannot run: an expression that does not parse
+       or uses an unsupported function, an unsupported element, or a use=
+       naming no definition. The rest of the timing still runs. */
+    HDDVD_RUNTIME_ISSUE_TIMING = 5
 } hddvd_runtime_issue_kind;
 /* message is borrowed until hddvd_runtime_clear_issues or destroy. node is
    the markup node concerned, or SIZE_MAX. */
@@ -1326,16 +1330,16 @@ HDDVD_API int hddvd_runtime_get_diagnostic(const hddvd_runtime *, hddvd_runtime_
      getProperty(), setProperty() and unsetProperty(). Values are strings
      ("true"/"false" for flags); a value set by script is converted with
      String(). Setting focused to "true" moves the focus there, and "false"
-     on the focused element clears it. unsetProperty() only validates the
-     name: script values stay until changed, because markup timing, which
-     would take the property back, is not modeled;
+     on the focused element clears it. A value a script sets overrides markup
+     timing until unsetProperty(), which keeps the value but lets timing
+     change it again;
    - element.style: a property per name the style model knows (x, y, width,
      height, display, visibility, opacity, backgroundImage, backgroundFrame,
      navUp, ...) plus getProperty(), setProperty(), unsetProperty() and
      animateProperty(name, "v1;v2;...", seconds). Reads return the script's
      value, else the markup's text, else "auto" (display), "visible"
      (visibility), "1" (opacity) or "". unsetProperty(), or setting "",
-     returns to markup.
+     returns to markup timing or markup. Script values override timing ones.
      animateProperty() steps through the values over the duration on
      hddvd_runtime_advance: numbers with the same unit (px, % or none)
      interpolate linearly, other values switch at each keyframe;
@@ -1357,9 +1361,30 @@ HDDVD_API int hddvd_runtime_get_diagnostic(const hddvd_runtime *, hddvd_runtime_
      setting enabled to true schedules it one interval after the current
      time, and false cancels it. Every timer runs on the time given to
      hddvd_runtime_advance, whatever its clock argument.
+   - markup timing: the <timing> element's par and cue containers (seq and
+     excl run as par) with begin and end offsets ("500ms", "2s", "12f",
+     "HH:MM:SS:FF") or conditions, dur and fill="hold"; their set, animate
+     (linear, or calcMode="discrete") and event actions, directly or through
+     use= of a <defs> g, set, animate or event; and an XPath subset for
+     conditions and select: id(), class(), defaultNode(), //name, @name,
+     $variables from document.setXPathVariable(), state:NAME() and
+     style:NAME() of the context element, not(), true(), false(),
+     boolean(), number(), string(), count(), contains(), starts-with(),
+     substring-before(), substring-after(), concat(), predicates,
+     comparisons, and, or and |. A container begins at its offset from its
+     parent's begin or each time its condition becomes true, and ends after
+     dur, at its end offset, when its end condition is true, or with its
+     parent. Active cues set their actions' values on their selected
+     elements (without select, the elements their begin condition matched;
+     held after the end with fill="hold" until the parent ends;
+     the cue that began last wins), and dispatch each event action, with its
+     params as event fields and the first selected element as target, when
+     they begin. Timing runs on hddvd_runtime_advance time from markup load,
+     and at the end of every call that runs scripts, repeatedly while its
+     values or events change something (at most 8 rounds). All of this
+     follows SMIL and is unconfirmed against a player; what cannot run is
+     reported as a TIMING issue.
    Player, Diagnostics and the application lifecycle are described below.
-   Markup timing (cues, events and animations declared in markup) does not
-   run.
 
    load_markup makes `xmu` (borrowed; it must outlive the runtime or the
    next load) the document scripts see, with the focus on its initial focus.
@@ -1436,8 +1461,7 @@ HDDVD_API void hddvd_runtime_clear_issues(hddvd_runtime *);
    change playback become commands for the host; the player state scripts
    read changes only when the host reports it. Members a player has but this
    runtime cannot honor (audio mixing and effects, video layout and scaling,
-   getSPRM, document.setXPathVariable() and getProperties(), which drive
-   markup timing, and every member of FileIO, XMLParser, Network and
+   getSPRM, document.getProperties(), and every member of FileIO, XMLParser, Network and
    PersistentStorageManager, which would reach files or the network) throw
    an Error naming the member; their constants exist so scripts can load.
 

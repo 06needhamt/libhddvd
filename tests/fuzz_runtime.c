@@ -6,8 +6,9 @@
 /* Runs the input as a script (any encoding the runtime accepts) with a small
    document, playlist, player state and application list, calls its function
    f and the markup loaded handler, then sends keys, events and time and
-   acknowledges the commands made, directly and through the script bridge,
-   under small budgets so every input
+   acknowledges the commands made, directly and through the script bridge.
+   The input is also run as the contents of a <timing> element. All under
+   small budgets so every input
    finishes quickly. */
 static const char markup[] =
     "<root xmlns='http://www.dvdforum.org/2005/ihd'"
@@ -23,6 +24,45 @@ static const char playlist[] =
     "<ChapterList><Chapter titleTimeBegin='00:00:00:00'/><Chapter titleTimeBegin='00:00:30:00'/>"
     "</ChapterList><TrackNavigationList><AudioTrack track='1' langcode='en:00'/>"
     "</TrackNavigationList></Title></TitleSet></Playlist>";
+
+static const char timing_open[] =
+    "<root xmlns='http://www.dvdforum.org/2005/ihd'"
+    " xmlns:style='http://www.dvdforum.org/2005/ihd#style'"
+    " xmlns:state='http://www.dvdforum.org/2005/ihd#state'><head><timing clock='page'>";
+static const char timing_close[] =
+    "</timing></head><body><div id='page'><button id='a' class='b' state:focused='true'"
+    " style:navRight='b'/><button id='b' class='b' style:navLeft='a'/>"
+    "<input id='field' state:value='v'/></div></body></root>";
+
+/* The input as markup timing, against a small document. */
+static void timing(hddvd_runtime *runtime, const uint8_t *data, size_t size)
+{
+    static char xml[sizeof(timing_open) + sizeof(timing_close) + 8192];
+    hddvd_xmu *xmu = NULL;
+    hddvd_time now;
+    size_t open = sizeof(timing_open) - 1, close = sizeof(timing_close) - 1, i;
+    if (size > 8192)
+        return;
+    memcpy(xml, timing_open, open);
+    memcpy(xml + open, data, size);
+    memcpy(xml + open + size, timing_close, close);
+    if (hddvd_xmu_open(xml, open + size + close, &xmu) != HDDVD_OK)
+        return;
+    (void)hddvd_runtime_evaluate(runtime, "vars.js", "document.setXPathVariable('V', 'a');", 36);
+    if (hddvd_runtime_load_markup(runtime, xmu) == HDDVD_OK)
+    {
+        for (i = 0; i < 4; i++)
+        {
+            (void)hddvd_runtime_key(runtime, i % 2 ? HDDVD_KEY_ENTER : HDDVD_KEY_RIGHT, 1, NULL);
+            (void)hddvd_runtime_key(runtime, HDDVD_KEY_ENTER, 0, NULL);
+            now.ticks = 1000000u + (uint64_t)i * 60000u;
+            (void)hddvd_runtime_advance(runtime, now);
+        }
+        (void)hddvd_runtime_dispatch(runtime, "x");
+    }
+    (void)hddvd_runtime_load_markup(runtime, NULL);
+    hddvd_xmu_close(xmu);
+}
 
 /* Takes every command the scripts made, accepting and rejecting in turn. */
 static void drain(hddvd_runtime *runtime)
@@ -151,6 +191,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     (void)hddvd_runtime_load_markup(runtime, NULL);
     (void)hddvd_runtime_load_playlist(runtime, NULL);
     (void)hddvd_runtime_call(runtime, "f");
+    timing(runtime, data, size);
     /* Commands left unacknowledged are released with the runtime. */
     hddvd_runtime_destroy(runtime);
     hddvd_xmu_close(xmu);
