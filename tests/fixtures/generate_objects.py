@@ -304,7 +304,10 @@ def std_vmg():
     head[0x400:0x400 + len(first_play)] = first_play
     return bytes(head) + sectors(std_table(2, titles)) + sectors(sets) + sectors(menus)
 
-standard = {"HV000I01.IFO": std_vmg(), "HV001I01.IFO": std_vts(), "HV001T01.EVO": std_evo(),
+# The disc files sit in HVDVD_TS, as on a disc, so the directory opens as a
+# disc root (hddvd_titles_open, the VLC plugin).
+standard = {"HVDVD_TS/HV000I01.IFO": std_vmg(), "HVDVD_TS/HV001I01.IFO": std_vts(),
+            "HVDVD_TS/HV001T01.EVO": std_evo(),
             # LinkCN 9 in PGCs of at most two cells: valid tables, a bad target.
             "bad-link.IFO": std_vts(post_command=bytes([0x20, 0x07, 0, 0, 0, 0, 0, 9]))}
 
@@ -602,9 +605,10 @@ for path in HDI_API.iterdir():
 for name, data in sorted(hdi_api.items()):
     (HDI_API / name).write_bytes(data)
 
-STANDARD.mkdir(exist_ok=True)
-for path in STANDARD.iterdir():
-    if path.is_file(): path.unlink()
+(STANDARD / "HVDVD_TS").mkdir(parents=True, exist_ok=True)
+for directory in (STANDARD, STANDARD / "HVDVD_TS"):
+    for path in directory.iterdir():
+        if path.is_file(): path.unlink()
 for name, data in sorted(standard.items()):
     (STANDARD / name).write_bytes(data)
 

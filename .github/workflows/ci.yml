@@ -13,7 +13,7 @@ jobs:
         run: python -m pip install clang-format==20.1.8
       - name: Check Allman formatting
         run: >-
-          find include src tests tools -type f
+          find include src tests tools vlc -type f
           \( -name '*.c' -o -name '*.h' -o -name '*.cpp' \)
           -print0 | xargs -0 clang-format --dry-run --Werror
 
@@ -183,8 +183,35 @@ jobs:
           ./build/fuzz-uri tests/fixtures/fuzz/uri/*
           ./build/fuzz-titlemap tests/fixtures/fuzz/titlemap/*
           ./build/fuzz-display tests/fixtures/fuzz/display/*
-          ./build/fuzz-vts tests/fixtures/standard/*.IFO tests/fixtures/fuzz/vts/*
+          ./build/fuzz-vts tests/fixtures/standard/*.IFO tests/fixtures/standard/HVDVD_TS/*.IFO tests/fixtures/fuzz/vts/*
           ./build/fuzz-runtime tests/fixtures/fuzz/runtime/*
           ./build/fuzz-aca -seed=1 -runs=1000
           ./build/fuzz-script -seed=1 -runs=1000
           ./build/fuzz-navigation -seed=1 -runs=1000
+
+  # The VLC plugin (vlc/) against the VLC commit pinned in vlc/VLC_COMMIT,
+  # built with every optional feature off and cached by commit.
+  vlc-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools and libxml2
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxml2-dev ninja-build pkg-config
+          pipx install meson
+      - name: Cache VLC
+        id: vlc-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vlc-install
+          key: vlc-${{ runner.os }}-${{ hashFiles('vlc/VLC_COMMIT', 'tools/build_vlc.sh') }}
+      - name: Build VLC
+        if: steps.vlc-cache.outputs.cache-hit != 'true'
+        run: tools/build_vlc.sh "$RUNNER_TEMP/vlc-src" "$RUNNER_TEMP/vlc-install"
+      - name: Configure
+        run: |
+          export PKG_CONFIG_PATH="$(echo "$RUNNER_TEMP"/vlc-install/lib/*/pkgconfig)"
+          cmake -S . -B build -DBUILD_TESTING=ON -DHDDVD_BUILD_VLC_PLUGIN=ON -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/vlc-install"
+      - run: cmake --build build --parallel
+      - run: ctest --test-dir build --output-on-failure -E install-consumer

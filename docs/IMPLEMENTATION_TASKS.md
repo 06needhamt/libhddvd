@@ -801,12 +801,27 @@ shared and static libraries and can report exactly which optional backends exist
 
 ### P7-02 — Implement the VLC access/demux module
 
-**Status:** Blocked
+**Status:** In progress
 **Depends on:** P1-05, P6-02 through P6-04, P7-01
 
 Open an HD DVD root, provide authorized clear streams, map title/EVO ranges to
 VLC demuxing, publish chapters and streams, and forward playback state to the
 navigation scheduler.
+
+**First slice (done):** `vlc/hddvd.c`, a VLC 4 access module built in-tree with
+`HDDVD_BUILD_VLC_PLUGIN` against the VLC `master` commit pinned in
+`vlc/VLC_COMMIT` (`tools/build_vlc.sh`; the `vlc-plugin` CI job). It plays
+Standard Content titles through `hddvd_titles` (`src/titles.c`): titles,
+chapters and durations from the VMG and title sets, a title's cells read as one
+MPEG-PS byte stream for VLC's PS demuxer, and AACS-scrambled packets reported
+as an "Encrypted HD DVD" dialog. `vlc/test_plugin.c` checks it headless in
+libvlc over the synthetic `tests/fixtures/standard` disc.
+
+**Remaining:** Advanced Content titles (playlist titles through
+`hddvd_title_map`), forwarding playback state to the navigation scheduler,
+Standard Content menus and navigation commands, angle blocks, a protection
+provider hook on the VLC side, and the upstream submission steps in
+`vlc/README.md`.
 
 **Acceptance:** headless tests open synthetic clear layouts; seek/title/chapter
 commands land on the expected ranges; protected content produces an actionable

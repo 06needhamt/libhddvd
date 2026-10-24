@@ -59,6 +59,7 @@ typedef struct hddvd_vts hddvd_vts;
 typedef struct hddvd_vmg hddvd_vmg;
 typedef struct hddvd_vm hddvd_vm;
 typedef struct hddvd_title_map hddvd_title_map;
+typedef struct hddvd_titles hddvd_titles;
 typedef struct hddvd_scene hddvd_scene;
 typedef void (*hddvd_log_fn)(void *, int, const char *);
 typedef enum hddvd_subsystem
@@ -1275,6 +1276,36 @@ typedef struct hddvd_vmg_title
     /* First sector of the title set on the disc. */
     uint32_t title_set_sector;
 } hddvd_vmg_title;
+/* A playable title (hddvd_titles_open). size is the length of the title's
+   byte stream: its extents' sectors, in order. */
+typedef struct hddvd_title_info
+{
+    hddvd_time duration;
+    uint64_t size;
+    size_t chapter_count;
+    size_t extent_count;
+    uint16_t title_set;
+    uint16_t title_set_title;
+    uint8_t angle_count;
+} hddvd_title_info;
+/* Where a chapter starts: its title time and byte offset in the title. */
+typedef struct hddvd_title_chapter
+{
+    hddvd_time start;
+    uint64_t offset;
+} hddvd_title_chapter;
+/* A run of sectors of one EVO that plays as part of a title, from offset in
+   the title's byte stream and start in its time. evo_uri is a borrowed
+   file:///dvddisc/ URI, valid until hddvd_titles_close(). */
+typedef struct hddvd_title_extent
+{
+    const char *evo_uri;
+    uint32_t first_sector;
+    uint32_t sector_count;
+    uint64_t offset;
+    hddvd_time start;
+    hddvd_time duration;
+} hddvd_title_extent;
 /* Where a title time plays from. evo_uri is a borrowed file:///dvddisc/ URI,
    valid until hddvd_title_map_close(). pts is the EVO presentation time of
    the title time (the EVOB start time plus evob_offset). Reading from sector
@@ -2054,6 +2085,33 @@ HDDVD_API void hddvd_title_map_close(hddvd_title_map *);
    whose [titleTimeBegin, titleTimeEnd) contains the time is used; times
    that no clip covers return HDDVD_ENOTFOUND. */
 HDDVD_API int hddvd_title_map_locate(const hddvd_title_map *, hddvd_time, hddvd_title_position *);
+/* A disc's playable titles, for a player that demultiplexes the EVO data
+   itself. Standard Content titles come from the VMG's title table
+   (HVDVD_TS/HV000I01.IFO): a title plays the PGCs its chapters name, in
+   chapter order, and each PGC's cells in order; each cell is one extent of
+   its title set's EVO (HVnnnT01.EVO). Durations add up the cells' times.
+   Angle blocks are not decoded (none has been seen). Advanced Content
+   titles are not listed yet: HDDVD_ENOTFOUND when the disc has no VMG.
+   Opening checks every title set and that each EVO holds its cells.
+
+   read fills buffer from the title's byte stream at offset. It is short
+   only at the end of the title. Every sector it touches must be an MPEG
+   program stream pack: HDDVD_EPARSE otherwise, and HDDVD_EPROTECTED when a
+   PES packet in it is marked scrambled (encrypted content, which libhddvd
+   does not decrypt). chapter_at gives the chapter playing at a byte offset.
+   A handle is single-threaded; failures are reported on the context. */
+HDDVD_API int hddvd_titles_open(hddvd_ctx *, hddvd_titles **);
+HDDVD_API void hddvd_titles_close(hddvd_titles *);
+HDDVD_API size_t hddvd_titles_count(const hddvd_titles *);
+HDDVD_API int hddvd_titles_get_info(const hddvd_titles *, size_t title, hddvd_title_info *);
+HDDVD_API int hddvd_titles_get_chapter(const hddvd_titles *, size_t title, size_t chapter,
+                                       hddvd_title_chapter *);
+HDDVD_API int hddvd_titles_get_extent(const hddvd_titles *, size_t title, size_t extent,
+                                      hddvd_title_extent *);
+HDDVD_API int hddvd_titles_chapter_at(const hddvd_titles *, size_t title, uint64_t offset,
+                                      size_t *chapter);
+HDDVD_API int hddvd_titles_read(hddvd_titles *, size_t title, uint64_t offset, void *buffer,
+                                size_t size, size_t *got);
 HDDVD_API void hddvd_free(void *);
 #ifdef __cplusplus
 }

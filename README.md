@@ -22,6 +22,9 @@ Experimental open-source HD DVD inspection library.
   attributes (video coding, audio and subpicture languages), menu PGCs and
   the first-play PGC (`hddvd_vts_open`, `hddvd_vmg_open`), and a navigation
   command VM (`hddvd_vm_run`); VTI attribute records
+- Playable Standard Content titles (`hddvd_titles_open`): titles, chapters and
+  durations, and a title's EVO sectors read as one MPEG program stream, with
+  encrypted (AACS) sectors refused as `HDDVD_EPROTECTED`
 - A sandboxed script runtime (`hddvd_runtime`) that runs HDi ECMAScript source,
   UTF-16 as on disc or UTF-8, with heap, recursion, operation and wall-clock
   budgets, in an optional QuickJS engine. Scripts get the HDi `document`
@@ -132,7 +135,7 @@ All C and C++ sources use Allman braces and are formatted with the checked-in
 ClangFormat configuration. Run the following before submitting changes:
 
 ```sh
-find include src tests tools -type f \
+find include src tests tools vlc -type f \
   \( -name '*.c' -o -name '*.h' -o -name '*.cpp' \) -print0 | \
   xargs -0 clang-format -i
 ```
@@ -153,10 +156,10 @@ find_package(hddvd 0.4 CONFIG REQUIRED)
 target_link_libraries(my_player PRIVATE hddvd::hddvd)
 ```
 
-The VLC access/demux and overlay modules remain downstream work in the VLC
-source tree.  This release supplies the versioned ABI, capability negotiation,
-renderer-neutral display list, and serialized navigation foundations those
-modules consume.
+`vlc/` holds a VLC 4 access module that plays Standard Content titles through
+`hddvd_titles` (`-DHDDVD_BUILD_VLC_PLUGIN=ON`; see `vlc/README.md`). It is
+meant for submission to VLC's tree; menus and Advanced Content are not
+supported yet.
 
 Context-bound resource failures are available through
 `hddvd_get_last_error()`, which reports a stable status, subsystem, resource URI,
