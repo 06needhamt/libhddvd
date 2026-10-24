@@ -128,8 +128,8 @@ static void title_set(void)
 
     assert(open_vts(bytes, size, &vts) == HDDVD_OK);
     assert(hddvd_vts_get_info(vts, &info) == HDDVD_OK);
-    assert(info.ifo_sectors == 6 && info.title_evo_sector == 6 && info.title_evo_sectors == 36);
-    assert(info.last_sector == 47 && info.menu_evo_sector == 0);
+    assert(info.ifo_sectors == 7 && info.title_evo_sector == 7 && info.title_evo_sectors == 36);
+    assert(info.last_sector == 49 && info.menu_evo_sector == 0);
 
     assert(hddvd_vts_title_count(vts) == 2);
     assert(hddvd_vts_chapter_count(vts, 0) == 2 && hddvd_vts_chapter_count(vts, 1) == 1);
@@ -377,11 +377,155 @@ static void video_manager(void)
     free(bytes);
 }
 
+/* The fixtures' menus: a title set root menu in sector 6, the VMG's title
+   menu and a second PGC in sector 3, and the first-play PGC at 0x400. */
+#define VTS_MENUS (6 * SECTOR)
+#define VTS_MENU_UNIT (VTS_MENUS + 16u)
+#define VMG_MENUS (3 * SECTOR)
+#define VMG_MENU_UNIT (VMG_MENUS + 16u)
+
+/* Runs a PGC's pre commands, as a host would on entering it. */
+static void run_pre(hddvd_vm *vm, const hddvd_vmg *vmg, size_t unit, size_t p, hddvd_vm_result *r)
+{
+    uint8_t commands[4][8];
+    hddvd_vts_pgc pgc;
+    size_t i;
+    if (unit == (size_t)-1)
+        assert(hddvd_vmg_get_first_play(vmg, &pgc) == HDDVD_OK);
+    else
+        assert(hddvd_vmg_get_menu_pgc(vmg, unit, p, NULL, &pgc) == HDDVD_OK);
+    assert(pgc.pre_command_count <= 4);
+    for (i = 0; i < pgc.pre_command_count; i++)
+        assert((unit == (size_t)-1
+                    ? hddvd_vmg_get_first_play_command(vmg, HDDVD_VTS_PRE_COMMAND, i, commands[i])
+                    : hddvd_vmg_get_menu_command(vmg, unit, p, HDDVD_VTS_PRE_COMMAND, i,
+                                                 commands[i])) == HDDVD_OK);
+    assert(hddvd_vm_run(vm, &commands[0][0], pgc.pre_command_count, 0, r) == HDDVD_OK);
+}
+
+static void menus(void)
+{
+    size_t size, vmg_size;
+    unsigned char *bytes = load("HV001I01.IFO", &size);
+    unsigned char *vmg_bytes = load("HV000I01.IFO", &vmg_size);
+    hddvd_vts *vts = NULL;
+    hddvd_vmg *vmg = NULL;
+    hddvd_menu_unit unit;
+    hddvd_menu_pgc category;
+    hddvd_vts_pgc pgc;
+    hddvd_vts_cell cell;
+    hddvd_vm *vm = NULL;
+    hddvd_vm_result r;
+    uint8_t command[8];
+
+    assert(open_vts(bytes, size, &vts) == HDDVD_OK);
+    assert(hddvd_vts_menu_unit_count(vts) == 1 && hddvd_vts_menu_unit_count(NULL) == 0);
+    assert(hddvd_vts_get_menu_unit(vts, 0, &unit) == HDDVD_OK);
+    assert(!strcmp(unit.language, "en") && unit.existence == 0x80 && unit.pgc_count == 1);
+    assert(hddvd_vts_get_menu_unit(vts, 1, &unit) == HDDVD_EINVAL);
+    assert(hddvd_vts_get_menu_unit(vts, 0, NULL) == HDDVD_EINVAL);
+    assert(hddvd_vts_get_menu_pgc(vts, 0, 0, &category, &pgc) == HDDVD_OK);
+    assert(category.entry == 1 && category.menu_id == 3 && category.category[1] == 0x30);
+    assert(pgc.program_count == 0 && pgc.cell_count == 0 && pgc.pre_command_count == 1 &&
+           pgc.post_command_count == 1 && pgc.cell_command_count == 0);
+    assert(hddvd_vts_get_menu_pgc(vts, 0, 0, &category, NULL) == HDDVD_OK);
+    assert(hddvd_vts_get_menu_pgc(vts, 0, 0, NULL, NULL) == HDDVD_EINVAL);
+    assert(hddvd_vts_get_menu_pgc(vts, 0, 1, &category, &pgc) == HDDVD_EINVAL);
+    assert(hddvd_vts_get_menu_command(vts, 0, 0, HDDVD_VTS_PRE_COMMAND, 0, command) == HDDVD_OK);
+    assert(command[0] == 0x71 && command[3] == 2 && command[5] == 7);
+    assert(hddvd_vts_get_menu_command(vts, 0, 0, HDDVD_VTS_POST_COMMAND, 0, command) == HDDVD_OK);
+    assert(command[0] == 0x30 && command[1] == 0x03);
+    assert(hddvd_vts_get_menu_command(vts, 0, 0, HDDVD_VTS_CELL_COMMAND, 0, command) ==
+           HDDVD_EINVAL);
+    assert(hddvd_vts_get_menu_command(vts, 0, 0, HDDVD_VTS_PRE_COMMAND, 0, NULL) == HDDVD_EINVAL);
+    assert(hddvd_vts_get_menu_cell(vts, 0, 0, 0, &cell) == HDDVD_EINVAL);
+    assert(hddvd_vts_get_menu_unit(NULL, 0, &unit) == HDDVD_EINVAL);
+    hddvd_vts_close(vts);
+
+    /* A title set without menus; a pointer past the file, no units, a unit
+       inside the pointers or past the table, a PGC past its unit. */
+    assert(mutated32(bytes, size, 0xd0, 0) == HDDVD_OK);
+    assert(mutated32(bytes, size, 0xd0, 99) == HDDVD_EPARSE);
+    assert(mutated16(bytes, size, VTS_MENUS, 0) == HDDVD_EPARSE);
+    assert(mutated32(bytes, size, VTS_MENUS + 12, 8) == HDDVD_EPARSE);
+    assert(mutated32(bytes, size, VTS_MENUS + 12, 4000) == HDDVD_EPARSE);
+    assert(mutated16(bytes, size, VTS_MENU_UNIT, 0) == HDDVD_EPARSE);
+    assert(mutated32(bytes, size, VTS_MENU_UNIT + 16, 4000) == HDDVD_EPARSE);
+
+    assert(open_vmg(vmg_bytes, vmg_size, &vmg) == HDDVD_OK);
+    assert(hddvd_vmg_menu_unit_count(vmg) == 1);
+    assert(hddvd_vmg_get_menu_unit(vmg, 0, &unit) == HDDVD_OK && unit.pgc_count == 2);
+    assert(hddvd_vmg_get_menu_pgc(vmg, 0, 0, &category, &pgc) == HDDVD_OK);
+    assert(category.menu_id == 2 && pgc.pre_command_count == 2);
+    assert(hddvd_vmg_get_menu_pgc(vmg, 0, 1, &category, &pgc) == HDDVD_OK);
+    assert(category.entry == 0 && category.menu_id == 0 && pgc.pre_command_count == 1);
+    assert(hddvd_vmg_get_menu_command(vmg, 0, 1, HDDVD_VTS_PRE_COMMAND, 0, command) == HDDVD_OK);
+    assert(command[1] == 0x08);
+    assert(hddvd_vmg_get_menu_cell(vmg, 0, 0, 0, &cell) == HDDVD_EINVAL);
+    assert(hddvd_vmg_get_first_play(vmg, &pgc) == HDDVD_OK && pgc.pre_command_count == 2 &&
+           pgc.cell_count == 0);
+    assert(hddvd_vmg_get_first_play(vmg, NULL) == HDDVD_EINVAL);
+    assert(hddvd_vmg_get_first_play_command(vmg, HDDVD_VTS_POST_COMMAND, 0, command) ==
+           HDDVD_EINVAL);
+
+    /* First play sets GPRM0 and jumps to the title menu (id 2, PGC 1),
+       which links to PGC 2, which calls the title set's root menu. */
+    assert(hddvd_vm_create(1, &vm) == HDDVD_OK);
+    run_pre(vm, vmg, (size_t)-1, 0, &r);
+    assert(r.action == HDDVD_VM_JUMP_SYSTEM && r.domain == HDDVD_VM_VMG_MENU && r.target == 2);
+    run_pre(vm, vmg, 0, 0, &r);
+    assert(r.action == HDDVD_VM_LINK && r.link == HDDVD_VM_LINK_PGC && r.target == 2);
+    run_pre(vm, vmg, 0, r.target - 1u, &r);
+    assert(r.action == HDDVD_VM_CALL_SYSTEM && r.domain == HDDVD_VM_VTS_MENU && r.target == 3 &&
+           r.resume_cell == 1);
+    /* With GPRM0 cleared, the title menu plays title 1. */
+    assert(hddvd_vm_set_register(vm, 0, 0) == HDDVD_OK);
+    run_pre(vm, vmg, 0, 0, &r);
+    assert(r.action == HDDVD_VM_JUMP_TITLE && r.target == 1 && r.line == 2);
+    hddvd_vm_destroy(vm);
+    hddvd_vmg_close(vmg);
+
+    /* No first play; one starting inside the header fields, or a header
+       end past the file. */
+    {
+        unsigned char *copy = malloc(vmg_size);
+        assert(copy);
+        memcpy(copy, vmg_bytes, vmg_size);
+        put32(copy + 0x84, 0);
+        assert(open_vmg(copy, vmg_size, &vmg) == HDDVD_OK);
+        assert(hddvd_vmg_get_first_play(vmg, &pgc) == HDDVD_ENOTFOUND);
+        assert(hddvd_vmg_get_first_play_command(vmg, HDDVD_VTS_PRE_COMMAND, 0, command) ==
+               HDDVD_ENOTFOUND);
+        hddvd_vmg_close(vmg);
+        put32(copy + 0x84, 0x40);
+        assert(open_vmg(copy, vmg_size, &vmg) == HDDVD_EPARSE && !vmg);
+        put32(copy + 0x84, 0x400);
+        put32(copy + 0x80, (uint32_t)vmg_size);
+        assert(open_vmg(copy, vmg_size, &vmg) == HDDVD_EPARSE);
+        /* A header too short for the PGC. */
+        put32(copy + 0x80, 0x410);
+        assert(open_vmg(copy, vmg_size, &vmg) == HDDVD_EPARSE);
+        put32(copy + 0x80, 0x7ff);
+        put32(copy + 0xc8, 0);
+        assert(open_vmg(copy, vmg_size, &vmg) == HDDVD_OK);
+        assert(hddvd_vmg_menu_unit_count(vmg) == 0);
+        assert(hddvd_vmg_get_menu_unit(vmg, 0, &unit) == HDDVD_EINVAL);
+        hddvd_vmg_close(vmg);
+        put32(copy + 0xc8, 3);
+        put32(copy + VMG_MENU_UNIT + 8 + 12 + 8, 2);
+        assert(open_vmg(copy, vmg_size, &vmg) == HDDVD_EPARSE);
+        free(copy);
+    }
+    free(vmg_bytes);
+    free(bytes);
+}
+
 int main(void)
 {
     title_set();
     title_set_errors();
     times();
     video_manager();
+    menus();
     return 0;
 }

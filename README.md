@@ -19,8 +19,9 @@ Experimental open-source HD DVD inspection library.
   read from
 - Standard Content title sets and title tables: chapters, PGCs, cells, raw
   navigation commands, time maps, cell addresses, VOBU maps and stream
-  attributes (video coding, audio and subpicture languages)
-  (`hddvd_vts_open`, `hddvd_vmg_open`); VTI attribute records
+  attributes (video coding, audio and subpicture languages), menu PGCs and
+  the first-play PGC (`hddvd_vts_open`, `hddvd_vmg_open`), and a navigation
+  command VM (`hddvd_vm_run`); VTI attribute records
 - A sandboxed script runtime (`hddvd_runtime`) that runs HDi ECMAScript source,
   UTF-16 as on disc or UTF-8, with heap, recursion, operation and wall-clock
   budgets, in an optional QuickJS engine. Scripts get the HDi `document`
@@ -66,9 +67,10 @@ checks each time map against them (see `docs/formats/ifo-map.md`).
 `hddvd-locate DISC_ROOT PLAYLIST.XPL TITLE_INDEX MILLISECONDS...` resolves title
 times to the EVO file, presentation time and sector that play them.
 `hddvd-vtsinfo HVnnnI01.IFO [HVnnnT01.EVO]` prints a Standard Content title
-set or title table, its stream attributes and its navigation commands (in
+set or title table, its stream attributes, menus and navigation commands (in
 DVD-Video syntax), and checks its tables and every command target; given the
-title EVO, it checks them against the EVO's navigation packs and streams.
+title EVO, it checks them against the EVO's navigation packs and streams. For
+a title table it also runs the first-play commands and prints where they lead.
 `hddvd-menurun [--before FILE] [--playlist FILE.xpl [--title ID]] archive.aca
 MANIFEST.xmf [STEP...]` runs one application in the script runtime: its
 manifest's scripts, its markup and the markup loaded handler, then steps such
@@ -200,4 +202,4 @@ original synthetic seeds and contain no bytes from the reference archive.
 
 ## Status
 
-This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content command semantics and menus, and conformance against a real player's behavior are future work.
+This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content playback beyond the command VM (a host must still sequence PGCs, cells and menus), and conformance against a real player's behavior are future work.

@@ -16,8 +16,13 @@
 #define VTS_TIME_MAP_TABLE 0xd4u
 #define VTS_CELL_ADDRESS_TABLE 0xe0u
 #define VTS_VOBU_MAP 0xe4u
+#define VTS_MENU_TABLE 0xd0u
+#define VMG_HEADER_END 0x80u
+#define VMG_FIRST_PLAY 0x84u
 #define VMG_TITLE_TABLE 0xc4u
+#define VMG_MENU_TABLE 0xc8u
 #define VMG_TITLE_SET_TABLE 0xd0u
+#define MENU_UNIT_POINTER 8u
 #define TABLE_HEADER 8u
 #define PGC_SEARCH_POINTER 12u
 #define PGC_TABLE_OFFSETS 0xa8u
@@ -54,6 +59,14 @@ typedef struct vts_pgc
     hddvd_vts_map_entry *map;
 } vts_pgc;
 
+/* A menu language unit and its PGCs. */
+typedef struct menu_unit
+{
+    hddvd_menu_unit info;
+    hddvd_menu_pgc *categories;
+    vts_pgc *pgcs;
+} menu_unit;
+
 struct hddvd_vts
 {
     hddvd_vts_info info;
@@ -72,6 +85,8 @@ struct hddvd_vts
     size_t stream_count[2];
     hddvd_stream_attributes audio[MAX_AUDIO];
     hddvd_stream_attributes subpictures[MAX_SUBPICTURES];
+    size_t menu_unit_count;
+    menu_unit *menu_units;
 };
 
 struct hddvd_vmg
@@ -80,6 +95,10 @@ struct hddvd_vmg
     size_t title_set_count;
     size_t title_count;
     hddvd_vmg_title *titles;
+    size_t menu_unit_count;
+    menu_unit *menu_units;
+    int has_first_play;
+    vts_pgc first_play;
 };
 
 /* The IFO in memory. */
@@ -95,6 +114,8 @@ typedef struct table
     size_t base;
     size_t length;
 } table;
+
+static int get_command(const vts_pgc *, hddvd_vts_command_kind, size_t, uint8_t[8]);
 
 static uint16_t be16(const unsigned char *b)
 {
@@ -205,18 +226,35 @@ int hddvd_vts_time_to_ticks(const hddvd_vts_time *time, hddvd_time *out)
     return HDDVD_OK;
 }
 
+static void pgc_free(vts_pgc *pgc)
+{
+    free(pgc->programs);
+    free(pgc->cells);
+    free(pgc->commands);
+    free(pgc->map);
+}
+
+static void menus_free(menu_unit *units, size_t count)
+{
+    size_t i, j;
+    for (i = 0; units && i < count; i++)
+    {
+        for (j = 0; units[i].pgcs && j < units[i].info.pgc_count; j++)
+            pgc_free(&units[i].pgcs[j]);
+        free(units[i].pgcs);
+        free(units[i].categories);
+    }
+    free(units);
+}
+
 void hddvd_vts_close(hddvd_vts *vts)
 {
     size_t i;
     if (!vts)
         return;
     for (i = 0; i < vts->pgc_count; i++)
-    {
-        free(vts->pgcs[i].programs);
-        free(vts->pgcs[i].cells);
-        free(vts->pgcs[i].commands);
-        free(vts->pgcs[i].map);
-    }
+        pgc_free(&vts->pgcs[i]);
+    menus_free(vts->menu_units, vts->menu_unit_count);
     free(vts->pgcs);
     free(vts->chapter_start);
     free(vts->chapters);
@@ -318,6 +356,8 @@ static int check_cell(const hddvd_vts *vts, const hddvd_vts_cell *cell)
     return HDDVD_EPARSE;
 }
 
+/* vts is NULL for menu and first-play PGCs, whose cells are not checked
+   against the title EVO's tables. */
 static int parse_pgc(const ifo *f, const table *t, size_t offset, hddvd_vts *vts, vts_pgc *pgc)
 {
     const unsigned char *h;
@@ -393,7 +433,7 @@ static int parse_pgc(const ifo *f, const table *t, size_t offset, hddvd_vts *vts
         cell->command = r[25];
         cell->evob_id = be16(p);
         cell->cell_id = p[3];
-        if (cell->command > pgc->info.cell_command_count || check_cell(vts, cell))
+        if (cell->command > pgc->info.cell_command_count || (vts && check_cell(vts, cell)))
             return HDDVD_EPARSE;
     }
     return HDDVD_OK;
@@ -422,6 +462,70 @@ static int parse_pgcs(const ifo *f, hddvd_vts *vts)
         rc = parse_pgc(f, &t, be32(srp + 8), vts, &vts->pgcs[i]);
         if (rc)
             return rc;
+    }
+    return HDDVD_OK;
+}
+
+/* A menu PGC unit table: language unit pointers (code, extension byte,
+   existence flags, offset), each unit a PGC table with 12-byte search
+   pointers. Absent tables leave no units. */
+static int parse_menus(const ifo *f, size_t field, menu_unit **out, size_t *out_count)
+{
+    table t;
+    size_t i, j, count;
+    menu_unit *units;
+    int rc = locate(f, field, 4, &t);
+    *out = NULL;
+    *out_count = 0;
+    if (rc == HDDVD_ENOTFOUND)
+        return HDDVD_OK;
+    if (rc)
+        return rc;
+    count = be16(at(f, &t, 0));
+    if (!count || !fits(&t, TABLE_HEADER, count * MENU_UNIT_POINTER))
+        return HDDVD_EPARSE;
+    units = calloc(count, sizeof(*units));
+    if (!units)
+        return HDDVD_ENOMEM;
+    *out = units;
+    *out_count = count;
+    for (i = 0; i < count; i++)
+    {
+        const unsigned char *p = at(f, &t, TABLE_HEADER + i * MENU_UNIT_POINTER);
+        size_t offset = be32(p + 4);
+        table unit;
+        menu_unit *u = &units[i];
+        if (p[0] && p[1])
+        {
+            u->info.language[0] = (char)p[0];
+            u->info.language[1] = (char)p[1];
+        }
+        u->info.language_extension = p[2];
+        u->info.existence = p[3];
+        if (offset < TABLE_HEADER + count * MENU_UNIT_POINTER || !fits(&t, offset, TABLE_HEADER))
+            return HDDVD_EPARSE;
+        unit.base = t.base + offset;
+        unit.length = (size_t)be32(at(f, &t, offset + 4)) + 1;
+        if (!unit.length || !fits(&t, offset, unit.length))
+            return HDDVD_EPARSE;
+        u->info.pgc_count = be16(at(f, &unit, 0));
+        if (!u->info.pgc_count ||
+            !fits(&unit, TABLE_HEADER, (size_t)u->info.pgc_count * PGC_SEARCH_POINTER))
+            return HDDVD_EPARSE;
+        u->categories = calloc(u->info.pgc_count, sizeof(*u->categories));
+        u->pgcs = calloc(u->info.pgc_count, sizeof(*u->pgcs));
+        if (!u->categories || !u->pgcs)
+            return HDDVD_ENOMEM;
+        for (j = 0; j < u->info.pgc_count; j++)
+        {
+            const unsigned char *srp = at(f, &unit, TABLE_HEADER + j * PGC_SEARCH_POINTER);
+            memcpy(u->categories[j].category, srp, 4);
+            u->categories[j].entry = (uint8_t)(srp[0] >> 7);
+            u->categories[j].menu_id = (uint8_t)(srp[1] >> 4);
+            rc = parse_pgc(f, &unit, be32(srp + 8), NULL, &u->pgcs[j]);
+            if (rc)
+                return rc;
+        }
     }
     return HDDVD_OK;
 }
@@ -577,6 +681,8 @@ int hddvd_vts_open_with_config(hddvd_stream *stream, const hddvd_config_limits *
         rc = parse_chapters(&f, vts);
     if (!rc)
         rc = parse_time_maps(&f, vts);
+    if (!rc)
+        rc = parse_menus(&f, VTS_MENU_TABLE, &vts->menu_units, &vts->menu_unit_count);
     free(f.data);
     if (rc)
     {
@@ -656,32 +762,9 @@ int hddvd_vts_get_cell(const hddvd_vts *vts, size_t pgc, size_t cell, hddvd_vts_
 int hddvd_vts_get_command(const hddvd_vts *vts, size_t pgc, hddvd_vts_command_kind kind,
                           size_t index, uint8_t command[8])
 {
-    const hddvd_vts_pgc *info;
-    size_t before, count;
     if (!vts || !command || pgc >= vts->pgc_count)
         return HDDVD_EINVAL;
-    info = &vts->pgcs[pgc].info;
-    switch (kind)
-    {
-        case HDDVD_VTS_PRE_COMMAND:
-            before = 0;
-            count = info->pre_command_count;
-            break;
-        case HDDVD_VTS_POST_COMMAND:
-            before = info->pre_command_count;
-            count = info->post_command_count;
-            break;
-        case HDDVD_VTS_CELL_COMMAND:
-            before = (size_t)info->pre_command_count + info->post_command_count;
-            count = info->cell_command_count;
-            break;
-        default:
-            return HDDVD_EINVAL;
-    }
-    if (index >= count)
-        return HDDVD_EINVAL;
-    memcpy(command, vts->pgcs[pgc].commands + (before + index) * COMMAND, COMMAND);
-    return HDDVD_OK;
+    return get_command(&vts->pgcs[pgc], kind, index, command);
 }
 
 int hddvd_vts_get_time_map(const hddvd_vts *vts, size_t pgc, uint8_t *unit_seconds, size_t *count)
@@ -734,6 +817,8 @@ void hddvd_vmg_close(hddvd_vmg *vmg)
 {
     if (!vmg)
         return;
+    menus_free(vmg->menu_units, vmg->menu_unit_count);
+    pgc_free(&vmg->first_play);
     free(vmg->titles);
     free(vmg);
 }
@@ -792,6 +877,22 @@ int hddvd_vmg_open_with_config(hddvd_stream *stream, const hddvd_config_limits *
             !title->title_set_title || title->title_set_sector <= vmg->last_sector ||
             (vmg->title_set_count && title->title_set > vmg->title_set_count))
             rc = HDDVD_EPARSE;
+    }
+    if (!rc)
+        rc = parse_menus(&f, VMG_MENU_TABLE, &vmg->menu_units, &vmg->menu_unit_count);
+    if (!rc && be32(f.data + VMG_FIRST_PLAY))
+    {
+        /* The first-play PGC lies in the header, which ends at the byte the
+           field at 0x80 names. */
+        table header;
+        header.base = 0;
+        header.length = (size_t)be32(f.data + VMG_HEADER_END) + 1;
+        if (header.length < VMG_FIRST_PLAY + 4 || header.length > f.size ||
+            be32(f.data + VMG_FIRST_PLAY) < VMG_FIRST_PLAY + 4)
+            rc = HDDVD_EPARSE;
+        else
+            rc = parse_pgc(&f, &header, be32(f.data + VMG_FIRST_PLAY), NULL, &vmg->first_play);
+        vmg->has_first_play = !rc;
     }
     free(f.data);
     if (rc)
@@ -855,4 +956,154 @@ int hddvd_vts_get_stream_attributes(const hddvd_vts *vts, hddvd_stream_kind kind
         return HDDVD_EINVAL;
     *out = kind == HDDVD_STREAM_AUDIO ? vts->audio[index] : vts->subpictures[index];
     return HDDVD_OK;
+}
+
+/* Menus */
+
+static int get_command(const vts_pgc *pgc, hddvd_vts_command_kind kind, size_t index,
+                       uint8_t command[8])
+{
+    const hddvd_vts_pgc *info = &pgc->info;
+    size_t before, count;
+    switch (kind)
+    {
+        case HDDVD_VTS_PRE_COMMAND:
+            before = 0;
+            count = info->pre_command_count;
+            break;
+        case HDDVD_VTS_POST_COMMAND:
+            before = info->pre_command_count;
+            count = info->post_command_count;
+            break;
+        case HDDVD_VTS_CELL_COMMAND:
+            before = (size_t)info->pre_command_count + info->post_command_count;
+            count = info->cell_command_count;
+            break;
+        default:
+            return HDDVD_EINVAL;
+    }
+    if (index >= count)
+        return HDDVD_EINVAL;
+    memcpy(command, pgc->commands + (before + index) * COMMAND, COMMAND);
+    return HDDVD_OK;
+}
+
+static const vts_pgc *menu_pgc(const menu_unit *units, size_t count, size_t unit, size_t pgc)
+{
+    if (!units || unit >= count || pgc >= units[unit].info.pgc_count)
+        return NULL;
+    return &units[unit].pgcs[pgc];
+}
+
+static int get_menu_unit(const menu_unit *units, size_t count, size_t unit, hddvd_menu_unit *out)
+{
+    if (!units || !out || unit >= count)
+        return HDDVD_EINVAL;
+    *out = units[unit].info;
+    return HDDVD_OK;
+}
+
+static int get_menu_pgc(const menu_unit *units, size_t count, size_t unit, size_t pgc,
+                        hddvd_menu_pgc *category, hddvd_vts_pgc *out)
+{
+    const vts_pgc *p = menu_pgc(units, count, unit, pgc);
+    if (!p || (!category && !out))
+        return HDDVD_EINVAL;
+    if (category)
+        *category = units[unit].categories[pgc];
+    if (out)
+        *out = p->info;
+    return HDDVD_OK;
+}
+
+static int get_menu_cell(const menu_unit *units, size_t count, size_t unit, size_t pgc, size_t cell,
+                         hddvd_vts_cell *out)
+{
+    const vts_pgc *p = menu_pgc(units, count, unit, pgc);
+    if (!p || !out || cell >= p->info.cell_count)
+        return HDDVD_EINVAL;
+    *out = p->cells[cell];
+    return HDDVD_OK;
+}
+
+size_t hddvd_vts_menu_unit_count(const hddvd_vts *vts)
+{
+    return vts ? vts->menu_unit_count : 0;
+}
+
+int hddvd_vts_get_menu_unit(const hddvd_vts *vts, size_t unit, hddvd_menu_unit *out)
+{
+    return vts ? get_menu_unit(vts->menu_units, vts->menu_unit_count, unit, out) : HDDVD_EINVAL;
+}
+
+int hddvd_vts_get_menu_pgc(const hddvd_vts *vts, size_t unit, size_t pgc, hddvd_menu_pgc *category,
+                           hddvd_vts_pgc *out)
+{
+    return vts ? get_menu_pgc(vts->menu_units, vts->menu_unit_count, unit, pgc, category, out)
+               : HDDVD_EINVAL;
+}
+
+int hddvd_vts_get_menu_command(const hddvd_vts *vts, size_t unit, size_t pgc,
+                               hddvd_vts_command_kind kind, size_t index, uint8_t command[8])
+{
+    const vts_pgc *p = vts ? menu_pgc(vts->menu_units, vts->menu_unit_count, unit, pgc) : NULL;
+    return p && command ? get_command(p, kind, index, command) : HDDVD_EINVAL;
+}
+
+int hddvd_vts_get_menu_cell(const hddvd_vts *vts, size_t unit, size_t pgc, size_t cell,
+                            hddvd_vts_cell *out)
+{
+    return vts ? get_menu_cell(vts->menu_units, vts->menu_unit_count, unit, pgc, cell, out)
+               : HDDVD_EINVAL;
+}
+
+size_t hddvd_vmg_menu_unit_count(const hddvd_vmg *vmg)
+{
+    return vmg ? vmg->menu_unit_count : 0;
+}
+
+int hddvd_vmg_get_menu_unit(const hddvd_vmg *vmg, size_t unit, hddvd_menu_unit *out)
+{
+    return vmg ? get_menu_unit(vmg->menu_units, vmg->menu_unit_count, unit, out) : HDDVD_EINVAL;
+}
+
+int hddvd_vmg_get_menu_pgc(const hddvd_vmg *vmg, size_t unit, size_t pgc, hddvd_menu_pgc *category,
+                           hddvd_vts_pgc *out)
+{
+    return vmg ? get_menu_pgc(vmg->menu_units, vmg->menu_unit_count, unit, pgc, category, out)
+               : HDDVD_EINVAL;
+}
+
+int hddvd_vmg_get_menu_command(const hddvd_vmg *vmg, size_t unit, size_t pgc,
+                               hddvd_vts_command_kind kind, size_t index, uint8_t command[8])
+{
+    const vts_pgc *p = vmg ? menu_pgc(vmg->menu_units, vmg->menu_unit_count, unit, pgc) : NULL;
+    return p && command ? get_command(p, kind, index, command) : HDDVD_EINVAL;
+}
+
+int hddvd_vmg_get_menu_cell(const hddvd_vmg *vmg, size_t unit, size_t pgc, size_t cell,
+                            hddvd_vts_cell *out)
+{
+    return vmg ? get_menu_cell(vmg->menu_units, vmg->menu_unit_count, unit, pgc, cell, out)
+               : HDDVD_EINVAL;
+}
+
+int hddvd_vmg_get_first_play(const hddvd_vmg *vmg, hddvd_vts_pgc *out)
+{
+    if (!vmg || !out)
+        return HDDVD_EINVAL;
+    if (!vmg->has_first_play)
+        return HDDVD_ENOTFOUND;
+    *out = vmg->first_play.info;
+    return HDDVD_OK;
+}
+
+int hddvd_vmg_get_first_play_command(const hddvd_vmg *vmg, hddvd_vts_command_kind kind,
+                                     size_t index, uint8_t command[8])
+{
+    if (!vmg || !command)
+        return HDDVD_EINVAL;
+    if (!vmg->has_first_play)
+        return HDDVD_ENOTFOUND;
+    return get_command(&vmg->first_play, kind, index, command);
 }

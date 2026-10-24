@@ -32,7 +32,7 @@ Sector pointers in the first sector:
 | 0xc4 | title EVO | equals the IFO's sector count in all 10, so the EVO follows the IFO |
 | 0xc8 | chapter (PTT) search table | |
 | 0xcc | PGC table | |
-| 0xd0 | menu PGC unit table | not decoded |
+| 0xd0 | menu PGC unit table | below; one root menu in 8 of 10 sets |
 | 0xd4 | time map table | 0 (absent) in one title set |
 | 0xe0 | cell address table | |
 | 0xe4 | VOBU address map | |
@@ -80,10 +80,38 @@ The 785 commands in the 11 IFOs use DVD-Video's 8-byte encoding, as libdvdnav do
 | `SetHL_BTNN` (button = value / 1024), some conditional | 19 | `56 00 00 00 04 00 00 00`: SetHL_BTNN 1 |
 | `LinkPGN`, `LinkPGCN`, `LinkPTTN` | 11 | |
 | conditional `Goto` | 2 | `00 a1 00 02 00 01 00 05`: if (GPRM2 == 1) Goto 5 |
-| jump subset 8, DVD's `CallSS` | 212 | `30 08 00 03 00 b0 00 00` |
+| `CallSS` (jump subset 8) | 212 | `30 08 00 03 00 b0 00 00`: CallSS VMG PGC 3 |
 
 - **Registers:** commands use general registers 0 to 3, 10, 11 and 63. GPRM63 is a loop counter: it is set to 3, decremented, and tested with `if (GPRM63 > 0) LinkCN 1`. DVD-Video has only 16 general registers, so HD DVD has at least 64.
-- **Jump subset 8 is unconfirmed.** Read as DVD's `CallSS`, byte 5 (`0xb0` in 210 commands, `0xa3` in 1) asks for a VTS menu, but these title sets have none. Byte 3 (0 to 10) matches no cell number of the cells that run it. `hddvd-vtsinfo` prints these commands raw and counts them as unconfirmed.
+- **`JumpSS` and `CallSS`** (jump subsets 6 and 8) take their domain from bits 5 and 4 of byte 5: 0 first play, 1 a VMG menu and 2 a title set menu (menu id in the low nibble), 3 a VMG PGC (number in bytes 2 and 3, 15 bits). `CallSS` keeps the cell to resume at in byte 4. Bit 7 of byte 5 is set in all but one of them and is unexplained.
+  - The first decoder read the domain from the low bits, which made 210 `CallSS` commands ask for title set menus that do not exist. Read this way, 211 `CallSS` and 6 `JumpSS` name VMG PGCs 2 to 10, all within the VMG's 10 menu PGCs. The last one calls the title set's root menu, menu id 3, and that set has one.
+  - All 212 `CallSS` resume at cell 0.
+
+### Menus and first play
+
+**Menu PGC unit table** (title set 0xd0, VMG 0xc8): the usual count and end offset, then one 8-byte pointer per language unit: language code (2 bytes), an extension byte, existence flags (`0x80` in all 9 tables), and the unit's offset. Each unit is a PGC table with the 12-byte search pointers above.
+- **Categories:** the high nibble of the second byte is DVD's menu id. The VMG's entry PGC is `82 20`, the title menu (2). Each title set's is `82 30`, the root menu (3). The other 9 VMG PGCs are `02 00`.
+- **Shape:** menu PGCs hold commands only, with no programs or cells. That fits the missing menu EVOs (0xc0 is 0).
+- **Contents:** each title set root menu either jumps to a title (`JumpTT`) or to a VMG PGC (`JumpSS`). The VMG's 10 PGCs keep the game's state in general registers: sets, compares, `Goto`, `LinkPGCN` and `JumpTT`.
+
+**First play** (VMG): the 4-byte value at **0x84** is the byte offset of the first-play PGC within the VMG's first sectors, which end at the byte that 0x80 names. On Dragon's Lair the header ends at 1479, the PGC is at 0x486, and its single command is `JumpTT 25`.
+
+Across the 11 IFOs there are 1,094 commands, 309 of them in menus and first play. Besides the forms above, they include:
+- 14 conditional sets: `74 c0 15 15 00 27 00 27` is if (GPRM21 >= 39) GPRM21 -= 39. The condition compares the register in byte 2 with bytes 6 and 7, or with the register in byte 7.
+- one `SetSTN`, which sets the subpicture stream.
+
+`hddvd-vtsinfo` confirms every command except one, `59 00 00 00 c1 00 00 00`. That is type 2 sub-operation 9, which DVD-Video does not define.
+
+### Command execution
+
+`hddvd_vm_run` executes these forms with libdvdnav's semantics: 64 general registers and DVD's 32 system registers. The set operations are `=`, swap, `+=`, `-=`, `*=`, `/=`, `%=`, rnd, `&=`, `|=` and `^=`.
+- **Saturation:** sums and products stop at 0xffff, and differences at 0.
+- **Division by zero:** division and remainder by 0 give 0xffff.
+- **rnd:** gives 1 to the value; 1 when the value is 0.
+
+A run ends at the first link, jump, `Exit` or `Break`, at the end of the list, or at a form the VM does not run. It reports what to do next and leaves the next step to the host: which PGC, menu or title to load, and when to run its post or cell commands. The 65,536-command limit catches `Goto` loops.
+
+`hddvd-vtsinfo` runs the VMG's first play. On Dragon's Lair it jumps to title 25.
 
 ### Stream attributes (title set)
 
@@ -120,8 +148,10 @@ Advanced Content EVOs (`FBILogo.EVO`) have zeros at these offsets.
 | Offset | Table |
 |---:|---|
 | 0x0c | last sector of the VMG (35) |
+| 0x80 | end of the header (byte offset; 1479) |
+| 0x84 | first-play PGC (byte offset within the header) |
 | 0xc4 | title table |
-| 0xc8 | menu PGC unit table (not decoded) |
+| 0xc8 | menu PGC unit table (above) |
 | 0xd0 | title set attribute table: a 2-byte title set count (10) and per-set records, not decoded (identical in all 10 sets) |
 
 **Title table:** **16-byte** entries (DVD: 12): a playback-type byte (not decoded), angle count, 2 unknown bytes, chapter count (2 bytes), 2 unknown bytes, title set and title number within it (2 bytes each), and the title set's first sector on the disc. All 60 titles' chapter counts equal their title sets' chapter tables. Title set 1 starts at sector 36, after the VMG. Each later set starts 17 sectors after the previous set's last sector (a 16-sector gap at all 9 boundaries), which is unexplained.
@@ -232,12 +262,14 @@ A clip plays its map from `clipTimeBegin` (default 0). A title time `t` inside t
   - every time-map entry names the VOBU playing at its time.
 
   All 11 Dragon's Lair IFOs open and pass, and `HV006I01.IFO` passes against `HV006T01.EVO`.
+- **Menus and first play:** both IFOs read their menu PGC unit tables (`hddvd_vts_get_menu_*`, `hddvd_vmg_get_menu_*`), and the VMG reads its first-play PGC (`hddvd_vmg_get_first_play*`). Each pointer and PGC must lie within its table, and the first play within the header. A zero pointer means there is none. Menu cells are checked against their own PGC only.
+- **`hddvd_vm`** runs command lists as described under "Command execution".
 
 ## What remains
 
 - **Standard Content:**
-  - executing commands (a VM), jump subset 8, and the cell command flags;
-  - menu PGCs and menu EVOs;
+  - the cell command flags, bit 7 of the `JumpSS`/`CallSS` domain byte, and `SetSystem` sub-operation 9;
+  - menu EVOs and menu cells (none on the observed disc), and `JumpSS` to title set menus of another set (the target set is not decoded);
   - audio coding and channel bits, and the rest of the video attributes (only one combination seen);
   - frame rates other than 30000/1001;
   - multi-angle and interleaved cells.

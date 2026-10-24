@@ -619,7 +619,7 @@ all represented in the conformance report.
 
 ### P6-03 — Decode required IFO and MAP navigation structures
 
-**Status:** Advanced Content time maps, the VTI EVOB and attribute tables, and Standard Content IFO tables, command encoding and stream attributes decoded and verified against real discs; Standard Content menus, executing commands and the remaining attribute bits remain
+**Status:** Complete (attribute bits, angle layouts and other time bases that no available disc shows are listed below)
 **Depends on:** P1-01, P6-02
 **Likely files:** `src/ifo.c`, `src/map.c`, `tests/test_ifo.c`, `tests/test_map.c`
 
@@ -689,9 +689,36 @@ Fifth slice: commands and stream attributes.
   against a title EVO's streams. Synthetic fixtures, mutations in `test_vts.c`
   and `test_ifo.c`, and both fuzzers cover the new fields.
 
-Still open: Standard Content menus and a command VM, audio coding bits (no EVO
-with audio is available), angle or interleaved maps, and the clock for time
-bases other than 60fps.
+Sixth slice: menus, first play and command execution.
+- **Menus:** the menu PGC unit tables (title set 0xd0, VMG 0xc8) hold language
+  units of command-only PGCs. `hddvd_vts_get_menu_*` and
+  `hddvd_vmg_get_menu_*` read them; the category's menu id names the VMG
+  title menu (2) and each set's root menu (3). The VMG's first-play PGC lies in
+  its header at the byte offset in 0x84 (`hddvd_vmg_get_first_play*`). All 11
+  IFOs open: 9 menu tables, 18 menu PGCs and 1 first play.
+- **Domain fix:** jump subset 8 is `CallSS`. Its domain is in bits 5 and 4 of
+  byte 5, as for `JumpSS`, which the fifth slice read wrong. All 212 `CallSS`
+  commands and 6 `JumpSS` name VMG PGCs that exist, or a root menu its set
+  has. `hddvd-vtsinfo` now confirms all 1,094 commands but one, a `SetSystem`
+  sub-operation DVD does not define. It also decodes conditional sets and
+  `SetSTN`, prints both menu tables and the first play, and runs the first play.
+- **VM:** `hddvd_vm` runs command lists with libdvdnav's semantics: 64 general
+  and 32 system registers, conditions, `Goto`/`Break`, sets, `SetSTN`,
+  `SetHL_BTNN`, links and jumps. It returns the link or jump for the host to
+  follow. It never runs an unknown form; it reports it, and bad registers or
+  lines fail with `HDDVD_EPARSE`. `HDDVD_ELIMIT` stops a loop after 65,536
+  commands.
+- **Coverage:** `test_vm.c` covers every operation and rejection. `test_vts.c`
+  reads the synthetic menus and first play, rejects bad pointers, and runs the
+  fixture VMG's first play through its menus. `fuzz-vts` walks the menus and
+  runs its input as commands, from a new seed.
+
+Not decoded, for lack of evidence (no disc with them is available):
+- audio coding and channel bits (no EVO with audio);
+- menu EVOs and menu cells;
+- angle and interleaved maps;
+- the clock for time bases other than 60fps;
+- the cell command flags and bit 7 of the `JumpSS`/`CallSS` domain byte.
 
 ### P6-04 — Harden EVO packet and stream metadata parsing
 

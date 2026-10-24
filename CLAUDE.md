@@ -32,7 +32,7 @@ least one is required), `HDDVD_SCRIPT_ENGINE` (`auto`/`quickjs`/`none`) with `HD
 QuickJS release compiled into libhddvd; `tools/fetch_quickjs.sh DEST` downloads the pinned,
 checksummed one outside the tree; installed distribution `libquickjs.a` builds are not `-fPIC`,
 so only static-only builds can use them),
-`HDDVD_BUILD_FUZZERS` (Clang only; builds `fuzz-{aca,object,xmf,xmu,script,xpl,navigation,timemap,uri,titlemap,display,vts}`, plus `fuzz-runtime` with an engine,
+`HDDVD_BUILD_FUZZERS` (Clang only; builds `fuzz-{aca,object,xmf,xmu,script,xpl,navigation,timemap,uri,titlemap,display,vts}` (`fuzz-vts` also runs its input through the command VM), plus `fuzz-runtime` with an engine,
 against `hddvd_fuzz`, a coverage-instrumented static copy of the library; fuzz with a scratch
 copy of the seeds, because libFuzzer writes new inputs into the corpus directory it is given),
 `HDDVD_ENABLE_REFERENCE_TESTS` and `HDDVD_ENABLE_EXTERNAL_MENU_TESTS` (opt-in Python tests that
@@ -138,13 +138,15 @@ Layered, bottom-up (see `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the full desi
    (`hddvd_display_get_item`); the older quad accessors still list image quads only.
 9. **Navigation scheduler** (`player.c`): `hddvd_nav` event queue, timers on title time
    (`hddvd_time`, 90 kHz), discontinuity/seek handling, and host command callbacks.
-10. **Probes and time maps** (`evo.c`, `ifo.c`, `vti.c`, `map.c`, `title_map.c`, `vts.c`): EVO
+10. **Probes and time maps** (`evo.c`, `ifo.c`, `vti.c`, `map.c`, `title_map.c`, `vts.c`, `vm.c`): EVO
     program-stream probing; IFO/VTI/MAP header validation; the VTI's EVOB table
     (`hddvd_vti`) and MAP time maps (`hddvd_tmap`). `hddvd_title_map` joins a playlist
     title's primary clips to their maps and VTI, so a title time resolves to an EVO URI and
     sector. Playlist `60fps` time counts at 60000/1001. Standard Content title sets
     (`hddvd_vts`: chapters, PGCs, cells, raw commands, time maps, cell addresses, VOBU map)
-    and the VMG title table (`hddvd_vmg`); stream attributes in title sets and VTIs;
+    and the VMG title table (`hddvd_vmg`); menu PGC unit tables in both and the VMG's
+    first-play PGC; `vm.c` runs navigation commands (`hddvd_vm_run`, libdvdnav semantics,
+    64 GPRMs) and reports the link or jump for the host to follow; stream attributes in title sets and VTIs;
     `hddvd-vtsinfo` disassembles commands (DVD-Video encoding) and checks them and the
     tables against an EVO's navigation packs and streams (`docs/formats/ifo-map.md`).
 
@@ -166,8 +168,7 @@ Only set a feature bit when the capability is actually implemented.
 
 - Work is tracked as task IDs (e.g. P3-01) with status, dependencies, and acceptance
   criteria in `docs/IMPLEMENTATION_TASKS.md`; update the task's status when completing it.
-  P4-06 (reference conformance) and P5-04 are blocked on a conforming-player trace;
-  P6-03 is partly done.
+  P4-06 (reference conformance) and P5-04 are blocked on a conforming-player trace.
 - A task is complete only when API docs, positive and negative tests, fuzz coverage where
   applicable, and `hddvd_strerror` behavior land in the same change.
 - **Never commit, copy, or download the reference ACA or any external menu corpus** into

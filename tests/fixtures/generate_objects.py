@@ -129,6 +129,31 @@ def std_table(count, body, count_size=2):
     head = struct.pack(">H", count) + bytes(2) + struct.pack(">I", 8 + len(body) - 1)
     return head + body
 
+def std_command_pgc(pre, post=()):
+    """A PGC of commands only, as menu and first-play PGCs are on observed
+    discs: no programs or cells."""
+    commands = list(pre) + list(post)
+    table = (struct.pack(">HHHI", len(pre), len(post), 0, 10 + 8 * len(commands) - 1) +
+             b"".join(commands))
+    return (struct.pack(">HH", 0, 0) + std_time(0) + bytes(0xa8 - 8) +
+            struct.pack(">HHHH", 0xb0, 0, 0, 0) + table)
+
+def std_menus(units):
+    """A menu PGC unit table: per language (code, PGCs as (category, PGC)), a
+    unit pointer (code, extension, existence flags, offset), then each unit,
+    a PGC table of 12-byte search pointers."""
+    pointers, body = b"", b""
+    base = 8 + 8 * len(units)
+    for language, pgcs in units:
+        unit_pointers, unit_body = b"", b""
+        unit_base = 8 + 12 * len(pgcs)
+        for category, pgc in pgcs:
+            unit_pointers += category + bytes(4) + struct.pack(">I", unit_base + len(unit_body))
+            unit_body += pgc
+        pointers += language + bytes([0, 0x80]) + struct.pack(">I", base + len(body))
+        body += std_table(len(pgcs), unit_pointers + unit_body)
+    return std_table(len(units), pointers + body)
+
 def std_vts(post_command=bytes([0x30, 0x02, 0, 0, 0, 1, 0, 0])):
     cell_frames = [n * 15 for _, _, _, n in STD_CELLS]
     first = lambda c: STD_CELLS[c][2] * VOBU_SECTORS
@@ -190,7 +215,10 @@ def std_vts(post_command=bytes([0x30, 0x02, 0, 0, 0, 1, 0, 0])):
     vobu_count = sum(n for _, _, _, n in STD_CELLS)
     admap = struct.pack(">I", 4 + 4 * vobu_count - 1) + b"".join(
         struct.pack(">I", v * VOBU_SECTORS) for v in range(vobu_count))
-    tables = [ptt, pgcit, tmapt, cadt, admap]
+    # A root menu (menu id 3): GPRM2 = 7, then JumpVTS_TT 2.
+    menus = std_menus([(b"en", [(bytes([0x82, 0x30, 0, 0]), std_command_pgc(
+        [bytes([0x71, 0, 0, 2, 0, 7, 0, 0])], [bytes([0x30, 0x03, 0, 0, 0, 2, 0, 0])]))])])
+    tables = [ptt, pgcit, tmapt, cadt, admap, menus]
     ifo_sectors = 1 + len(tables)
     evo_sectors = vobu_count * VOBU_SECTORS
     head = bytearray(2048)
@@ -204,7 +232,8 @@ def std_vts(post_command=bytes([0x30, 0x02, 0, 0, 0, 1, 0, 0])):
     head[0x1c:0x20] = struct.pack(">I", ifo_sectors - 1)
     head[0x20:0x22] = struct.pack(">H", 0x10)
     head[0x80:0x84] = struct.pack(">I", 0x7ff)
-    for field, value in ((0xc4, ifo_sectors), (0xc8, 1), (0xcc, 2), (0xd4, 3), (0xe0, 4), (0xe4, 5)):
+    for field, value in ((0xc4, ifo_sectors), (0xc8, 1), (0xcc, 2), (0xd4, 3), (0xe0, 4), (0xe4, 5),
+                         (0xd0, 6)):
         head[field:field + 4] = struct.pack(">I", value)
     return bytes(head) + b"".join(sectors(t) for t in tables)
 
@@ -256,10 +285,24 @@ def std_vmg():
     head = bytearray(2048)
     head[0:12] = b"HVDVD-VMG100"
     head[0x0c:0x10] = struct.pack(">I", 7)
-    head[0x1c:0x20] = struct.pack(">I", 2)
+    head[0x1c:0x20] = struct.pack(">I", 3)
     head[0xc4:0xc8] = struct.pack(">I", 1)
     head[0xd0:0xd4] = struct.pack(">I", 2)
-    return bytes(head) + sectors(std_table(2, titles)) + sectors(sets)
+    # The title menu (menu id 2) links to PGC 2 when GPRM0 is 1, else plays
+    # title 1; PGC 2 calls the title set's root menu, resuming at cell 1.
+    menus = std_menus([(b"en", [
+        (bytes([0x82, 0x20, 0, 0]), std_command_pgc([
+            bytes([0x20, 0xa4, 0, 0, 0, 1, 0, 2]), bytes([0x30, 0x02, 0, 0, 0, 1, 0, 0])])),
+        (bytes([0x02, 0, 0, 0]), std_command_pgc([bytes([0x30, 0x08, 0, 0, 1, 0xa3, 0, 0])]))])])
+    head[0xc8:0xcc] = struct.pack(">I", 3)
+    # First play, in the header (which ends at the byte 0x80 names): GPRM0 =
+    # 1, then JumpSS to the VMG's title menu.
+    first_play = std_command_pgc([bytes([0x71, 0, 0, 0, 0, 1, 0, 0]),
+                                  bytes([0x30, 0x06, 0, 0, 0, 0x92, 0, 0])])
+    head[0x80:0x84] = struct.pack(">I", 0x7ff)
+    head[0x84:0x88] = struct.pack(">I", 0x400)
+    head[0x400:0x400 + len(first_play)] = first_play
+    return bytes(head) + sectors(std_table(2, titles)) + sectors(sets) + sectors(menus)
 
 standard = {"HV000I01.IFO": std_vmg(), "HV001I01.IFO": std_vts(), "HV001T01.EVO": std_evo(),
             # LinkCN 9 in PGCs of at most two cells: valid tables, a bad target.
@@ -398,6 +441,14 @@ app = {
 # Seeds for harnesses whose input is not a file format of its own.
 FUZZ = Path(__file__).resolve().parent / "fuzz"
 fuzz_seeds = {
+    # fuzz-vts also runs its input as navigation commands: a loop on GPRM0,
+    # each set operation, SetSTN, SetHL_BTNN with a link, then CallSS.
+    "vts/commands.bin": b"".join(bytes(c) for c in (
+        [0x73, 0, 0, 0, 0, 1, 0, 0], [0x00, 0xf1, 0, 0, 0, 4, 0, 1],
+        *([0x70 | op, 0x00, 0, 1, 0, 3, 0, 0] for op in range(1, 12) if op != 2),
+        [0x62, 0, 0, 1, 0, 2, 0, 0], [0x74, 0xc0, 1, 1, 0, 1, 0, 1],
+        [0x51, 0, 0, 0x82, 0x81, 0x81, 0, 0], [0x56, 0x04, 0, 0, 0x08, 0, 0, 2],
+        [0x30, 0x08, 0, 4, 2, 0xb0, 0, 0])),
     # fuzz-runtime evaluates a script, then calls its function f.
     "runtime/calls.js": (
         "var count = 0;\n"

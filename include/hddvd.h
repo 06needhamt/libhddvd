@@ -57,6 +57,7 @@ typedef struct hddvd_vti hddvd_vti;
 typedef struct hddvd_tmap hddvd_tmap;
 typedef struct hddvd_vts hddvd_vts;
 typedef struct hddvd_vmg hddvd_vmg;
+typedef struct hddvd_vm hddvd_vm;
 typedef struct hddvd_title_map hddvd_title_map;
 typedef struct hddvd_scene hddvd_scene;
 typedef void (*hddvd_log_fn)(void *, int, const char *);
@@ -1183,6 +1184,85 @@ typedef struct hddvd_vts_evob_cell
     uint32_t first_sector;
     uint32_t last_sector;
 } hddvd_vts_evob_cell;
+/* A menu language unit: the menus for one language (title set menus at
+   IFO offset 0xd0, VMG menus at 0xc8; docs/formats/ifo-map.md). */
+typedef struct hddvd_menu_unit
+{
+    /* ISO 639 code as stored, "" when none. */
+    char language[3];
+    /* The byte after the code and the menu existence flags, stored. */
+    uint8_t language_extension;
+    uint8_t existence;
+    uint16_t pgc_count;
+} hddvd_menu_unit;
+/* A menu PGC's search-pointer category. menu_id is the second byte's high
+   nibble: 2 on the VMG's title menu and 3 on title sets' root menus, DVD's
+   numbers for those menus. */
+typedef struct hddvd_menu_pgc
+{
+    uint8_t entry;
+    uint8_t menu_id;
+    uint8_t category[4];
+} hddvd_menu_pgc;
+/* What a run of navigation commands ended with (hddvd_vm_run). */
+typedef enum hddvd_vm_action
+{
+    /* The last command ran, or Break: the PGC goes on (to its cells, or to
+       its post commands). */
+    HDDVD_VM_END = 0,
+    /* A link within the domain: link and target. */
+    HDDVD_VM_LINK,
+    /* JumpTT: target is a VMG title number. */
+    HDDVD_VM_JUMP_TITLE,
+    /* JumpVTS_TT: target is a title of the current title set. */
+    HDDVD_VM_JUMP_VTS_TITLE,
+    /* JumpVTS_PTT: target title, chapter. */
+    HDDVD_VM_JUMP_VTS_CHAPTER,
+    /* JumpSS and CallSS: domain and target (CallSS also resume_cell). */
+    HDDVD_VM_JUMP_SYSTEM,
+    HDDVD_VM_CALL_SYSTEM,
+    HDDVD_VM_EXIT,
+    /* A command in a form the VM does not run; nothing of it was done.
+       line names it, so a host may skip it and run on from there. */
+    HDDVD_VM_UNSUPPORTED
+} hddvd_vm_action;
+/* Link subsets, numbered as in the command. */
+typedef enum hddvd_vm_link
+{
+    HDDVD_VM_LINK_NONE = 0,
+    /* target: the LinkSIns instruction (DVD's LinkTopCell, NextPG, ...). */
+    HDDVD_VM_LINK_INSTRUCTION = 1,
+    HDDVD_VM_LINK_PGC = 4,
+    HDDVD_VM_LINK_CHAPTER = 5,
+    HDDVD_VM_LINK_PROGRAM = 6,
+    HDDVD_VM_LINK_CELL = 7
+} hddvd_vm_link;
+/* JumpSS and CallSS destinations: the first-play PGC, a VMG menu (target:
+   menu id), a title set menu (target: menu id) or a VMG menu PGC (target:
+   1-based PGC number in the menu language unit). */
+typedef enum hddvd_vm_domain
+{
+    HDDVD_VM_FIRST_PLAY = 0,
+    HDDVD_VM_VMG_MENU,
+    HDDVD_VM_VTS_MENU,
+    HDDVD_VM_VMG_PGC
+} hddvd_vm_domain;
+typedef struct hddvd_vm_result
+{
+    hddvd_vm_action action;
+    hddvd_vm_link link;
+    hddvd_vm_domain domain;
+    uint16_t target;
+    uint16_t chapter;
+    uint8_t resume_cell;
+    /* The highlight button the deciding command set (1-based), else 0. */
+    uint16_t button;
+    /* 1-based command that ended the run; 0 when it ran off the end. */
+    size_t line;
+    /* Commands executed. */
+    size_t steps;
+    uint8_t command[8];
+} hddvd_vm_result;
 /* A title from the disc's title table (HV000I01.IFO). */
 typedef struct hddvd_vmg_title
 {
@@ -1910,6 +1990,53 @@ HDDVD_API uint32_t hddvd_vmg_last_sector(const hddvd_vmg *);
 HDDVD_API size_t hddvd_vmg_title_set_count(const hddvd_vmg *);
 HDDVD_API size_t hddvd_vmg_title_count(const hddvd_vmg *);
 HDDVD_API int hddvd_vmg_get_title(const hddvd_vmg *, size_t, hddvd_vmg_title *);
+/* Menus. Menu PGCs read as title PGCs do; their cells, if any, are checked
+   against their own table only (no menu EVO has been seen). Indexes are
+   0-based. The VMG's first-play PGC (byte offset at 0x84, within the
+   header) has commands only on observed discs; HDDVD_ENOTFOUND when the
+   VMG has none. */
+HDDVD_API size_t hddvd_vts_menu_unit_count(const hddvd_vts *);
+HDDVD_API int hddvd_vts_get_menu_unit(const hddvd_vts *, size_t unit, hddvd_menu_unit *);
+HDDVD_API int hddvd_vts_get_menu_pgc(const hddvd_vts *, size_t unit, size_t pgc, hddvd_menu_pgc *,
+                                     hddvd_vts_pgc *);
+HDDVD_API int hddvd_vts_get_menu_command(const hddvd_vts *, size_t unit, size_t pgc,
+                                         hddvd_vts_command_kind, size_t index, uint8_t command[8]);
+HDDVD_API int hddvd_vts_get_menu_cell(const hddvd_vts *, size_t unit, size_t pgc, size_t cell,
+                                      hddvd_vts_cell *);
+HDDVD_API size_t hddvd_vmg_menu_unit_count(const hddvd_vmg *);
+HDDVD_API int hddvd_vmg_get_menu_unit(const hddvd_vmg *, size_t unit, hddvd_menu_unit *);
+HDDVD_API int hddvd_vmg_get_menu_pgc(const hddvd_vmg *, size_t unit, size_t pgc, hddvd_menu_pgc *,
+                                     hddvd_vts_pgc *);
+HDDVD_API int hddvd_vmg_get_menu_command(const hddvd_vmg *, size_t unit, size_t pgc,
+                                         hddvd_vts_command_kind, size_t index, uint8_t command[8]);
+HDDVD_API int hddvd_vmg_get_menu_cell(const hddvd_vmg *, size_t unit, size_t pgc, size_t cell,
+                                      hddvd_vts_cell *);
+HDDVD_API int hddvd_vmg_get_first_play(const hddvd_vmg *, hddvd_vts_pgc *);
+HDDVD_API int hddvd_vmg_get_first_play_command(const hddvd_vmg *, hddvd_vts_command_kind,
+                                               size_t index, uint8_t command[8]);
+/* Navigation command VM: DVD-Video's 8-byte encoding as HD DVD discs use it
+   (docs/formats/ifo-map.md), with 64 general registers (GPRMs, register
+   numbers 0 to 63) and 32 system registers (SPRMs, numbers 0x80 to 0x9f),
+   all 16 bits and 0 at create. seed starts the generator rnd uses.
+   run executes commands[first ..] (count 8-byte commands) until a link,
+   jump, Exit or Break, the end of the list, or a command it does not run:
+   - conditions compare a register with a value or register: &, ==, !=,
+     >=, >, <=, <;
+   - Nop, Goto (1-based line), Break; links and jumps (a link's button
+     field, and SetHL_BTNN, set SPRM8 to the button times 1024);
+   - set a GPRM, with an optional condition: =, swap, +=, -=, *=, /=, %=,
+     rnd (1 to the value; 1 for 0), &=, |=, ^=; as libdvdnav does it, results
+     saturate at 0 and 0xffff, and division or remainder by 0 give 0xffff;
+   - SetSTN (SPRM1 audio, SPRM2 subpicture, SPRM3 angle) and SetHL_BTNN.
+   Other forms stop the run with HDDVD_VM_UNSUPPORTED and HDDVD_OK.
+   HDDVD_EPARSE for a register or Goto line out of range (the run stops at
+   that command, line set), HDDVD_ELIMIT after 65536 commands (a loop). */
+HDDVD_API int hddvd_vm_create(uint32_t seed, hddvd_vm **);
+HDDVD_API void hddvd_vm_destroy(hddvd_vm *);
+HDDVD_API int hddvd_vm_get_register(const hddvd_vm *, unsigned, uint16_t *);
+HDDVD_API int hddvd_vm_set_register(hddvd_vm *, unsigned, uint16_t);
+HDDVD_API int hddvd_vm_run(hddvd_vm *, const uint8_t *commands, size_t count, size_t first,
+                           hddvd_vm_result *);
 /* Convert a playlist time to title time on the 90 kHz clock. A "60fps"
    timeBase counts at 60000/1001 frames per second (docs/formats/ifo-map.md);
    other rates are unconfirmed and return HDDVD_ENOTSUP. Results that do not
