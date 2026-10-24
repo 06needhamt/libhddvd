@@ -22,7 +22,7 @@ ctest --test-dir build -R '^xpl$' --output-on-failure
 ./build/test-xpl            # or run the test binary directly
 
 # Format check exactly as CI does (CI pins clang-format 20.1.8: pip install clang-format==20.1.8)
-find include src tests tools vlc -type f \( -name '*.c' -o -name '*.h' -o -name '*.cpp' \) \
+find include src tests tools -type f \( -name '*.c' -o -name '*.h' -o -name '*.cpp' \) \
   -print0 | xargs -0 clang-format --dry-run --Werror
 # Apply formatting: replace `--dry-run --Werror` with `-i`
 ```
@@ -35,9 +35,6 @@ so only static-only builds can use them),
 `HDDVD_BUILD_FUZZERS` (Clang only; builds `fuzz-{aca,object,xmf,xmu,script,xpl,navigation,timemap,uri,titlemap,display,vts}` (`fuzz-vts` also runs its input through the command VM), plus `fuzz-runtime` with an engine,
 against `hddvd_fuzz`, a coverage-instrumented static copy of the library; fuzz with a scratch
 copy of the seeds, because libFuzzer writes new inputs into the corpus directory it is given),
-`HDDVD_BUILD_VLC_PLUGIN` (OFF by default; builds the VLC 4 access module in `vlc/` and its
-headless libvlc test against an installed VLC, e.g. one from `tools/build_vlc.sh SRC PREFIX`,
-which builds the commit pinned in `vlc/VLC_COMMIT`; see `vlc/README.md`),
 `HDDVD_ENABLE_REFERENCE_TESTS` and `HDDVD_ENABLE_EXTERNAL_MENU_TESTS` (opt-in Python tests that
 read external data from `HDDVD_REFERENCE_ACA` / `HDDVD_EXTERNAL_MENU_CORPUS` and exit 77 =
 skipped when unset; `HDDVD_EXTERNAL_MENU_STRICT=1` also fails on unmodeled XPL constructs).
@@ -49,8 +46,7 @@ matrix (shared+static, static-only, shared-only; Linux and the jobs below build 
 macOS and Windows build without an engine), an ASan+UBSan build with Clang, a
 ThreadSanitizer run (`test_threads.c` uses separate objects concurrently), the Clang static
 analyzer (`scan-build --status-bugs`), a 32-bit build (`cmake/toolchains/linux-i386.cmake`),
-an ABI check on pull requests (`tools/abi_check.sh` allows only additions), a `vlc-plugin`
-job (builds the pinned VLC master, cached, then the plugin and its test), and a libFuzzer
+an ABI check on pull requests (`tools/abi_check.sh` allows only additions), and a libFuzzer
 job that builds every harness and replays the seeds in `tests/fixtures`. The
 scheduled `.github/workflows/fuzz.yml` runs each harness for ten minutes nightly. The
 `install-consumer` CTest installs the library to a temp prefix and builds `tests/consumer/`
@@ -155,8 +151,6 @@ Layered, bottom-up (see `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the full desi
     cells as one program stream, refusing scrambled (AACS) packets with `HDDVD_EPROTECTED`;
     `hddvd-vtsinfo` disassembles commands (DVD-Video encoding) and checks them and the
     tables against an EVO's navigation packs and streams (`docs/formats/ifo-map.md`).
-11. **VLC plugin** (`vlc/`, optional): a VLC 4 access module over `hddvd_titles`, kept
-    in-tree until it is submitted upstream; it is the only code that includes VLC headers.
 
 Capability negotiation: hosts call `hddvd_abi_version()` and `hddvd_get_features()`.
 Only set a feature bit when the capability is actually implemented.

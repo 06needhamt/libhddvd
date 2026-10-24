@@ -135,7 +135,7 @@ All C and C++ sources use Allman braces and are formatted with the checked-in
 ClangFormat configuration. Run the following before submitting changes:
 
 ```sh
-find include src tests tools vlc -type f \
+find include src tests tools -type f \
   \( -name '*.c' -o -name '*.h' -o -name '*.cpp' \) -print0 | \
   xargs -0 clang-format -i
 ```
@@ -156,10 +156,11 @@ find_package(hddvd 0.4 CONFIG REQUIRED)
 target_link_libraries(my_player PRIVATE hddvd::hddvd)
 ```
 
-`vlc/` holds a VLC 4 access module that plays Standard Content titles through
-`hddvd_titles` (`-DHDDVD_BUILD_VLC_PLUGIN=ON`; see `vlc/README.md`). It is
-meant for submission to VLC's tree; menus and Advanced Content are not
-supported yet.
+The VLC access/demux and overlay modules are developed in the VLC source
+tree, as VLC's modules for libdvdnav and libbluray are. This library supplies
+the versioned ABI, capability negotiation, playable titles (`hddvd_titles`),
+renderer-neutral display list, and serialized navigation foundations those
+modules consume.
 
 Context-bound resource failures are available through
 `hddvd_get_last_error()`, which reports a stable status, subsystem, resource URI,

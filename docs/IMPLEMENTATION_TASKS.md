@@ -808,20 +808,24 @@ Open an HD DVD root, provide authorized clear streams, map title/EVO ranges to
 VLC demuxing, publish chapters and streams, and forward playback state to the
 navigation scheduler.
 
-**First slice (done):** `vlc/hddvd.c`, a VLC 4 access module built in-tree with
-`HDDVD_BUILD_VLC_PLUGIN` against the VLC `master` commit pinned in
-`vlc/VLC_COMMIT` (`tools/build_vlc.sh`; the `vlc-plugin` CI job). It plays
-Standard Content titles through `hddvd_titles` (`src/titles.c`): titles,
-chapters and durations from the VMG and title sets, a title's cells read as one
-MPEG-PS byte stream for VLC's PS demuxer, and AACS-scrambled packets reported
-as an "Encrypted HD DVD" dialog. `vlc/test_plugin.c` checks it headless in
-libvlc over the synthetic `tests/fixtures/standard` disc.
+The module is developed in the VLC source tree (`modules/access/hddvd.c`), as
+VLC's libdvdnav and libbluray modules are; libhddvd supplies what it calls.
+
+**First slice (done):** `hddvd_titles` (`src/titles.c`) gives a player a
+Standard Content disc's titles, chapters and durations from the VMG and title
+sets, and reads a title's cells as one MPEG-PS byte stream, refusing
+AACS-scrambled packets with `HDDVD_EPROTECTED`. A VLC 4 access module over it
+(titles and chapters published to VLC, the stream read by VLC's PS demuxer,
+encrypted titles reported in an "Encrypted HD DVD" dialog) builds in VLC's
+tree and passes a headless libvlc check over the synthetic
+`tests/fixtures/standard` disc; it is submitted to VLC separately, together
+with a contrib entry that needs a tagged libhddvd release.
 
 **Remaining:** Advanced Content titles (playlist titles through
 `hddvd_title_map`), forwarding playback state to the navigation scheduler,
 Standard Content menus and navigation commands, angle blocks, a protection
-provider hook on the VLC side, and the upstream submission steps in
-`vlc/README.md`.
+provider hook on the VLC side, fuzz coverage for `hddvd_titles_read`'s sector
+checks, and the VLC merge request.
 
 **Acceptance:** headless tests open synthetic clear layouts; seek/title/chapter
 commands land on the expected ranges; protected content produces an actionable

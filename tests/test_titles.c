@@ -64,9 +64,8 @@ static void titles_and_chapters(const hddvd_titles *titles)
     assert(chapter.start.ticks == 45u * FRAME && chapter.offset == 12u * SECTOR);
     assert(hddvd_titles_get_extent(titles, 0, 1, &extent) == HDDVD_OK);
     assert(!strcmp(extent.evo_uri, "file:///dvddisc/HVDVD_TS/HV001T01.EVO"));
-    assert(extent.first_sector == 12 && extent.sector_count == 8 &&
-           extent.offset == 12u * SECTOR && extent.start.ticks == 45u * FRAME &&
-           extent.duration.ticks == 30u * FRAME);
+    assert(extent.first_sector == 12 && extent.sector_count == 8 && extent.offset == 12u * SECTOR &&
+           extent.start.ticks == 45u * FRAME && extent.duration.ticks == 30u * FRAME);
     assert(hddvd_titles_chapter_at(titles, 0, 0, &index) == HDDVD_OK && index == 0);
     assert(hddvd_titles_chapter_at(titles, 0, 12u * SECTOR - 1, &index) == HDDVD_OK && index == 0);
     assert(hddvd_titles_chapter_at(titles, 0, 12u * SECTOR, &index) == HDDVD_OK && index == 1);
@@ -116,8 +115,7 @@ static void reads(hddvd_titles *titles)
 
 /* A copy of the disc whose EVO is `evo` (evo_size bytes); returns the open
    status, and the titles in *out when asked. */
-static int open_copy(const unsigned char *evo, size_t evo_size, hddvd_ctx **ctx,
-                     hddvd_titles **out)
+static int open_copy(const unsigned char *evo, size_t evo_size, hddvd_ctx **ctx, hddvd_titles **out)
 {
     static const char *const ifos[] = {"HV000I01.IFO", "HV001I01.IFO"};
     size_t i, size;

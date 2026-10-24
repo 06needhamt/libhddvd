@@ -11,7 +11,6 @@ option(HDDVD_ENABLE_REFERENCE_TESTS
 option(HDDVD_ENABLE_EXTERNAL_MENU_TESTS
        "Enable inventory tests using an external menu ZIP or directory" OFF)
 option(HDDVD_BUILD_FUZZERS "Build libFuzzer harnesses (Clang only)" OFF)
-option(HDDVD_BUILD_VLC_PLUGIN "Build the VLC 4 plugin in vlc/ (needs an installed VLC 4)" OFF)
 option(HDDVD_BUILD_SHARED "Build the shared libhddvd library" ON)
 option(HDDVD_BUILD_STATIC "Build the static libhddvd library" ON)
 
@@ -422,10 +421,6 @@ if(HDDVD_BUILD_FUZZERS)
         target_link_options(fuzz-${target} PRIVATE
             -fsanitize=fuzzer,address,undefined)
     endforeach()
-endif()
-
-if(HDDVD_BUILD_VLC_PLUGIN)
-    add_subdirectory(vlc)
 endif()
 
 install(TARGETS
