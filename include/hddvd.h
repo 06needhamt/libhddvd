@@ -51,6 +51,7 @@ typedef struct hddvd_runtime hddvd_runtime;
 typedef struct hddvd_image_cache hddvd_image_cache;
 typedef struct hddvd_display_list hddvd_display_list;
 typedef struct hddvd_nav hddvd_nav;
+typedef struct hddvd_runtime_bridge hddvd_runtime_bridge;
 typedef struct hddvd_evo_parser hddvd_evo_parser;
 typedef struct hddvd_vti hddvd_vti;
 typedef struct hddvd_tmap hddvd_tmap;
@@ -840,8 +841,23 @@ typedef enum hddvd_event_type
     HDDVD_EVENT_COMMAND_ACK,
     HDDVD_EVENT_TIMER,
     HDDVD_EVENT_INPUT,
-    HDDVD_EVENT_RATE_CHANGE
+    HDDVD_EVENT_RATE_CHANGE,
+    /* A title started playing: data.position.title is its playlist index. */
+    HDDVD_EVENT_TITLE_BEGIN,
+    /* Playback entered a chapter: data.position.chapter, 1-based. */
+    HDDVD_EVENT_CHAPTER,
+    /* The host finished a script command (hddvd_runtime_bridge):
+       data.acknowledgement with the runtime command's id. */
+    HDDVD_EVENT_SCRIPT_ACK
 } hddvd_event_type;
+/* HDDVD_EVENT_STREAM_SELECTION's data.stream.stream_type for the tracks
+   scripts see; stream_id is then the 1-based track number, 0 for none. */
+typedef enum hddvd_stream_type
+{
+    HDDVD_STREAM_TYPE_OTHER = 0,
+    HDDVD_STREAM_TYPE_AUDIO,
+    HDDVD_STREAM_TYPE_SUBTITLE
+} hddvd_stream_type;
 typedef enum hddvd_command_type
 {
     HDDVD_COMMAND_PLAY = 0,
@@ -891,6 +907,11 @@ typedef struct hddvd_event
             int32_t numerator;
             uint32_t denominator;
         } rate;
+        struct
+        {
+            uint32_t title;
+            uint32_t chapter;
+        } position;
     } data;
 } hddvd_event;
 typedef struct hddvd_command
@@ -986,6 +1007,7 @@ typedef struct hddvd_config_limits
 } hddvd_config_limits;
 typedef void (*hddvd_event_fn)(void *, const hddvd_event *);
 typedef void (*hddvd_command_fn)(void *, const hddvd_command *);
+typedef void (*hddvd_runtime_command_fn)(void *, const hddvd_runtime_command *);
 
 typedef struct hddvd_map_info
 {
@@ -1719,6 +1741,33 @@ HDDVD_API int hddvd_nav_discontinuity(hddvd_nav *, hddvd_time);
 HDDVD_API size_t hddvd_nav_cancel_all_timers(hddvd_nav *);
 HDDVD_API size_t hddvd_nav_pump(hddvd_nav *, size_t);
 HDDVD_API int hddvd_nav_command(hddvd_nav *, const hddvd_command *, uint64_t *);
+/* Runs a script runtime's work as navigation-queue tasks: the host's
+   hddvd_event_fn passes every pumped event to hddvd_runtime_bridge_event,
+   so scripts run in queue order with clocks, input, timers and
+   acknowledgements. For each event the bridge:
+   - moves the runtime clock forward by the scheduler time that passed since
+     the previous event (none across an HDDVD_EVENT_DISCONTINUITY), running
+     script timers and animations, and reports the event's time as the
+     current title's elapsed time;
+   - INPUT: hddvd_runtime_key;
+   - PLAYBACK_STATE, TITLE_BEGIN, CHAPTER and STREAM_SELECTION (audio and
+     subtitle types): reports the new player state, then dispatches
+     play_state, title_begin, chapter, audio_track or subtitle_track;
+     TITLE_END dispatches title_end;
+   - SCRIPT_ACK: hddvd_runtime_acknowledge.
+   Then it hands every command scripts made to the callback, in order. The
+   host must answer each, accepted or not, by posting HDDVD_EVENT_SCRIPT_ACK
+   with the command's id; with no callback the bridge rejects them itself.
+   Commands beyond the runtime's 64 unacknowledged wait for acknowledgements.
+   The runtime is borrowed and must outlive the bridge; the host may still
+   set the playlist, applications and markup between events. Returns the
+   first failure of the calls made (as hddvd_runtime_key); the rest of the
+   event is still handled. HDDVD_EINVAL for a title the playlist lacks.
+   Event names and the clock model are unconfirmed against a player. */
+HDDVD_API int hddvd_runtime_bridge_create(hddvd_runtime *, hddvd_runtime_command_fn, void *,
+                                          hddvd_runtime_bridge **);
+HDDVD_API void hddvd_runtime_bridge_destroy(hddvd_runtime_bridge *);
+HDDVD_API int hddvd_runtime_bridge_event(hddvd_runtime_bridge *, const hddvd_event *);
 /* The incremental EVO parser accepts arbitrarily split input. finish()
    reports a truncated PES packet; metadata remains queryable afterward. */
 HDDVD_API int hddvd_evo_parser_create(hddvd_evo_parser **);

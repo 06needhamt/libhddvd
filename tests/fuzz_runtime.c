@@ -6,7 +6,8 @@
 /* Runs the input as a script (any encoding the runtime accepts) with a small
    document, playlist, player state and application list, calls its function
    f and the markup loaded handler, then sends keys, events and time and
-   acknowledges the commands made, under small budgets so every input
+   acknowledges the commands made, directly and through the script bridge,
+   under small budgets so every input
    finishes quickly. */
 static const char markup[] =
     "<root xmlns='http://www.dvdforum.org/2005/ihd'"
@@ -31,6 +32,61 @@ static void drain(hddvd_runtime *runtime)
     while (hddvd_runtime_take_command(runtime, &command) == HDDVD_OK)
         (void)hddvd_runtime_acknowledge(runtime, command.id,
                                         n++ % 2 ? HDDVD_COMMAND_REJECTED : HDDVD_COMMAND_ACCEPTED);
+}
+
+/* Ids of commands the bridge handed over, acknowledged by later events. */
+struct handed
+{
+    uint64_t ids[128];
+    size_t count;
+};
+
+static void on_command(void *opaque, const hddvd_runtime_command *command)
+{
+    struct handed *handed = (struct handed *)opaque;
+    if (handed->count < sizeof(handed->ids) / sizeof(handed->ids[0]))
+        handed->ids[handed->count++] = command->id;
+}
+
+/* Every event type the bridge handles, then acknowledgements for what it
+   handed over. */
+static void bridge(hddvd_runtime *runtime)
+{
+    static const hddvd_event_type types[] = {
+        HDDVD_EVENT_TITLE_BEGIN,   HDDVD_EVENT_PLAYBACK_STATE,
+        HDDVD_EVENT_CHAPTER,       HDDVD_EVENT_STREAM_SELECTION,
+        HDDVD_EVENT_INPUT,         HDDVD_EVENT_CLOCK,
+        HDDVD_EVENT_DISCONTINUITY, HDDVD_EVENT_STREAM_SELECTION,
+        HDDVD_EVENT_TITLE_END};
+    struct handed handed;
+    hddvd_runtime_bridge *b = NULL;
+    hddvd_event e;
+    size_t i;
+    handed.count = 0;
+    if (hddvd_runtime_bridge_create(runtime, on_command, &handed, &b) != HDDVD_OK)
+        return;
+    for (i = 0; i < sizeof(types) / sizeof(types[0]); i++)
+    {
+        memset(&e, 0, sizeof(e));
+        e.type = types[i];
+        e.when.ticks = 300000u + (uint64_t)(i % 6) * 30000u;
+        e.data.position.title = (uint32_t)(i % 3);
+        e.data.stream.stream_type = (uint32_t)(i % 3);
+        e.data.stream.stream_id = 1;
+        e.data.input.key = HDDVD_KEY_ENTER;
+        e.data.input.pressed = 1;
+        (void)hddvd_runtime_bridge_event(b, &e);
+    }
+    for (i = 0; i < handed.count; i++)
+    {
+        memset(&e, 0, sizeof(e));
+        e.type = HDDVD_EVENT_SCRIPT_ACK;
+        e.when.ticks = 600000;
+        e.data.acknowledgement.command_id = handed.ids[i];
+        e.data.acknowledgement.result = i % 2 ? HDDVD_COMMAND_FAILED : HDDVD_COMMAND_ACCEPTED;
+        (void)hddvd_runtime_bridge_event(b, &e);
+    }
+    hddvd_runtime_bridge_destroy(b);
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
@@ -81,6 +137,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     (void)hddvd_runtime_dispatch(runtime, "fuzz");
     (void)hddvd_runtime_dispatch_fields(runtime, "play_state", names, values, 2);
     drain(runtime);
+    bridge(runtime);
     (void)hddvd_runtime_get_diagnostic(runtime, &diagnostic);
     for (i = 0; i < hddvd_runtime_issue_count(runtime); i++)
         (void)hddvd_runtime_get_issue(runtime, i, &issue);

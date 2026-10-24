@@ -30,7 +30,9 @@ Experimental open-source HD DVD inspection library.
   `hddvd_scene_build`. `Player` reads the playlist and the player state the
   host reports, and turns playback calls into typed commands the host takes
   and acknowledges; file, XML, network and storage objects are denied, and
-  unsupported members throw. `docs/hdi-host-api.md` lists what disc scripts
+  unsupported members throw. `hddvd_runtime_bridge` runs a runtime as tasks
+  on the navigation queue, so scripts see input, time, player events and
+  command answers in queue order. `docs/hdi-host-api.md` lists what disc scripts
   use. A bounded structural decoder covers the clean-room `HDIS` fixture
   format only
 - Renderer-neutral, damage-tracked display lists with host-decoded premultiplied

@@ -422,6 +422,19 @@ fuzz_seeds = {
         "  Player.generalParameters.setValue('k', Player.playlist.currentTitle.elapsedTime);\n"
         "  Diagnostics.trace(Player.track.selectedAudioLanguageCode); }\n"
     ).encode("utf-8"),
+    # Player events through the script bridge, making commands as they arrive.
+    "runtime/bridge.js": (
+        "var n = 0;\n"
+        "function on(e) { n++; var t = Player.playlist.currentTitle;\n"
+        "  if (t && e.type == 'chapter') t.chapters[0].jump('00:00:00:01');\n"
+        "  if (e.type == 'title_end') Player.playlist.pause();\n"
+        "  if (e.type == 'audio_track') Player.track.selectSubtitleTrackNumber(n % 3 + 1); }\n"
+        "var names = ['title_begin', 'title_end', 'chapter', 'play_state', 'audio_track',\n"
+        "  'subtitle_track', 'controller_key_down'];\n"
+        "for (var i = 0; i < names.length; i++) addEventListener(names[i], on, false);\n"
+        "var t = createTimer('00:00:00:01', 1, function () { Player.playlist.play(); });\n"
+        "t.enabled = true;\n"
+    ).encode("utf-8"),
     # The host objects, against fuzz_runtime.c's document.
     "runtime/host.js": (
         "var a = document.getElementById('a'), log = [];\n"

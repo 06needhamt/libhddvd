@@ -104,7 +104,7 @@ Layered, bottom-up (see `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the full desi
    (manifests), `application.c` (manifest + resolved dependencies), `xmu.c` (markup tree),
    `style.c` (specified/computed styles, image-for-state, z-order, navigation; further
    properties in `hddvd_xmu_get_style_details`, unknown ones reported as unmodeled).
-7. **Scripts** (`runtime.c`, `runtime_dom.c`, `runtime_player.c`, `hdi_prelude.js`, `script_engine.h`,
+7. **Scripts** (`runtime.c`, `runtime_dom.c`, `runtime_player.c`, `runtime_bridge.c`, `hdi_prelude.js`, `script_engine.h`,
    `script_quickjs.c`/`script_none.c`, `script_decode.c`): disc scripts are ECMAScript 3
    source (UTF-16BE), bare or in the clear `AACS` envelope; protected ones are encrypted.
    `hddvd_runtime` runs them in a sandboxed engine with heap, recursion, operation and time
@@ -121,7 +121,9 @@ Layered, bottom-up (see `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the full desi
    and failing stubs for file, XML, network and storage objects are in the same prelude
    over `runtime_player.c`, which keeps the borrowed playlist, the player state and
    application list the host reports, and a bounded queue of typed commands the host
-   takes and acknowledges. `docs/hdi-host-api.md` lists what discs use
+   takes and acknowledges. `runtime_bridge.c` runs a runtime as navigation-queue tasks
+   (`hddvd_runtime_bridge_event`: scheduler events become key, clock and player events,
+   and commands go to the host and come back as `HDDVD_EVENT_SCRIPT_ACK`). `docs/hdi-host-api.md` lists what discs use
    (`tools/inventory_hdi_scripts.py`) and `hddvd-menurun` runs a disc application. `script_decode.c` is a bounded structural
    decoder for the clean-room `HDIS` fixture format only, which is not a disc format.
 8. **Display list** (`display.c`, `scene.c`): renderer-neutral, damage-tracked quads from a
@@ -163,7 +165,7 @@ Only set a feature bit when the capability is actually implemented.
 - Work is tracked as task IDs (e.g. P3-01) with status, dependencies, and acceptance
   criteria in `docs/IMPLEMENTATION_TASKS.md`; update the task's status when completing it.
   P4-06 (reference conformance) and P5-04 are blocked on a conforming-player trace;
-  P6-03 is partly done; P6-05's script-task integration is ready.
+  P6-03 is partly done.
 - A task is complete only when API docs, positive and negative tests, fuzz coverage where
   applicable, and `hddvd_strerror` behavior land in the same change.
 - **Never commit, copy, or download the reference ACA or any external menu corpus** into

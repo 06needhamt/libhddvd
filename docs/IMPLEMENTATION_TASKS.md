@@ -693,7 +693,7 @@ bytes are cannot be told without decryption.
 
 ### P6-05 — Add the deterministic navigation scheduler
 
-**Status:** Scheduler complete; script-task integration ready
+**Status:** Complete
 **Depends on:** P4-05, P6-01, P6-02
 **Likely files:** `src/player.c`, `tests/test_player.c`
 
@@ -705,8 +705,28 @@ Timers run on title time. `hddvd_nav_discontinuity` handles seeks in either
 direction and stream discontinuities without reordering queued events,
 `HDDVD_EVENT_RATE_CHANGE` reports rate changes, and
 `hddvd_nav_cancel_all_timers` discards a closed menu's timers. Fake-clock tests
-in `test_player.c` cover every case in the acceptance criteria. Queuing script
-tasks can now use the runtime's commands and entry points (P4-05).
+in `test_player.c` cover every case in the acceptance criteria.
+
+Script tasks run on the same queue through `hddvd_runtime_bridge`
+(`src/runtime_bridge.c`). The host passes every pumped event to
+`hddvd_runtime_bridge_event`, which:
+- moves the runtime clock by the scheduler time that passed, so script timers
+  and animations follow title time and do not move across a seek;
+- turns input into key events;
+- reports title, chapter, play state and track changes as player state and
+  dispatches `title_begin`, `title_end`, `chapter`, `play_state`,
+  `audio_track` and `subtitle_track` (new event types `HDDVD_EVENT_TITLE_BEGIN`,
+  `HDDVD_EVENT_CHAPTER`, and `hddvd_stream_type` for stream selections);
+- hands the commands scripts made to the host in order, and takes the host's
+  answers back as `HDDVD_EVENT_SCRIPT_ACK` events, so acknowledgements are
+  ordered with everything else. Commands beyond the runtime's 64
+  unacknowledged wait for answers.
+
+`test_runtime_bridge.c` runs a scheduler with a runtime and checks event
+order and the state listeners see, timers across a seek, the command round
+trip (including rejection, an unknown id and the 64-command limit), a title
+the playlist lacks, a throwing listener and a bridge without a callback.
+`fuzz-runtime` drives every event type through a bridge.
 
 **Acceptance:** fake-clock tests prove stable ordering and timer behavior across
 pause, seek, rate change, discontinuity, title end, menu close, and reopen.
