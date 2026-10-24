@@ -143,6 +143,15 @@ A title EVO's navigation pack holds a private-stream-2 packet whose first byte i
 
 Advanced Content EVOs (`FBILogo.EVO`) have zeros at these offsets.
 
+### Encrypted sectors
+
+AACS marks encrypted packets as CSS does on DVD:
+- **Scrambling bits:** in `FBILogo.EVO`, all 3,329 VC-1 PES packets (stream `0xfd`) have PES_scrambling_control `01`.
+- **Clear prefix:** VC-1 start codes (`0x0d`, `0x0e`, `0x0f`) appear only in the first 128 bytes of each sector. The rest runs at about 7.8 bits per byte, as ciphertext does. So, as with CSS, the first 128 bytes of a sector are clear and the rest is encrypted.
+- **Clear discs:** in Dragon's Lair `HV006T01.EVO` (14,370 sectors), every sector is a pack and none is scrambled.
+
+`hddvd_titles_read` therefore refuses a sector holding an audio, video, private-stream-1 or extended-stream (`0xfd`) PES packet with non-zero scrambling bits.
+
 ### VMG (`HVDVD-VMG100`)
 
 | Offset | Table |
@@ -264,6 +273,13 @@ A clip plays its map from `clipTimeBegin` (default 0). A title time `t` inside t
   All 11 Dragon's Lair IFOs open and pass, and `HV006I01.IFO` passes against `HV006T01.EVO`.
 - **Menus and first play:** both IFOs read their menu PGC unit tables (`hddvd_vts_get_menu_*`, `hddvd_vmg_get_menu_*`), and the VMG reads its first-play PGC (`hddvd_vmg_get_first_play*`). Each pointer and PGC must lie within its table, and the first play within the header. A zero pointer means there is none. Menu cells are checked against their own PGC only.
 - **`hddvd_vm`** runs command lists as described under "Command execution".
+- **`hddvd_titles`** lists a Standard Content disc's titles for a player. It follows the VMG title table to each title set (`HVDVD_TS/HVnnnI01.IFO`) and its EVO (`HVnnnT01.EVO`):
+  - a title's PGCs play in the order its chapters first name them;
+  - its cells become extents of EVO sectors, which `hddvd_titles_read` reads as one byte stream;
+  - durations and chapter start times come from the cells' playback times;
+  - a chapter's byte offset is that of its program's first cell.
+
+  `hddvd_titles_read` checks every sector it reads: a sector that is not a program-stream pack fails with `HDDVD_EPARSE`, and an encrypted one (above) with `HDDVD_EPROTECTED`. A disc without a VMG (Advanced Content only) fails to open with `HDDVD_ENOTFOUND`.
 
 ## What remains
 

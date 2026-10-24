@@ -112,7 +112,7 @@ static int mutated8(const unsigned char *bytes, size_t size, size_t offset, unsi
 static void title_set(void)
 {
     size_t size;
-    unsigned char *bytes = load("HV001I01.IFO", &size);
+    unsigned char *bytes = load("HVDVD_TS/HV001I01.IFO", &size);
     hddvd_vts *vts = NULL;
     hddvd_vts_info info;
     hddvd_vts_chapter chapter;
@@ -225,7 +225,7 @@ static void title_set(void)
 static void title_set_errors(void)
 {
     size_t size;
-    unsigned char *bytes = load("HV001I01.IFO", &size);
+    unsigned char *bytes = load("HVDVD_TS/HV001I01.IFO", &size);
     unsigned char *vmg = NULL;
     size_t vmg_size;
     hddvd_vts *vts = NULL;
@@ -235,7 +235,7 @@ static void title_set_errors(void)
     size_t count;
 
     assert(mutated(bytes, size, 0, "STANDARD-VTX", 12) == HDDVD_ENOTSUP);
-    vmg = load("HV000I01.IFO", &vmg_size);
+    vmg = load("HVDVD_TS/HV000I01.IFO", &vmg_size);
     assert(open_vts(vmg, vmg_size, &vts) == HDDVD_ENOTSUP);
     /* A table beyond the file or past its stated end. */
     assert(mutated32(bytes, size, 0xc8, 99) == HDDVD_EPARSE);
@@ -349,8 +349,8 @@ static int vmg_mutated32(const unsigned char *bytes, size_t size, size_t offset,
 static void video_manager(void)
 {
     size_t size, vts_size;
-    unsigned char *bytes = load("HV000I01.IFO", &size);
-    unsigned char *vts_bytes = load("HV001I01.IFO", &vts_size);
+    unsigned char *bytes = load("HVDVD_TS/HV000I01.IFO", &size);
+    unsigned char *vts_bytes = load("HVDVD_TS/HV001I01.IFO", &vts_size);
     hddvd_vmg *vmg = NULL;
     hddvd_vmg_title title;
     assert(open_vmg(bytes, size, &vmg) == HDDVD_OK);
@@ -406,8 +406,8 @@ static void run_pre(hddvd_vm *vm, const hddvd_vmg *vmg, size_t unit, size_t p, h
 static void menus(void)
 {
     size_t size, vmg_size;
-    unsigned char *bytes = load("HV001I01.IFO", &size);
-    unsigned char *vmg_bytes = load("HV000I01.IFO", &vmg_size);
+    unsigned char *bytes = load("HVDVD_TS/HV001I01.IFO", &size);
+    unsigned char *vmg_bytes = load("HVDVD_TS/HV000I01.IFO", &vmg_size);
     hddvd_vts *vts = NULL;
     hddvd_vmg *vmg = NULL;
     hddvd_menu_unit unit;

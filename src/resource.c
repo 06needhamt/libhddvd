@@ -90,6 +90,11 @@ static int resolve_path(const char *root, const char *relative, char **out)
     return HDDVD_OK;
 }
 
+int hddvd_resolve_disc_path(const hddvd_ctx *ctx, const char *relative, char **out)
+{
+    return resolve_path(ctx->root, relative, out);
+}
+
 int hddvd_open_resource(const hddvd_ctx *ctx, const char *text, hddvd_stream **out)
 {
     hddvd_uri *uri;

@@ -42,6 +42,9 @@ int hddvd_ascii_equal_ci(const char *a, const char *b);
 int hddvd_stream_slice(hddvd_stream *, uint64_t, uint64_t, hddvd_stream **);
 void hddvd_stream_retain(hddvd_stream *);
 void hddvd_ctx_set_error(const hddvd_ctx *, int, hddvd_subsystem, const char *, const char *);
+/* Resolves a disc-relative path ("HVDVD_TS/HV001T01.EVO") component by
+   component, case-insensitively, as hddvd_open_resource does. */
+int hddvd_resolve_disc_path(const hddvd_ctx *, const char *, char **);
 int hddvd_config_limits_valid(const hddvd_config_limits *);
 /* Strips a recognized envelope whose type is `expected` or clear text.
    Non-envelope input passes through unchanged with *owned set to NULL;

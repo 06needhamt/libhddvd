@@ -22,6 +22,9 @@ Experimental open-source HD DVD inspection library.
   attributes (video coding, audio and subpicture languages), menu PGCs and
   the first-play PGC (`hddvd_vts_open`, `hddvd_vmg_open`), and a navigation
   command VM (`hddvd_vm_run`); VTI attribute records
+- Playable Standard Content titles (`hddvd_titles_open`): titles, chapters and
+  durations, and a title's EVO sectors read as one MPEG program stream, with
+  encrypted (AACS) sectors refused as `HDDVD_EPROTECTED`
 - A sandboxed script runtime (`hddvd_runtime`) that runs HDi ECMAScript source,
   UTF-16 as on disc or UTF-8, with heap, recursion, operation and wall-clock
   budgets, in an optional QuickJS engine. Scripts get the HDi `document`
@@ -153,8 +156,9 @@ find_package(hddvd 0.4 CONFIG REQUIRED)
 target_link_libraries(my_player PRIVATE hddvd::hddvd)
 ```
 
-The VLC access/demux and overlay modules remain downstream work in the VLC
-source tree.  This release supplies the versioned ABI, capability negotiation,
+The VLC access/demux and overlay modules are developed in the VLC source
+tree, as VLC's modules for libdvdnav and libbluray are. This library supplies
+the versioned ABI, capability negotiation, playable titles (`hddvd_titles`),
 renderer-neutral display list, and serialized navigation foundations those
 modules consume.
 

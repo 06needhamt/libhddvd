@@ -127,6 +127,7 @@ set(HDDVD_SOURCES
     src/stream.c
     src/style.c
     src/title_map.c
+    src/titles.c
     src/uri.c
     src/util.c
     src/vti.c
@@ -235,7 +236,7 @@ foreach(tool info menuinfo menurun acainfo acaextract scriptdump scriptinfo xpli
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom runtime_player runtime_bridge runtime_timing vts vm)
+    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom runtime_player runtime_bridge runtime_timing vts vm titles)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         # Test assertions also perform setup and must run in Release builds.
@@ -258,6 +259,8 @@ if(BUILD_TESTING)
     target_compile_definitions(test-limits PRIVATE
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
     target_compile_definitions(test-vts PRIVATE
+        HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+    target_compile_definitions(test-titles PRIVATE
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 
     # Concurrent use of separate objects; the CI tsan job runs it under
@@ -322,17 +325,17 @@ if(BUILD_TESTING)
     # The generated Standard Content title set must agree with its EVO's
     # navigation packs, and a different file must not pass as that EVO.
     add_test(NAME vtsinfo-fixture
-        COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HV001I01.IFO
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HV001T01.EVO)
+        COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HVDVD_TS/HV001I01.IFO
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HVDVD_TS/HV001T01.EVO)
     set_tests_properties(vtsinfo-fixture PROPERTIES PASS_REGULAR_EXPRESSION
         "evo .*sectors=36 navigation-packs=9.*summary ok")
     add_test(NAME vtsinfo-wrong-evo
-        COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HV001I01.IFO
+        COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HVDVD_TS/HV001I01.IFO
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/timemap/original.vti)
     set_tests_properties(vtsinfo-wrong-evo PROPERTIES WILL_FAIL TRUE)
     # The VMG's first play runs to its title menu; its menus disassemble.
     add_test(NAME vtsinfo-vmg
-        COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HV000I01.IFO)
+        COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HVDVD_TS/HV000I01.IFO)
     set_tests_properties(vtsinfo-vmg PROPERTIES PASS_REGULAR_EXPRESSION
         "first-play run: status=success action=jump-system domain=vmg-menu target=2.*CallSS vts-menu 3 \\(resume cell 1\\).*commands unconfirmed=0.*summary ok")
     # Commands that link to a cell their PGC lacks.
