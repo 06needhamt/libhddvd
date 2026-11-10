@@ -18,7 +18,7 @@ extern "C"
 {
 #endif
 #define HDDVD_VERSION_MAJOR 0
-#define HDDVD_VERSION_MINOR 4
+#define HDDVD_VERSION_MINOR 5
 #define HDDVD_VERSION_PATCH 0
 #define HDDVD_ABI_VERSION 1u
 #define HDDVD_PATH_MAX 1024
@@ -60,6 +60,7 @@ typedef struct hddvd_vmg hddvd_vmg;
 typedef struct hddvd_vm hddvd_vm;
 typedef struct hddvd_title_map hddvd_title_map;
 typedef struct hddvd_titles hddvd_titles;
+typedef struct hddvd_std_nav hddvd_std_nav;
 typedef struct hddvd_scene hddvd_scene;
 typedef void (*hddvd_log_fn)(void *, int, const char *);
 typedef enum hddvd_subsystem
@@ -1306,6 +1307,33 @@ typedef struct hddvd_title_extent
     hddvd_time start;
     hddvd_time duration;
 } hddvd_title_extent;
+/* What a Standard Content navigator arrived at (hddvd_std_nav). */
+typedef enum hddvd_std_nav_kind
+{
+    /* Play bytes [offset, offset + size) of a title: one cell. */
+    HDDVD_STD_NAV_PLAY = 1,
+    /* Playback is over: an Exit command, or a program chain ended and its
+       commands went nowhere. reason says which. */
+    HDDVD_STD_NAV_STOP,
+    /* The disc asked for something that is not modelled or does not exist;
+       reason names it. Nothing is playing. */
+    HDDVD_STD_NAV_UNSUPPORTED
+} hddvd_std_nav_kind;
+/* title and chapter index the navigator's hddvd_titles; offset and size are
+   in that title's byte stream. title_set, pgc and cell are the cell's
+   1-based numbers on the disc. reason is a static string, NULL for PLAY. */
+typedef struct hddvd_std_nav_step
+{
+    hddvd_std_nav_kind kind;
+    size_t title;
+    size_t chapter;
+    uint64_t offset;
+    uint64_t size;
+    uint16_t title_set;
+    uint16_t pgc;
+    uint16_t cell;
+    const char *reason;
+} hddvd_std_nav_step;
 /* Where a title time plays from. evo_uri is a borrowed file:///dvddisc/ URI,
    valid until hddvd_title_map_close(). pts is the EVO presentation time of
    the title time (the EVOB start time plus evob_offset). Reading from sector
@@ -1336,7 +1364,10 @@ typedef enum hddvd_feature
     HDDVD_FEATURE_PROTECTION_PROVIDER = UINT64_C(1) << 5,
     HDDVD_FEATURE_SCRIPT_RUNTIME = UINT64_C(1) << 6,
     HDDVD_FEATURE_IMAGE_DECODER = UINT64_C(1) << 7,
-    HDDVD_FEATURE_TIME_MAP = UINT64_C(1) << 8
+    HDDVD_FEATURE_TIME_MAP = UINT64_C(1) << 8,
+    /* hddvd_titles (Standard Content and playlist titles) and
+       hddvd_std_nav. */
+    HDDVD_FEATURE_TITLES = UINT64_C(1) << 9
 } hddvd_feature;
 
 HDDVD_API const char *hddvd_version(void);
@@ -2090,17 +2121,39 @@ HDDVD_API int hddvd_title_map_locate(const hddvd_title_map *, hddvd_time, hddvd_
    (HVDVD_TS/HV000I01.IFO): a title plays the PGCs its chapters name, in
    chapter order, and each PGC's cells in order; each cell is one extent of
    its title set's EVO (HVnnnT01.EVO). Durations add up the cells' times.
-   Angle blocks are not decoded (none has been seen). Advanced Content
-   titles are not listed yet: HDDVD_ENOTFOUND when the disc has no VMG.
-   Opening checks every title set and that each EVO holds its cells.
+   Angle blocks are not decoded (none has been seen). HDDVD_ENOTFOUND when
+   the disc has no VMG. Opening checks every title set and that each EVO
+   holds its cells.
+
+   Advanced Content titles come from a playlist (open_playlist): one per
+   playlist title, at the same index, so a title with no primary
+   audio/video clip is listed with no extents and size 0. Each primary clip
+   is one extent, in title-time order (overlapping clips: HDDVD_EPARSE). It
+   runs from the EVOBU holding the clip's first frame to the end of the one
+   holding its last, so its data can begin a little before the extent's
+   start; where no clip plays, the stream has nothing. The duration is the
+   declared titleDuration, or the last clip's end when that is later or
+   none is declared. Chapters are the playlist's: a chapter's offset is the
+   EVOBU that plays its first frame, or the next extent when no clip plays
+   then. title_set and title_set_title are 0 and angle_count is 0 (angles
+   are not decoded). Opening fails as hddvd_title_map_open does, and with
+   HDDVD_ENOTFOUND for an EVO that is not on the disc. The playlist is not
+   retained.
+
+   hddvd_open_playlist opens the disc's playlist: ADV_OBJ/VPLSTnnn.XPL with
+   the highest number (the format's rule; unconfirmed against a player),
+   parsed with the context's limits. HDDVD_ENOTFOUND when there is none.
 
    read fills buffer from the title's byte stream at offset. It is short
    only at the end of the title. Every sector it touches must be an MPEG
    program stream pack: HDDVD_EPARSE otherwise, and HDDVD_EPROTECTED when a
    PES packet in it is marked scrambled (encrypted content, which libhddvd
-   does not decrypt). chapter_at gives the chapter playing at a byte offset.
+   does not decrypt). chapter_at gives the chapter playing at a byte offset
+   (HDDVD_ENOTFOUND for a title without chapters).
    A handle is single-threaded; failures are reported on the context. */
 HDDVD_API int hddvd_titles_open(hddvd_ctx *, hddvd_titles **);
+HDDVD_API int hddvd_titles_open_playlist(hddvd_ctx *, const hddvd_xpl *, hddvd_titles **);
+HDDVD_API int hddvd_open_playlist(hddvd_ctx *, hddvd_xpl **);
 HDDVD_API void hddvd_titles_close(hddvd_titles *);
 HDDVD_API size_t hddvd_titles_count(const hddvd_titles *);
 HDDVD_API int hddvd_titles_get_info(const hddvd_titles *, size_t title, hddvd_title_info *);
@@ -2112,6 +2165,53 @@ HDDVD_API int hddvd_titles_chapter_at(const hddvd_titles *, size_t title, uint64
                                       size_t *chapter);
 HDDVD_API int hddvd_titles_read(hddvd_titles *, size_t title, uint64_t offset, void *buffer,
                                 size_t size, size_t *got);
+/* Standard Content navigation, for a player that wants a disc to play as
+   authored and not only title by title. The navigator opens the disc's
+   titles (as hddvd_titles_open, with the same failures), its tables and a
+   command VM, and follows the disc's commands with libdvdnav's rules until
+   a cell of a title is to be played:
+   - start runs the first-play PGC (a disc without one starts at its first
+     title);
+   - next is called when the cell of the last PLAY step has played to its
+     end: it runs the cell's command, then goes on to the next cell, or to
+     the PGC's post commands after the last (HDDVD_EINVAL when no PLAY step
+     is outstanding);
+   - select_title is the user choosing a title and chapter (indices into
+     the titles), as JumpVTS_PTT: the PGC's pre commands run, then the
+     chapter's program plays. HDDVD_EINVAL when there is no such chapter;
+   - menu is the user's menu key, as CallSS: menu id 2 is the disc's title
+     menu, any other id a menu of the title set last played (3 is its root
+     menu). The cell playing can be resumed by the menu's commands.
+     HDDVD_ENOTFOUND, changing nothing, when the disc has no such menu.
+   Each fills a step. Entering a PGC runs its pre commands; jumps to titles
+   and menus, links to PGCs, chapters, programs and cells, and the link
+   instructions for the current, next and previous cell and program, the
+   PGC's start and its post commands, and resume are followed. Menus are
+   taken from the language unit set_language names (a two-letter code, or
+   NULL), else the first. Title set menus reached before any title has
+   played are the first title set's.
+
+   Not modelled, each ending in an UNSUPPORTED step: menu cells (menu EVOs
+   are not decoded, and observed menus are command-only), the next,
+   previous and parent PGC links (those numbers are not decoded, so a PGC
+   whose post commands do not leave it is a STOP step), and commands the VM
+   does not run. Stills, cell flags and angle blocks are not interpreted.
+   HDDVD_ELIMIT when commands pass through 1024 PGCs without playing a
+   cell. The VM's registers are the host's to read and set (vm): SPRM4, 5
+   and 6 are set to the title, the title-set title and the PGC at each PLAY
+   step. titles is the navigator's own, for hddvd_titles_read; both are
+   borrowed until close. A navigator is single-threaded and reports
+   failures on the context. */
+HDDVD_API int hddvd_std_nav_open(hddvd_ctx *, hddvd_std_nav **);
+HDDVD_API void hddvd_std_nav_close(hddvd_std_nav *);
+HDDVD_API hddvd_titles *hddvd_std_nav_titles(const hddvd_std_nav *);
+HDDVD_API hddvd_vm *hddvd_std_nav_vm(const hddvd_std_nav *);
+HDDVD_API int hddvd_std_nav_set_language(hddvd_std_nav *, const char *language);
+HDDVD_API int hddvd_std_nav_start(hddvd_std_nav *, hddvd_std_nav_step *);
+HDDVD_API int hddvd_std_nav_next(hddvd_std_nav *, hddvd_std_nav_step *);
+HDDVD_API int hddvd_std_nav_select_title(hddvd_std_nav *, size_t title, size_t chapter,
+                                         hddvd_std_nav_step *);
+HDDVD_API int hddvd_std_nav_menu(hddvd_std_nav *, unsigned menu_id, hddvd_std_nav_step *);
 HDDVD_API void hddvd_free(void *);
 #ifdef __cplusplus
 }

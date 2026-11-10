@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        harness: [aca, object, xmf, xmu, script, xpl, navigation, timemap, uri, titlemap, display, runtime, vts]
+        harness: [aca, object, xmf, xmu, script, xpl, navigation, timemap, uri, titlemap, display, runtime, vts, titles]
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y libxml2-dev
@@ -43,7 +43,7 @@ jobs:
             script) cp tests/fixtures/scripts/*.hdis corpus/ ;;
             timemap) cp tests/fixtures/timemap/* corpus/ ;;
             vts) cp tests/fixtures/standard/*.IFO tests/fixtures/standard/HVDVD_TS/*.IFO tests/fixtures/fuzz/vts/* corpus/ ;;
-            uri|titlemap|display|runtime) cp tests/fixtures/fuzz/${{ matrix.harness }}/* corpus/ ;;
+            uri|titlemap|display|runtime|titles) cp tests/fixtures/fuzz/${{ matrix.harness }}/* corpus/ ;;
           esac
       - name: Fuzz
         run: >-
