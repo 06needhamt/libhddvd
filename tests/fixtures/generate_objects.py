@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate original deterministic HDDVDOBJ and clean-room script fixtures."""
 from pathlib import Path
+import json
 import struct
 import zlib
 
@@ -278,7 +279,10 @@ def std_evo():
                 out += filler
     return bytes(out)
 
-def std_vmg():
+# The title menu's commands: link to PGC 2 when GPRM0 is 1, else play title 1.
+STD_TITLE_MENU = [bytes([0x20, 0xa4, 0, 0, 0, 1, 0, 2]), bytes([0x30, 0x02, 0, 0, 0, 1, 0, 0])]
+
+def std_vmg(title_menu=STD_TITLE_MENU):
     titles = b"".join(bytes([0x3c, 1, 0, 0]) + struct.pack(">HHHHI", chapters, 0, 1, number, 8)
                       for number, chapters in ((1, 2), (2, 1)))
     sets = std_table(1, struct.pack(">I", 12) + bytes(4))
@@ -291,8 +295,7 @@ def std_vmg():
     # The title menu (menu id 2) links to PGC 2 when GPRM0 is 1, else plays
     # title 1; PGC 2 calls the title set's root menu, resuming at cell 1.
     menus = std_menus([(b"en", [
-        (bytes([0x82, 0x20, 0, 0]), std_command_pgc([
-            bytes([0x20, 0xa4, 0, 0, 0, 1, 0, 2]), bytes([0x30, 0x02, 0, 0, 0, 1, 0, 0])])),
+        (bytes([0x82, 0x20, 0, 0]), std_command_pgc(title_menu)),
         (bytes([0x02, 0, 0, 0]), std_command_pgc([bytes([0x30, 0x08, 0, 0, 1, 0xa3, 0, 0])]))])])
     head[0xc8:0xcc] = struct.pack(">I", 3)
     # First play, in the header (which ends at the byte 0x80 names): GPRM0 =
@@ -309,7 +312,11 @@ def std_vmg():
 standard = {"HVDVD_TS/HV000I01.IFO": std_vmg(), "HVDVD_TS/HV001I01.IFO": std_vts(),
             "HVDVD_TS/HV001T01.EVO": std_evo(),
             # LinkCN 9 in PGCs of at most two cells: valid tables, a bad target.
-            "bad-link.IFO": std_vts(post_command=bytes([0x20, 0x07, 0, 0, 0, 0, 0, 9]))}
+            "bad-link.IFO": std_vts(post_command=bytes([0x20, 0x07, 0, 0, 0, 0, 0, 9])),
+            # VMGs for hddvd_std_nav: a title menu that links to itself, and
+            # one that resumes (LinkSIns 16).
+            "menu-loop.IFO": std_vmg([bytes([0x20, 0x04, 0, 0, 0, 0, 0, 1])]),
+            "menu-resume.IFO": std_vmg([bytes([0x20, 0x01, 0, 0, 0, 0, 0, 0x10])])}
 
 # Original scripts for tools/inventory_hdi_scripts.py, in each container the
 # tool reads: bare UTF-16 with a byte-order mark, the clear AACS envelope, and
@@ -441,6 +448,44 @@ app = {
     ]),
 }
 
+# An interaction trace for the application above, in the format of
+# tests/reference_trace.schema.json, for tests/replay_reference_trace.py. It
+# is written by hand from the application's own script, not recorded on a
+# player, so it tests the replay harness and nothing else. The screenshot
+# hashes are placeholders.
+def app_state(name, focus):
+    return {"id": name, "focused_element": focus, "visible_elements": ["one", "two", "three"],
+            "screenshot_sha256": "0" * 64}
+
+def app_transition(source, event, target, commands=(), wait_ms=None):
+    transition = {"from": source, "event": event, "to": target, "host_commands": list(commands)}
+    if wait_ms is not None:
+        transition["wait_ms"] = wait_ms
+    return transition
+
+app_trace = {
+    "schema": 1,
+    "player": {"name": "none (hand-written for the libhddvd fixture)", "version": "1"},
+    "states": [app_state("one", "one"), app_state("two", "two"), app_state("armed", "two"),
+               app_state("three", "three")],
+    "transitions": [
+        app_transition("closed", "open", "one"),
+        app_transition("one", "right", "two"),
+        # "two" names no element to its left.
+        app_transition("two", "left", "two"),
+        app_transition("two", "activate", "armed"),
+        app_transition("armed", "timer", "three", wait_ms=1100),
+        app_transition("three", "activate", "three", ["jump title=Feature time=00:00:01:00"]),
+    ],
+}
+# The same trace with a wrong focus and a command the application never
+# makes, which the replay must report.
+app_trace_wrong = json.loads(json.dumps(app_trace))
+app_trace_wrong["states"][1]["focused_element"] = "three"
+app_trace_wrong["transitions"][4]["host_commands"] = ["pause"]
+app["app.trace.json"] = (json.dumps(app_trace, indent=2) + "\n").encode("utf-8")
+app["app.trace-wrong.json"] = (json.dumps(app_trace_wrong, indent=2) + "\n").encode("utf-8")
+
 # Seeds for harnesses whose input is not a file format of its own.
 FUZZ = Path(__file__).resolve().parent / "fuzz"
 fuzz_seeds = {
@@ -528,6 +573,21 @@ fuzz_seeds = {
         b"<PrimaryAudioVideoClip src='file:///dvddisc/HVDVD_TS/ONE.MAP' "
         b"titleTimeBegin='00:00:00:20' clipTimeBegin='00:00:00:10' "
         b"titleTimeEnd='00:00:00:40'/></Title></TitleSet></Playlist>"),
+    # fuzz-titles replaces one file of its disc with the input; the first
+    # byte says which (0 EVO sectors, 1 title set, 2 VMG, 3 time map,
+    # 4 playlist).
+    "titles/evo-sectors.bin": b"\0" + std_evo()[:4 * 2048],
+    "titles/title-set.bin": b"\1" + std_vts(),
+    "titles/vmg.bin": b"\2" + std_vmg(),
+    "titles/time-map.bin": b"\3" + tmap(),
+    "titles/playlist.bin": (
+        b"\4<Playlist xmlns='http://www.dvdforum.org/2005/HDDVDVideo/Playlist'>"
+        b"<TitleSet timeBase='60fps'><Title id='t' titleDuration='00:00:01:00'>"
+        b"<PrimaryAudioVideoClip src='file:///dvddisc/HVDVD_TS/ONE.MAP' "
+        b"titleTimeBegin='00:00:00:10' titleTimeEnd='00:00:00:40'/>"
+        b"<ChapterList><Chapter titleTimeBegin='00:00:00:00'/>"
+        b"<Chapter titleTimeBegin='00:00:00:30'/></ChapterList>"
+        b"</Title></TitleSet></Playlist>"),
     # Every style detail property, keyword and unknown property included.
     "xmu/style-details.xmu": (
         b"<root xmlns='http://www.dvdforum.org/2005/ihd' "

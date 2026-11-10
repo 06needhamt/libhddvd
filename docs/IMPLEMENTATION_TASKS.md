@@ -461,6 +461,14 @@ callbacks at all.
 Close remaining host-object gaps found by the reference scripts.  Add tests for
 each gap before changing runtime behavior.
 
+The replay side is ready (`docs/REFERENCE_TRACE.md`):
+`tests/replay_reference_trace.py` checks a recorded trace against
+`hddvd-menurun --state`, transition by transition: focus, visible elements and
+player commands. CTest runs it on a hand-written trace of the fixture
+application, and the opt-in `reference-trace` test runs it on a trace named by
+`HDDVD_REFERENCE_TRACE`. What is still missing is a trace recorded on a
+player.
+
 **Acceptance:** the report contains zero unknown host calls, and replay produces
 every captured state transition without title-specific branches.
 
@@ -551,6 +559,10 @@ button bounds.
 
 Compare display-list structure and, where color pipelines permit, screenshot
 hashes for every recorded state.
+
+The trace format records a screenshot hash per state, and the replay harness
+(P4-06) already reaches every recorded state; it does not compare pixels,
+because libhddvd draws nothing itself.
 
 **Acceptance:** geometry, visibility, resource selection, and stacking match all
 captured states; any allowed pixel tolerance is documented and narrowly bounded.
@@ -821,11 +833,32 @@ tree and passes a headless libvlc check over the synthetic
 `tests/fixtures/standard` disc; it is submitted to VLC separately, together
 with a contrib entry that needs a tagged libhddvd release.
 
-**Remaining:** Advanced Content titles (playlist titles through
-`hddvd_title_map`), forwarding playback state to the navigation scheduler,
-Standard Content menus and navigation commands, angle blocks, a protection
-provider hook on the VLC side, fuzz coverage for `hddvd_titles_read`'s sector
-checks, and the VLC merge request.
+**Second slice (done), library side:**
+- **Advanced Content titles:** `hddvd_titles_open_playlist` lists a
+  playlist's titles. Each primary clip is an extent of its EVO, found through
+  its time map and VTI, and the playlist's chapters get byte offsets.
+  `hddvd_open_playlist` finds the disc's playlist (`ADV_OBJ/VPLSTnnn.XPL`,
+  highest number). EVO files are opened one at a time, so a playlist with
+  hundreds of clips does not hold hundreds of files open.
+- **Standard Content navigation:** `hddvd_std_nav` (`src/std_nav.c`) follows
+  first play, menus, jumps and links through the command VM and returns the
+  cell to play as a title byte range. It also takes the user's title, chapter
+  and menu choices, and supports resume. What it does not model ends in an
+  explicit step: menu cells, the next/previous/parent PGC links, and commands
+  the VM does not run.
+- **Tool:** `hddvd-titles` lists both kinds of title, reads them through
+  (`--read`) and follows a disc's navigation (`--navigate`).
+- **Coverage:** `test_titles_playlist.c` and `test_std_nav.c` cover both on
+  synthetic discs, with every rejection. `fuzz-titles` replaces one file of a
+  synthetic disc at a time (EVO sectors, title set, VMG, time map, playlist),
+  then lists, reads and navigates it.
+
+**Remaining:**
+- in VLC: the merge request, Advanced Content and `hddvd_std_nav` in the
+  module, forwarding playback state to the navigation scheduler, and a
+  protection provider hook;
+- in libhddvd, for lack of a disc that has them: angle blocks, menu cells and
+  the PGC link numbers.
 
 **Acceptance:** headless tests open synthetic clear layouts; seek/title/chapter
 commands land on the expected ranges; protected content produces an actionable

@@ -8,7 +8,7 @@ int main(void)
 
     if (hddvd_abi_version() != HDDVD_ABI_VERSION)
         return 1;
-    if (strcmp(hddvd_version(), "0.4.0") != 0)
+    if (strcmp(hddvd_version(), "0.5.0") != 0)
         return 2;
     if ((features & HDDVD_FEATURE_OBJECT_ENVELOPE) == 0)
         return 3;

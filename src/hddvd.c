@@ -4,7 +4,7 @@
 #include <string.h>
 const char *hddvd_version(void)
 {
-    return "0.4.0";
+    return "0.5.0";
 }
 uint32_t hddvd_abi_version(void)
 {
@@ -15,7 +15,7 @@ hddvd_features hddvd_get_features(void)
     hddvd_features features = HDDVD_FEATURE_OBJECT_ENVELOPE | HDDVD_FEATURE_MARKUP_INSPECTION |
                               HDDVD_FEATURE_SCRIPT_DECODER | HDDVD_FEATURE_DISPLAY_LIST |
                               HDDVD_FEATURE_NAV_SCHEDULER | HDDVD_FEATURE_PROTECTION_PROVIDER |
-                              HDDVD_FEATURE_TIME_MAP;
+                              HDDVD_FEATURE_TIME_MAP | HDDVD_FEATURE_TITLES;
     if (hddvd_runtime_engine())
         features |= HDDVD_FEATURE_SCRIPT_RUNTIME;
     return features;
@@ -42,6 +42,8 @@ const char *hddvd_feature_name(hddvd_feature feature)
             return "image-decoder";
         case HDDVD_FEATURE_TIME_MAP:
             return "time-map";
+        case HDDVD_FEATURE_TITLES:
+            return "titles";
         default:
             return NULL;
     }

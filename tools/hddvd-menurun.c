@@ -9,7 +9,11 @@
    each, plus every issue, failure and player command (each acknowledged as
    accepted). --before FILE first evaluates a local script, for example
    stand-ins for host objects the runtime lacks; --playlist FILE.xpl gives
-   scripts the disc's playlist, and --title ID reports that title playing. */
+   scripts the disc's playlist, and --title ID reports that title playing.
+   --state also prints, after each step, the ids of the elements shown: those
+   that are visible in the scene built from the runtime's styles, as are all
+   their ancestors. tests/replay_reference_trace.py compares these lines with
+   a trace recorded on a player. */
 
 static int read_member(const hddvd_aca *aca, const char *name, void **out, size_t *size)
 {
@@ -225,6 +229,46 @@ static int read_file(const char *path, void **out, size_t *size)
     return HDDVD_OK;
 }
 
+static int no_image(void *opaque, const char *url, const void **data, size_t *size)
+{
+    (void)opaque;
+    (void)url;
+    (void)data;
+    (void)size;
+    return HDDVD_ENOTFOUND;
+}
+
+static int show_state;
+
+static void print_visible(const hddvd_runtime *runtime, const hddvd_xmu *xmu)
+{
+    hddvd_scene *scene = NULL;
+    const hddvd_scene_node *nodes;
+    size_t i, count;
+    if (!xmu ||
+        hddvd_scene_build(xmu, hddvd_runtime_styles(runtime), SIZE_MAX, no_image, NULL, &scene))
+    {
+        printf("  visible: unknown\n");
+        return;
+    }
+    nodes = hddvd_scene_nodes(scene);
+    count = hddvd_scene_node_count(scene);
+    printf("  visible:");
+    for (i = 0; i < count; i++)
+    {
+        hddvd_xmu_node node;
+        size_t at = i;
+        /* Parents precede children, so the walk up ends. */
+        while (at < count && nodes[at].visible && nodes[at].parent < at)
+            at = nodes[at].parent;
+        if (at < count && nodes[at].visible &&
+            hddvd_xmu_get_node(xmu, (size_t)nodes[i].id, &node) == HDDVD_OK && node.id)
+            printf(" %s", node.id);
+    }
+    printf("\n");
+    hddvd_scene_close(scene);
+}
+
 static void print_focus(const hddvd_runtime *runtime, const hddvd_xmu *xmu)
 {
     size_t focus = hddvd_runtime_focus(runtime);
@@ -234,6 +278,8 @@ static void print_focus(const hddvd_runtime *runtime, const hddvd_xmu *xmu)
     else
         printf("  focus: %s", node.id ? node.id : node.name);
     printf(" (generation %llu)\n", (unsigned long long)hddvd_runtime_generation(runtime));
+    if (show_state)
+        print_visible(runtime, xmu);
 }
 
 static int key_code(const char *step, uint32_t *code)
@@ -311,6 +357,12 @@ int main(int argc, char **argv)
     const char *id, *src, *before = NULL, *playlist_path = NULL, *title = NULL;
     const char *program = argv[0];
     int rc, failed = 0;
+    while (argc >= 2 && !strcmp(argv[1], "--state"))
+    {
+        show_state = 1;
+        argv++;
+        argc--;
+    }
     while (argc >= 3 && (!strcmp(argv[1], "--before") || !strcmp(argv[1], "--playlist") ||
                          !strcmp(argv[1], "--title")))
     {
@@ -325,11 +377,12 @@ int main(int argc, char **argv)
     }
     if (argc < 3 || (title && !playlist_path))
     {
-        fprintf(stderr,
-                "Usage: %s [--before FILE] [--playlist FILE.xpl [--title ID]] archive.aca "
-                "MANIFEST.xmf [STEP...]\n"
-                "Steps: left, right, up, down, enter, key:CODE, wait:SECONDS, event:TYPE\n",
-                program);
+        fprintf(
+            stderr,
+            "Usage: %s [--state] [--before FILE] [--playlist FILE.xpl [--title ID]] archive.aca "
+            "MANIFEST.xmf [STEP...]\n"
+            "Steps: left, right, up, down, enter, key:CODE, wait:SECONDS, event:TYPE\n",
+            program);
         return 2;
     }
     if (!hddvd_runtime_engine())

@@ -45,6 +45,24 @@ void hddvd_ctx_set_error(const hddvd_ctx *, int, hddvd_subsystem, const char *, 
 /* Resolves a disc-relative path ("HVDVD_TS/HV001T01.EVO") component by
    component, case-insensitively, as hddvd_open_resource does. */
 int hddvd_resolve_disc_path(const hddvd_ctx *, const char *, char **);
+/* A title map's primary clips, for titles.c: title times and the offset into
+   the clip's EVOB in 90 kHz ticks, and its time map and EVO URI, both
+   borrowed from the map. */
+typedef struct hddvd_title_map_clip
+{
+    uint64_t begin;
+    uint64_t end;
+    uint64_t clip_begin;
+    const hddvd_tmap *tmap;
+    const char *evo_uri;
+} hddvd_title_map_clip;
+size_t hddvd_title_map_clip_count_internal(const hddvd_title_map *);
+void hddvd_title_map_get_clip_internal(const hddvd_title_map *, size_t, hddvd_title_map_clip *);
+/* titles.c, for std_nav.c: the extent of a Standard Content title that is
+   cell `cell` (0-based) of its title set's PGC `pgc` (1-based);
+   HDDVD_ENOTFOUND when the title does not play it. */
+int hddvd_titles_find_cell_internal(const hddvd_titles *, size_t title, uint16_t pgc, size_t cell,
+                                    size_t *extent);
 int hddvd_config_limits_valid(const hddvd_config_limits *);
 /* Strips a recognized envelope whose type is `expected` or clear text.
    Non-envelope input passes through unchanged with *owned set to NULL;

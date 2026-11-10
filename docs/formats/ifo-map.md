@@ -280,12 +280,26 @@ A clip plays its map from `clipTimeBegin` (default 0). A title time `t` inside t
   - a chapter's byte offset is that of its program's first cell.
 
   `hddvd_titles_read` checks every sector it reads: a sector that is not a program-stream pack fails with `HDDVD_EPARSE`, and an encrypted one (above) with `HDDVD_EPROTECTED`. A disc without a VMG (Advanced Content only) fails to open with `HDDVD_ENOTFOUND`.
+- **`hddvd_titles_open_playlist`** lists an Advanced Content playlist's titles the same way, one per playlist title:
+  - each primary audio/video clip is one extent, in title-time order. It runs from the EVOBU that holds the clip's first frame to the end of the one that holds its last, so its data can start a little before the clip does;
+  - a chapter's byte offset is the EVOBU that plays its first frame, or the next extent when no clip plays at that time;
+  - the duration is the declared `titleDuration`, or the last clip's end when that is later;
+  - overlapping primary clips and an EVO shorter than its time map fail with `HDDVD_EPARSE`.
+
+  `hddvd_open_playlist` opens `ADV_OBJ/VPLSTnnn.XPL` with the highest number. That is the format's naming rule as generally described; no player has confirmed it here.
+- **`hddvd_std_nav`** plays a Standard Content disc as authored. It runs the first-play PGC, menu PGCs and each title PGC's pre, cell and post commands in `hddvd_vm`, and follows what they end with, as libdvdnav does for DVD-Video:
+  - jumps to titles and chapters, to the first play, to VMG and title set menus (by menu id, in the chosen language unit or the first) and to VMG menu PGCs;
+  - links to PGCs, chapters, programs and cells, and the link instructions for the current, next and previous cell and program, the PGC's start, its post commands, and resume;
+  - `CallSS` from a title remembers the cell to resume.
+
+  Each run ends with a cell to play (a byte range of an `hddvd_titles` title), a stop, or a named thing it does not model. Three choices follow DVD-Video and are unconfirmed for HD DVD: a cell command runs as one command, a title set menu reached before any title has played is the first title set's, and a PGC whose post commands do not leave it ends playback (its next-PGC number is not decoded).
 
 ## What remains
 
 - **Standard Content:**
   - the cell command flags, bit 7 of the `JumpSS`/`CallSS` domain byte, and `SetSystem` sub-operation 9;
   - menu EVOs and menu cells (none on the observed disc), and `JumpSS` to title set menus of another set (the target set is not decoded);
+  - the next, previous and parent PGC numbers in a PGC's header, which `hddvd_std_nav` would need to follow those links;
   - audio coding and channel bits, and the rest of the video attributes (only one combination seen);
   - frame rates other than 30000/1001;
   - multi-angle and interleaved cells.

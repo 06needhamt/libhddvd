@@ -203,6 +203,22 @@ void hddvd_title_map_close(hddvd_title_map *map)
     free(map);
 }
 
+size_t hddvd_title_map_clip_count_internal(const hddvd_title_map *map)
+{
+    return map->count;
+}
+
+void hddvd_title_map_get_clip_internal(const hddvd_title_map *map, size_t index,
+                                       hddvd_title_map_clip *out)
+{
+    const struct title_clip *clip = &map->clips[index];
+    out->begin = clip->begin;
+    out->end = clip->end;
+    out->clip_begin = clip->clip_begin;
+    out->tmap = clip->tmap;
+    out->evo_uri = clip->evo_uri;
+}
+
 int hddvd_title_map_locate(const hddvd_title_map *map, hddvd_time time, hddvd_title_position *out)
 {
     size_t i;

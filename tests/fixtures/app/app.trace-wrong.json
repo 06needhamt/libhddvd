@@ -1,0 +1,92 @@
+{
+  "schema": 1,
+  "player": {
+    "name": "none (hand-written for the libhddvd fixture)",
+    "version": "1"
+  },
+  "states": [
+    {
+      "id": "one",
+      "focused_element": "one",
+      "visible_elements": [
+        "one",
+        "two",
+        "three"
+      ],
+      "screenshot_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "id": "two",
+      "focused_element": "three",
+      "visible_elements": [
+        "one",
+        "two",
+        "three"
+      ],
+      "screenshot_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "id": "armed",
+      "focused_element": "two",
+      "visible_elements": [
+        "one",
+        "two",
+        "three"
+      ],
+      "screenshot_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "id": "three",
+      "focused_element": "three",
+      "visible_elements": [
+        "one",
+        "two",
+        "three"
+      ],
+      "screenshot_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "transitions": [
+    {
+      "from": "closed",
+      "event": "open",
+      "to": "one",
+      "host_commands": []
+    },
+    {
+      "from": "one",
+      "event": "right",
+      "to": "two",
+      "host_commands": []
+    },
+    {
+      "from": "two",
+      "event": "left",
+      "to": "two",
+      "host_commands": []
+    },
+    {
+      "from": "two",
+      "event": "activate",
+      "to": "armed",
+      "host_commands": []
+    },
+    {
+      "from": "armed",
+      "event": "timer",
+      "to": "three",
+      "host_commands": [
+        "pause"
+      ],
+      "wait_ms": 1100
+    },
+    {
+      "from": "three",
+      "event": "activate",
+      "to": "three",
+      "host_commands": [
+        "jump title=Feature time=00:00:01:00"
+      ]
+    }
+  ]
+}

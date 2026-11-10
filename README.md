@@ -1,4 +1,4 @@
-# libhddvd 0.4.0
+# libhddvd 0.5.0
 
 Experimental open-source HD DVD inspection library.
 
@@ -22,9 +22,14 @@ Experimental open-source HD DVD inspection library.
   attributes (video coding, audio and subpicture languages), menu PGCs and
   the first-play PGC (`hddvd_vts_open`, `hddvd_vmg_open`), and a navigation
   command VM (`hddvd_vm_run`); VTI attribute records
-- Playable Standard Content titles (`hddvd_titles_open`): titles, chapters and
+- Playable titles (`hddvd_titles`): Standard Content titles from the title
+  table (`hddvd_titles_open`) and Advanced Content titles from the playlist
+  (`hddvd_open_playlist`, `hddvd_titles_open_playlist`), with chapters and
   durations, and a title's EVO sectors read as one MPEG program stream, with
   encrypted (AACS) sectors refused as `HDDVD_EPROTECTED`
+- Standard Content navigation (`hddvd_std_nav`): first play, menus, jumps and
+  links followed through the command VM to the cell to play, plus the user's
+  title, chapter and menu choices
 - A sandboxed script runtime (`hddvd_runtime`) that runs HDi ECMAScript source,
   UTF-16 as on disc or UTF-8, with heap, recursion, operation and wall-clock
   budgets, in an optional QuickJS engine. Scripts get the HDi `document`
@@ -74,7 +79,12 @@ set or title table, its stream attributes, menus and navigation commands (in
 DVD-Video syntax), and checks its tables and every command target; given the
 title EVO, it checks them against the EVO's navigation packs and streams. For
 a title table it also runs the first-play commands and prints where they lead.
-`hddvd-menurun [--before FILE] [--playlist FILE.xpl [--title ID]] archive.aca
+`hddvd-titles [--read] [--navigate COUNT] DISC_ROOT` lists a disc's playable
+titles, Standard Content and Advanced Content, with their chapters and the EVO
+extents they play. `--read` reads every title through and says whether its
+data is clear, encrypted or damaged; `--navigate` follows a Standard Content
+disc's own commands from first play for up to COUNT cells.
+`hddvd-menurun [--state] [--before FILE] [--playlist FILE.xpl [--title ID]] archive.aca
 MANIFEST.xmf [STEP...]` runs one application in the script runtime: its
 manifest's scripts, its markup and the markup loaded handler, then steps such
 as `right`, `enter`, `key:0xCE`, `wait:1.5` or `event:TYPE`, printing the
@@ -152,13 +162,14 @@ engine (`hddvd_runtime_engine()` names it). No feature bit implies complete HDi
 menu conformance.
 
 ```cmake
-find_package(hddvd 0.4 CONFIG REQUIRED)
+find_package(hddvd 0.5 CONFIG REQUIRED)
 target_link_libraries(my_player PRIVATE hddvd::hddvd)
 ```
 
 The VLC access/demux and overlay modules are developed in the VLC source
 tree, as VLC's modules for libdvdnav and libbluray are. This library supplies
 the versioned ABI, capability negotiation, playable titles (`hddvd_titles`),
+Standard Content navigation (`hddvd_std_nav`),
 renderer-neutral display list, and serialized navigation foundations those
 modules consume.
 
@@ -187,7 +198,10 @@ HDDVD_REFERENCE_ACA=/outside/the/repository/reference.aca \
 The test checks the fixed size and SHA-256 identity, the complete member
 inventory, and every member CRC.  Set `HDDVD_REFERENCE_REPORT` to write the JSON
 report to a chosen path.  With no `HDDVD_REFERENCE_ACA`, CTest reports the test as
-skipped.  See `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the remaining phases.
+skipped.  The same option adds `reference-trace`, which replays an interaction
+trace recorded on a player (`HDDVD_REFERENCE_TRACE`) against libhddvd; how to
+record and replay one is in `docs/REFERENCE_TRACE.md`.
+See `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the remaining phases.
 Reviewable tasks, dependencies, and acceptance criteria for those phases are in
 `docs/IMPLEMENTATION_TASKS.md`.
 
@@ -206,4 +220,4 @@ original synthetic seeds and contain no bytes from the reference archive.
 
 ## Status
 
-This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content playback beyond the command VM (a host must still sequence PGCs, cells and menus), and conformance against a real player's behavior are future work.
+This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content navigation follows DVD-Video's rules and has not been checked against a player; menu cells, angle blocks and conformance against a real player's behavior are future work.

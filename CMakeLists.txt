@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(libhddvd VERSION 0.4.0 LANGUAGES C)
+project(libhddvd VERSION 0.5.0 LANGUAGES C)
 
 include(GNUInstallDirs)
 include(CTest)
@@ -124,6 +124,7 @@ set(HDDVD_SOURCES
     src/runtime_bridge.c
     src/scene.c
     src/script_decode.c
+    src/std_nav.c
     src/stream.c
     src/style.c
     src/title_map.c
@@ -230,13 +231,13 @@ elseif(HDDVD_BUILD_STATIC)
     add_library(hddvd::hddvd_static ALIAS hddvd)
 endif()
 
-foreach(tool info menuinfo menurun acainfo acaextract scriptdump scriptinfo xplinfo timemap locate vtsinfo)
+foreach(tool info menuinfo menurun acainfo acaextract scriptdump scriptinfo xplinfo timemap locate vtsinfo titles)
     add_executable(hddvd-${tool} tools/hddvd-${tool}.c)
     target_link_libraries(hddvd-${tool} PRIVATE hddvd)
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom runtime_player runtime_bridge runtime_timing vts vm titles)
+    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom runtime_player runtime_bridge runtime_timing vts vm titles titles_playlist std_nav)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         # Test assertions also perform setup and must run in Release builds.
@@ -262,6 +263,8 @@ if(BUILD_TESTING)
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
     target_compile_definitions(test-titles PRIVATE
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+    target_compile_definitions(test-std_nav PRIVATE
+        HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 
     # Concurrent use of separate objects; the CI tsan job runs it under
     # ThreadSanitizer. POSIX threads only.
@@ -283,6 +286,13 @@ if(BUILD_TESTING)
                     $<TARGET_FILE:hddvd-acainfo>
                     ${CMAKE_CURRENT_SOURCE_DIR}/tests/reference_menu_expected.json)
         set_tests_properties(reference-menu PROPERTIES SKIP_RETURN_CODE 77)
+        # A trace recorded on a player, replayed against the same archive
+        # (HDDVD_REFERENCE_TRACE; docs/REFERENCE_TRACE.md).
+        add_test(NAME reference-trace
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/replay_reference_trace.py
+                    $<TARGET_FILE:hddvd-menurun> --reference)
+        set_tests_properties(reference-trace PROPERTIES SKIP_RETURN_CODE 77)
     endif()
 
     if(HDDVD_ENABLE_EXTERNAL_MENU_TESTS)
@@ -338,6 +348,16 @@ if(BUILD_TESTING)
         COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/HVDVD_TS/HV000I01.IFO)
     set_tests_properties(vtsinfo-vmg PROPERTIES PASS_REGULAR_EXPRESSION
         "first-play run: status=success action=jump-system domain=vmg-menu target=2.*CallSS vts-menu 3 \\(resume cell 1\\).*commands unconfirmed=0.*summary ok")
+    # The Standard Content disc's titles read through, and its own
+    # navigation from first play.
+    add_test(NAME titles-fixture
+        COMMAND hddvd-titles --read --navigate 3
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard)
+    set_tests_properties(titles-fixture PROPERTIES PASS_REGULAR_EXPRESSION
+        "standard-content titles=2.*title 1 duration=2.502s sectors=20 chapters=2 extents=2 title-set=1/1.*read ok.*navigate play title=2 chapter=1 sectors=0\\+16 pgc=2 cell=1.*navigate play title=1 chapter=2 sectors=12\\+8 pgc=1 cell=2.*summary ok")
+    add_test(NAME titles-no-disc
+        COMMAND hddvd-titles ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/objects)
+    set_tests_properties(titles-no-disc PROPERTIES WILL_FAIL TRUE)
     # Commands that link to a cell their PGC lacks.
     add_test(NAME vtsinfo-bad-link
         COMMAND hddvd-vtsinfo ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard/bad-link.IFO)
@@ -357,6 +377,25 @@ if(BUILD_TESTING)
                 right enter wait:1.1 enter)
         set_tests_properties(menurun-playlist PROPERTIES PASS_REGULAR_EXPRESSION
             "title 1, application 1 of 1.*focus: three.*command: jump title=Feature time=00:00:01:00")
+        # The trace replay harness, on a hand-written trace of the same
+        # application: every transition matches, and a wrong trace does not.
+        find_package(Python3 3.8 COMPONENTS Interpreter)
+        if(Python3_FOUND)
+            foreach(trace app.trace app.trace-wrong)
+                add_test(NAME replay-${trace}
+                    COMMAND ${Python3_EXECUTABLE}
+                        ${CMAKE_CURRENT_SOURCE_DIR}/tests/replay_reference_trace.py
+                        $<TARGET_FILE:hddvd-menurun>
+                        --trace ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/app/${trace}.json
+                        --archive ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/app/app.aca
+                        --manifest app.xmf
+                        --playlist ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/app/app.xpl)
+            endforeach()
+            set_tests_properties(replay-app.trace PROPERTIES PASS_REGULAR_EXPRESSION
+                "matched 6, mismatched 0, not replayed 0")
+            set_tests_properties(replay-app.trace-wrong PROPERTIES PASS_REGULAR_EXPRESSION
+                "focus is 'two', recorded 'three'.*commands are \\[\\], recorded \\['pause'\\].*matched 3, mismatched 3")
+        endif()
         add_test(NAME menurun-bad-step
             COMMAND hddvd-menurun ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/app/app.aca app.xmf
                 sideways)
@@ -409,7 +448,7 @@ if(HDDVD_BUILD_FUZZERS)
     add_library(hddvd_fuzz STATIC ${HDDVD_SOURCES})
     hddvd_configure_library(hddvd_fuzz STATIC)
     target_compile_options(hddvd_fuzz PRIVATE -fsanitize=fuzzer-no-link,address,undefined)
-    set(fuzz_targets aca object xmf xmu script xpl navigation timemap uri titlemap display vts)
+    set(fuzz_targets aca object xmf xmu script xpl navigation timemap uri titlemap display vts titles)
     if(HDDVD_SELECTED_ENGINE STREQUAL "quickjs")
         list(APPEND fuzz_targets runtime)
     endif()
@@ -421,12 +460,15 @@ if(HDDVD_BUILD_FUZZERS)
         target_link_options(fuzz-${target} PRIVATE
             -fsanitize=fuzzer,address,undefined)
     endforeach()
+    target_compile_definitions(fuzz-titles PRIVATE
+        HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 endif()
 
 install(TARGETS
         ${hddvd_library_targets}
         hddvd-info hddvd-menuinfo hddvd-menurun hddvd-acainfo hddvd-acaextract
         hddvd-scriptdump hddvd-scriptinfo hddvd-xplinfo hddvd-timemap hddvd-locate hddvd-vtsinfo
+        hddvd-titles
     EXPORT hddvdTargets
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

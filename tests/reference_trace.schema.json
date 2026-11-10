@@ -39,7 +39,8 @@
           "from": {"type": "string"},
           "event": {"enum": ["open", "close", "up", "down", "left", "right", "activate", "timer", "title_end"]},
           "to": {"type": "string"},
-          "host_commands": {"type": "array", "items": {"type": "string"}}
+          "host_commands": {"type": "array", "items": {"type": "string"}},
+          "wait_ms": {"type": "integer", "minimum": 0, "maximum": 86400000}
         },
         "additionalProperties": false
       }
