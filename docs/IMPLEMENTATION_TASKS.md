@@ -854,9 +854,10 @@ with a contrib entry that needs a tagged libhddvd release.
   then lists, reads and navigates it.
 
 **Remaining:**
-- in VLC: the merge request, Advanced Content and `hddvd_std_nav` in the
-  module, forwarding playback state to the navigation scheduler, and a
-  protection provider hook;
+- in VLC: the merge request (the prepared module plays Standard Content
+  titles and, on discs without them, the playlist's titles), `hddvd_std_nav`
+  in the module, forwarding playback state to the navigation scheduler, and
+  a protection provider hook;
 - in libhddvd, for lack of a disc that has them: angle blocks, menu cells and
   the PGC link numbers.
 
