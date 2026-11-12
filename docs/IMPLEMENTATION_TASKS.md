@@ -868,18 +868,39 @@ VLC's Blu-ray module, with a chained PS demuxer:
   application in an `hddvd_menu` session: the display list is drawn as an
   overlay on the video, VLC's navigation keys and the mouse go to it, the
   session's clock follows the title time (playback state reaches the
-  scheduler this way), and jump commands change the title.
-- Headless libvlc checks cover navigation, title and chapter choices, the
-  menu, keys, a jump, the overlay on a real video output, and the dialog for
-  an encrypted title.
+  scheduler this way), and its player commands are carried out:
+  - jumps change the title;
+  - pause stops reading until a play command, and the player state is
+    reported back with `hddvd_runtime_set_player`;
+  - audio and subtitle choices by track number or language select the
+    stream that the playlist track's `streamNumber` names;
+  - subtitle visibility and the application's z-order are applied;
+  - activating or inactivating other applications is refused, because one
+    application runs per title.
+- Mouse positions are mapped through the size of the video under the
+  overlay, which VLC reports to the overlay's updater. The first version
+  read the size from the elementary stream's format, which VLC's PS demuxer
+  leaves at zero for MPEG-2, so every click missed.
+- Track choices needed a third VLC patch: the PS demuxer gives streams their
+  stream ids as ES ids when a private `ps-stream-ids` option is set, as
+  VLC's DVD modules already do. Without the option nothing changes.
+- Headless libvlc checks run against VLC master. They cover:
+  - navigation, title and chapter choices, and seeks through the navigator,
+    with the disc's navigation continuing from the cell sought;
+  - the menu, keys, the overlay on a real video output, and the dialog for
+    an encrypted title;
+  - mouse clicks on the menu's buttons, through VLC's own video output path
+    (a test window plugin reports the events), which pause and play, select
+    tracks, hide subtitles, reorder and inactivate the application, and
+    jump.
 
 **Remaining:**
-- in VLC: submitting the merge request, which needs a tagged libhddvd release
-  for the contrib entry and a licence notice in the module header. VLC has
-  nothing that supplies clear HD DVD sectors, so the module sets no sector
-  provider. Menu commands other than jumps (track selection, pause) are
-  refused, and VLC's contrib builds libhddvd without a script engine, so
-  HDi menus need a libhddvd built with QuickJS;
+- in VLC: submitting the merge request, which needs three things from the
+  maintainer: a tagged libhddvd release for the contrib entry's checksum, a
+  licence notice in the module header, and an account on code.videolan.org.
+  VLC has nothing that supplies clear HD DVD sectors, so the module sets no
+  sector provider. VLC's contrib builds libhddvd without a script engine,
+  so HDi menus need a libhddvd built with QuickJS;
 - in libhddvd, for lack of a disc that has them: angle blocks, menu cells and
   the PGC link numbers.
 
@@ -889,7 +910,7 @@ message rather than a generic I/O error.
 
 ### P7-03 — Implement VLC overlay and input bridging
 
-**Status:** Complete (the adapter and its mock-host test here; the VLC module in the prepared patch series draws its display lists as an overlay and sends it keys and the mouse)
+**Status:** Complete (the adapter and its mock-host test here; the VLC module in the prepared patch series draws its display lists as an overlay and sends it keys and the mouse, both checked headlessly in VLC)
 **Depends on:** P5-03, P6-05, P7-02
 
 Convert display-list changes to VLC subpictures and translate VLC key/mouse/menu
@@ -962,7 +983,7 @@ regression test in `test_object.c`.
 
 ### X-04 — Release checks
 
-**Status:** Complete (the Linux, macOS and Windows jobs all pass in GitHub Actions)
+**Status:** Complete (the checks are in place and passed on all three systems in GitHub Actions up to run 117; from run 118 on, Actions starts no runner for any job, so later commits are verified by running the Linux jobs locally: the same steps as `ci.yml`, with every job passing on c158f9d, while macOS, Windows and `abi` are unverified since run 117)
 **Depends on:** X-03
 
 `ci.yml` adds four release checks:
