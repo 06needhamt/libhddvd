@@ -901,8 +901,21 @@ VLC's Blu-ray module, with a chained PS demuxer:
   VLC has nothing that supplies clear HD DVD sectors, so the module sets no
   sector provider. VLC's contrib builds libhddvd without a script engine,
   so HDi menus need a libhddvd built with QuickJS;
-- in libhddvd, for lack of a disc that has them: angle blocks, menu cells and
-  the PGC link numbers.
+- in libhddvd: angle blocks, menu cells and the PGC link numbers. These are
+  blocked on evidence, not unstarted. The HD DVD IFO is not DVD-Video's
+  layout (12-byte PGC search pointers, 28-byte cells, command offsets at
+  0xa8 rather than 0xe4; `docs/formats/ifo-map.md`), and the one Standard
+  Content disc available has none of them:
+  - its PGCs link nowhere, so the next, previous and parent numbers cannot
+    be located among the undecoded bytes 0x08 to 0xa8;
+  - its cells form no angle blocks, so the block bits of the cell category
+    are unknown;
+  - its menu PGCs have no cells, so menu EVO names and button highlight
+    data were never seen.
+
+  The specification is licensed, and a search found no public description
+  of these structures, only DVD-Video's. Taking DVD-Video's offsets would be
+  guessing. Each needs a disc that uses it.
 
 **Acceptance:** headless tests open synthetic clear layouts; seek/title/chapter
 commands land on the expected ranges; protected content produces an actionable
@@ -983,7 +996,7 @@ regression test in `test_object.c`.
 
 ### X-04 — Release checks
 
-**Status:** Complete (the checks are in place and passed on all three systems in GitHub Actions up to run 117; from run 118 on, Actions starts no runner for any job, so later commits are verified by running the Linux jobs locally: the same steps as `ci.yml`, with every job passing on c158f9d, while macOS, Windows and `abi` are unverified since run 117)
+**Status:** Complete (the checks are in place and passed on all three systems in GitHub Actions up to run 117; from run 118 on, Actions starts no runner for any job, so later commits are verified by running the Linux jobs locally: the same steps as `ci.yml`, with every job passing on c158f9d, and the `abi` job's steps, which pass against the merge base with main (16 functions added, none changed or removed); macOS and Windows are unverified since run 117)
 **Depends on:** X-03
 
 `ci.yml` adds four release checks:
