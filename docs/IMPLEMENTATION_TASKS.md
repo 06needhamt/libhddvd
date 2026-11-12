@@ -858,11 +858,28 @@ with a contrib entry that needs a tagged libhddvd release.
   The result is checked like any stored sector. libhddvd still decrypts
   nothing itself.
 
+**Third slice (done), the VLC module** (prepared as a patch series against
+VLC master; it lives in VLC's tree, not here). It is an access-demux like
+VLC's Blu-ray module, with a chained PS demuxer:
+- Standard Content plays as authored through `hddvd_std_nav` (first play,
+  menus that jump, cell links, the user's title, chapter and menu choices,
+  and seeks through `hddvd_std_nav_seek`).
+- Advanced Content offers the playlist's titles and runs the title's
+  application in an `hddvd_menu` session: the display list is drawn as an
+  overlay on the video, VLC's navigation keys and the mouse go to it, the
+  session's clock follows the title time (playback state reaches the
+  scheduler this way), and jump commands change the title.
+- Headless libvlc checks cover navigation, title and chapter choices, the
+  menu, keys, a jump, the overlay on a real video output, and the dialog for
+  an encrypted title.
+
 **Remaining:**
-- in VLC: the merge request (the prepared module plays Standard Content
-  titles and, on discs without them, the playlist's titles), and whatever a
-  VLC-side provider would call, since VLC has nothing that supplies clear HD
-  DVD sectors;
+- in VLC: submitting the merge request, which needs a tagged libhddvd release
+  for the contrib entry and a licence notice in the module header. VLC has
+  nothing that supplies clear HD DVD sectors, so the module sets no sector
+  provider. Menu commands other than jumps (track selection, pause) are
+  refused, and VLC's contrib builds libhddvd without a script engine, so
+  HDi menus need a libhddvd built with QuickJS;
 - in libhddvd, for lack of a disc that has them: angle blocks, menu cells and
   the PGC link numbers.
 
@@ -872,7 +889,7 @@ message rather than a generic I/O error.
 
 ### P7-03 — Implement VLC overlay and input bridging
 
-**Status:** Complete in libhddvd (the adapter and its mock-host test); turning its display lists into VLC subpictures is VLC-side work
+**Status:** Complete (the adapter and its mock-host test here; the VLC module in the prepared patch series draws its display lists as an overlay and sends it keys and the mouse)
 **Depends on:** P5-03, P6-05, P7-02
 
 Convert display-list changes to VLC subpictures and translate VLC key/mouse/menu
