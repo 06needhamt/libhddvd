@@ -171,6 +171,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     {
         (void)hddvd_runtime_key(runtime, keys[i], 1, NULL);
         (void)hddvd_runtime_key(runtime, keys[i], 0, NULL);
+        /* The pointer on each node in turn, pressed on every other one,
+           then on none and on one the document lacks. */
+        (void)hddvd_runtime_pointer(runtime, i, (int)(i & 1u));
+        (void)hddvd_runtime_pointer(runtime, i % 3 ? SIZE_MAX : 100000u, 0);
         now.ticks = (uint64_t)(i + 1) * 45000u;
         (void)hddvd_runtime_advance(runtime, now);
     }

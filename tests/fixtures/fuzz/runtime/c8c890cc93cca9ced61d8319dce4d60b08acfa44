@@ -1,0 +1,10 @@
+var n = 0;
+function on(e) { n++; var t = Player.playlist.currentTitle;
+  if (t && e.type == 'chapter') t.chapters[0].jump('00:00:00:01');
+  if (e.type == 'title_end') Player.playlist.pause();
+  if (e.type == 'audio_track') Player.track.selectSubtitleTrackNumber(n % 3 + 1); }
+var names = ['title_begin', 'title_end', 'chapter', 'play_state', 'audio_track',
+  'subtitle_track', 'controller_key_down'];
+for (var i = 5; i < names.length; i++) addEventListener(names[i], on, false);
+var t = createTimer('00:00:00:01', 1, function () { Player.playlist.play(); });
+t.enabled = true;

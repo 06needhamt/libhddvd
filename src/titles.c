@@ -51,6 +51,8 @@ struct hddvd_titles
     size_t file_capacity;
     hddvd_stream *open;
     size_t open_file;
+    hddvd_sector_fn provider;
+    void *provider_opaque;
 };
 
 void hddvd_titles_close(hddvd_titles *titles)
@@ -655,6 +657,15 @@ static int check_sector(const unsigned char *b)
     return HDDVD_OK;
 }
 
+int hddvd_titles_set_sector_provider(hddvd_titles *titles, hddvd_sector_fn provider, void *opaque)
+{
+    if (!titles)
+        return HDDVD_EINVAL;
+    titles->provider = provider;
+    titles->provider_opaque = opaque;
+    return HDDVD_OK;
+}
+
 int hddvd_titles_read(hddvd_titles *titles, size_t title, uint64_t offset, void *buffer,
                       size_t size, size_t *got)
 {
@@ -710,6 +721,18 @@ int hddvd_titles_read(hddvd_titles *titles, size_t title, uint64_t offset, void 
             rc = HDDVD_EPARSE;
         if (!rc)
             rc = check_sector(sector);
+        if (rc == HDDVD_EPROTECTED && titles->provider)
+        {
+            rc = titles->provider(titles->provider_opaque, e->evo_uri, (uint32_t)(at / SECTOR),
+                                  sector);
+            if (rc)
+            {
+                *got = done;
+                return fail(titles->ctx, rc, e->evo_uri,
+                            "the sector provider did not supply the sector");
+            }
+            rc = check_sector(sector);
+        }
         if (rc)
         {
             *got = done;

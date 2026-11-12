@@ -111,10 +111,23 @@ static void setup(void)
     write_file("HVA00001.VTI", vti, sizeof(vti));
 }
 
+/* A host provider that claims every protected sector is now clear: it
+   clears the scrambling bits of the packet after a 14-byte pack header. */
+static int provide(void *opaque, const char *evo_uri, uint32_t sector, uint8_t data[2048])
+{
+    (void)opaque;
+    (void)evo_uri;
+    if (sector & 1u)
+        return HDDVD_EPROTECTED;
+    data[20] &= 0xcf;
+    return HDDVD_OK;
+}
+
 static void read_through(hddvd_titles *titles)
 {
     unsigned char buffer[5000];
     size_t title;
+    (void)hddvd_titles_set_sector_provider(titles, provide, NULL);
     for (title = 0; title < hddvd_titles_count(titles) && title < 8; title++)
     {
         hddvd_title_info info;

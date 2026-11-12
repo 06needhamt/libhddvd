@@ -150,7 +150,7 @@ AACS marks encrypted packets as CSS does on DVD:
 - **Clear prefix:** VC-1 start codes (`0x0d`, `0x0e`, `0x0f`) appear only in the first 128 bytes of each sector. The rest runs at about 7.8 bits per byte, as ciphertext does. So, as with CSS, the first 128 bytes of a sector are clear and the rest is encrypted.
 - **Clear discs:** in Dragon's Lair `HV006T01.EVO` (14,370 sectors), every sector is a pack and none is scrambled.
 
-`hddvd_titles_read` therefore refuses a sector holding an audio, video, private-stream-1 or extended-stream (`0xfd`) PES packet with non-zero scrambling bits.
+`hddvd_titles_read` therefore refuses a sector holding an audio, video, private-stream-1 or extended-stream (`0xfd`) PES packet with non-zero scrambling bits. A host that is authorized to play the disc can supply the clear sector through `hddvd_titles_set_sector_provider`; the result must itself pass this check.
 
 ### VMG (`HVDVD-VMG100`)
 

@@ -44,7 +44,7 @@ Fixtures in `tests/fixtures/objects`, `tests/fixtures/scripts`, `tests/fixtures/
 CI (`.github/workflows/ci.yml`) runs the format check, a Linux/macOS/Windows build+test
 matrix (shared+static, static-only, shared-only; Linux and the jobs below build QuickJS in,
 macOS and Windows build without an engine), an ASan+UBSan build with Clang, a
-ThreadSanitizer run (`test_threads.c` uses separate objects concurrently), the Clang static
+ThreadSanitizer run (`test_threads.c` uses separate objects concurrently; `test_menu_threads.c` is a mock player host around one menu session), the Clang static
 analyzer (`scan-build --status-bugs`), a 32-bit build (`cmake/toolchains/linux-i386.cmake`),
 an ABI check on pull requests (`tools/abi_check.sh` allows only additions), and a libFuzzer
 job that builds every harness and replays the seeds in `tests/fixtures`. The
@@ -138,6 +138,10 @@ Layered, bottom-up (see `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the full desi
    (`hddvd_display_get_item`); the older quad accessors still list image quads only.
 9. **Navigation scheduler** (`player.c`): `hddvd_nav` event queue, timers on title time
    (`hddvd_time`, 90 kHz), discontinuity/seek handling, and host command callbacks.
+   `hddvd_menu` (`menu.c`) is the session a player's overlay code drives: it loads an
+   application from the disc and joins runtime, scheduler, bridge, scene and display list
+   (keys, pointer through the letterbox transform and hit test, `hddvd_menu_update` for the
+   damage-tracked list, polled commands). `test_menu_threads.c` is its mock host under TSan.
 10. **Probes and time maps** (`evo.c`, `ifo.c`, `vti.c`, `map.c`, `title_map.c`, `titles.c`, `std_nav.c`, `vts.c`, `vm.c`): EVO
     program-stream probing; IFO/VTI/MAP header validation; the VTI's EVOB table
     (`hddvd_vti`) and MAP time maps (`hddvd_tmap`). `hddvd_title_map` joins a playlist
@@ -149,7 +153,8 @@ Layered, bottom-up (see `docs/HDI_MENU_IMPLEMENTATION_PLAN.md` for the full desi
     64 GPRMs) and reports the link or jump for the host to follow; stream attributes in title sets and VTIs;
     `hddvd_titles` (`titles.c`) lists a disc's playable titles, Standard Content from the VMG or
     Advanced Content from a playlist (`hddvd_open_playlist` finds it), and reads a title's
-    extents as one program stream, refusing scrambled (AACS) packets with `HDDVD_EPROTECTED`;
+    extents as one program stream, refusing scrambled (AACS) packets with `HDDVD_EPROTECTED`
+    unless a host sector provider (`hddvd_titles_set_sector_provider`) supplies the clear sector;
     `hddvd_std_nav` (`std_nav.c`) follows a Standard Content disc's first play, menus, jumps and
     links through the VM to the cell to play (libdvdnav's rules; what it does not model ends
     in an explicit step); `hddvd-titles` lists, reads and navigates;

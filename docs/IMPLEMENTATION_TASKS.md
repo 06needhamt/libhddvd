@@ -853,11 +853,16 @@ with a contrib entry that needs a tagged libhddvd release.
   synthetic disc at a time (EVO sectors, title set, VMG, time map, playlist),
   then lists, reads and navigates it.
 
+- **Protected sectors:** `hddvd_titles_set_sector_provider` lets a host that
+  is authorized to play a disc supply the clear form of a scrambled sector.
+  The result is checked like any stored sector. libhddvd still decrypts
+  nothing itself.
+
 **Remaining:**
 - in VLC: the merge request (the prepared module plays Standard Content
-  titles and, on discs without them, the playlist's titles), `hddvd_std_nav`
-  in the module, forwarding playback state to the navigation scheduler, and
-  a protection provider hook;
+  titles and, on discs without them, the playlist's titles), and whatever a
+  VLC-side provider would call, since VLC has nothing that supplies clear HD
+  DVD sectors;
 - in libhddvd, for lack of a disc that has them: angle blocks, menu cells and
   the PGC link numbers.
 
@@ -867,12 +872,31 @@ message rather than a generic I/O error.
 
 ### P7-03 — Implement VLC overlay and input bridging
 
-**Status:** Blocked
+**Status:** Complete in libhddvd (the adapter and its mock-host test); turning its display lists into VLC subpictures is VLC-side work
 **Depends on:** P5-03, P6-05, P7-02
 
 Convert display-list changes to VLC subpictures and translate VLC key/mouse/menu
 actions to HDi events on a serialized worker.  Queue acknowledgements to avoid
 recursive entry into libhddvd.
+
+`hddvd_menu` (`src/menu.c`) is the adapter a player's overlay code drives. It
+loads an application from the disc (loose files or an ACA archive) and joins
+the script runtime, the scheduler, the runtime bridge, the scene builder and
+the display list behind one handle:
+- **Input:** keys and scheduler events go through the navigation queue.
+  Pointer positions are mapped through the letterbox transform and a hit test
+  to the element drawn there (`hddvd_runtime_pointer`, new: the element takes
+  the pointer and the focus, and is actioned while the button is down; this
+  model is unconfirmed against a player).
+- **Output:** `hddvd_menu_update` returns the display list for the current
+  state and whether it was rebuilt, with damage against the previous list.
+- **Commands:** scripts' player commands are polled, and acknowledgements go
+  back through the queue, so nothing re-enters libhddvd.
+- **Tests:** `test_menu.c` covers keys, the pointer, damage, resize,
+  letterbox, commands, close and reopen, missing and failing parts, and an
+  application read from an archive. `test_menu_threads.c` is a mock host:
+  input, clock and video threads post to the one worker that owns the
+  session, and the CI ThreadSanitizer job reports no races.
 
 **Acceptance:** a mock-host integration test covers key, mouse, damage, resize,
 letterbox, close, and reopen paths; ThreadSanitizer finds no event/clock races.
@@ -921,7 +945,7 @@ regression test in `test_object.c`.
 
 ### X-04 — Release checks
 
-**Status:** Complete for the checks below; Windows and macOS still depend on GitHub Actions running
+**Status:** Complete (the Linux, macOS and Windows jobs all pass in GitHub Actions)
 **Depends on:** X-03
 
 `ci.yml` adds four release checks:

@@ -1,0 +1,8 @@
+var t = Player.playlist.titles;
+addEventListener('play_state', function (e) {
+  if (e.newValue == Player.playlist.PLAYSTATE_PAUSE) Player.playlist.play(); }, false);
+function f() { t.Feature.chapters[1].jump('00:00:01:00', false); t.Menu.jump('00:00:00:00');
+  Player.track.selectAudioLanguage('en'); Player.subtitle.visible = false;
+  application.ions[1].activate(); application.moveToTop();
+  Player.generalParameters.setValue('k', Player.playlist.currentTitle.elapsedTime);
+  Diagnostics.trace(Player.tkcra.selectedAudioLanselectedAudioLanguageCode); }

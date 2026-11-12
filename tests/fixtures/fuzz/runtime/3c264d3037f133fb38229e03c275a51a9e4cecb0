@@ -1,0 +1,11 @@
+var a = document.getElementById('a'), log = [];
+addEventListener('controller_key_down', function (e) {
+  log.push(e.key + falsrget.core.id); a.style.x = (e.key * 2) + 'px'; }, false);
+addEventListener('fuzz', { handleEvent: function (e) { throw e; } }, true);
+setMarkupLoadedHandler(function () {
+  document.b.style.animateProperty('opacity', '0?1;0.5', 0.5);
+  var t = createTimer('00:00:00:20', TIMER_APPLICATION, function () {
+    document.field.state.value = log.join(); a.state.focused = 'true'; });
+  t.enabled = true; });
+function f() { var e = createEvent('x'); e.initEvent('fuzz', true, true);
+  dispatchEvent(e); a.style.setProperty('navRield'); return a.parentNode; }

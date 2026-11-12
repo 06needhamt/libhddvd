@@ -115,6 +115,7 @@ set(HDDVD_SOURCES
     src/io.c
     src/limits.c
     src/map.c
+    src/menu.c
     src/object.c
     src/player.c
     src/resource.c
@@ -237,7 +238,7 @@ foreach(tool info menuinfo menurun acainfo acaextract scriptdump scriptinfo xpli
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom runtime_player runtime_bridge runtime_timing vts vm titles titles_playlist std_nav)
+    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom runtime_player runtime_bridge runtime_timing vts vm titles titles_playlist std_nav menu)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         # Test assertions also perform setup and must run in Release builds.
@@ -265,6 +266,8 @@ if(BUILD_TESTING)
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
     target_compile_definitions(test-std_nav PRIVATE
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+    target_compile_definitions(test-menu PRIVATE
+        HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 
     # Concurrent use of separate objects; the CI tsan job runs it under
     # ThreadSanitizer. POSIX threads only.
@@ -276,6 +279,14 @@ if(BUILD_TESTING)
         target_compile_definitions(test-threads PRIVATE
             HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
         add_test(NAME threads COMMAND test-threads)
+        # A mock player host: threads post input, time and resizes to the
+        # one worker that owns a menu session.
+        add_executable(test-menu_threads tests/test_menu_threads.c)
+        target_link_libraries(test-menu_threads PRIVATE hddvd Threads::Threads)
+        target_compile_options(test-menu_threads PRIVATE -UNDEBUG)
+        target_compile_definitions(test-menu_threads PRIVATE
+            HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+        add_test(NAME menu_threads COMMAND test-menu_threads)
     endif()
 
     if(HDDVD_ENABLE_REFERENCE_TESTS)

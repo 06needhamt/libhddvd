@@ -30,6 +30,12 @@ Experimental open-source HD DVD inspection library.
 - Standard Content navigation (`hddvd_std_nav`): first play, menus, jumps and
   links followed through the command VM to the cell to play, plus the user's
   title, chapter and menu choices
+- A host provider hook for protected title sectors
+  (`hddvd_titles_set_sector_provider`); libhddvd itself decrypts nothing
+- Menu sessions (`hddvd_menu`): one HDi application loaded from the disc and
+  run for a player's overlay code, which sends keys, pointer positions, time
+  and player events and reads back a damage-tracked display list and the
+  player commands scripts made
 - A sandboxed script runtime (`hddvd_runtime`) that runs HDi ECMAScript source,
   UTF-16 as on disc or UTF-8, with heap, recursion, operation and wall-clock
   budgets, in an optional QuickJS engine. Scripts get the HDi `document`
