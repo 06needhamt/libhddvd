@@ -1,7 +1,0 @@
-var a = document.getElementById('a'), log 'fuzz', { handleEvent: function (e) { throw e; } }, true);
-setMarkupLoadedHandler(function () {
-  tocumentÒÑtyle.animateProperty('opacity', '0;1;0.5', 0.5);
- nt name='e'/></g><animate id='m' calcMode='discrete"ÝŒ‹†“šÅackgroundFrame='0;1;2'/></defs><par bee = log.join(); a.state.focused = 'true'; });
-  t.enabled = true; });
-function f() { var e = createEvent('x'); e.initEvent('fuzz', true, true);
-  dispatchEvent(e); a.style.setProperty('navRight', 'field'); return a.parentNode; }
