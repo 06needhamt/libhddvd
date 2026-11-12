@@ -414,6 +414,18 @@ int hddvd_menu_advance(hddvd_menu *menu, hddvd_time now)
     return rc ? rc : deliver(menu);
 }
 
+int hddvd_menu_seek(hddvd_menu *menu, hddvd_time now)
+{
+    int rc;
+    if (!menu)
+        return HDDVD_EINVAL;
+    menu->now = now;
+    menu->event_rc = HDDVD_OK;
+    rc = hddvd_nav_discontinuity(menu->nav, now);
+    hddvd_nav_pump(menu->nav, 0);
+    return rc ? rc : menu->event_rc;
+}
+
 int hddvd_menu_post(hddvd_menu *menu, const hddvd_event *event)
 {
     hddvd_event copy;

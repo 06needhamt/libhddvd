@@ -121,6 +121,24 @@ static void as_authored(hddvd_ctx *ctx)
     assert(hddvd_std_nav_next(nav, &step) == HDDVD_OK);
     playing(&step, 0, 0, 0, 12, 1, 1);
 
+    /* A seek into title 1's second cell plays that cell, with no command
+       run, and playback goes on from there: its cell command, to first
+       play and on to title 2. */
+    assert(hddvd_vm_set_register(hddvd_std_nav_vm(nav), 2, 0) == HDDVD_OK);
+    assert(hddvd_std_nav_seek(nav, 0, 15u * SECTOR + 9, &step) == HDDVD_OK);
+    playing(&step, 0, 1, 12, 8, 1, 2);
+    assert(reg(nav, 2) == 0);
+    assert(hddvd_std_nav_next(nav, &step) == HDDVD_OK);
+    playing(&step, 1, 0, 0, 16, 2, 1);
+    assert(hddvd_std_nav_seek(nav, 1, 0, &step) == HDDVD_OK);
+    playing(&step, 1, 0, 0, 16, 2, 1);
+    assert(hddvd_std_nav_seek(nav, 1, 16u * SECTOR, &step) == HDDVD_EINVAL);
+    assert(hddvd_std_nav_seek(nav, 2, 0, &step) == HDDVD_EINVAL);
+    assert(hddvd_std_nav_seek(NULL, 0, 0, &step) == HDDVD_EINVAL);
+    assert(hddvd_std_nav_seek(nav, 0, 0, NULL) == HDDVD_EINVAL);
+    assert(hddvd_std_nav_next(nav, &step) == HDDVD_OK);
+    playing(&step, 0, 0, 0, 12, 1, 1);
+
     /* The title menu with GPRM0 cleared plays title 1; the root menu jumps
        to title 2. Menus come from the first unit when the language has
        none. */

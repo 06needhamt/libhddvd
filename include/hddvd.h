@@ -2201,6 +2201,10 @@ HDDVD_API int hddvd_titles_read(hddvd_titles *, size_t title, uint64_t offset, v
    - select_title is the user choosing a title and chapter (indices into
      the titles), as JumpVTS_PTT: the PGC's pre commands run, then the
      chapter's program plays. HDDVD_EINVAL when there is no such chapter;
+   - seek is the user seeking within a title: the cell holding the byte at
+     offset of the title's stream becomes the cell playing, without running
+     any command, and the step describes that whole cell (the host reads on
+     from offset). HDDVD_EINVAL for a title or offset the disc lacks;
    - menu is the user's menu key, as CallSS: menu id 2 is the disc's title
      menu, any other id a menu of the title set last played (3 is its root
      menu). The cell playing can be resumed by the menu's commands.
@@ -2233,6 +2237,8 @@ HDDVD_API int hddvd_std_nav_start(hddvd_std_nav *, hddvd_std_nav_step *);
 HDDVD_API int hddvd_std_nav_next(hddvd_std_nav *, hddvd_std_nav_step *);
 HDDVD_API int hddvd_std_nav_select_title(hddvd_std_nav *, size_t title, size_t chapter,
                                          hddvd_std_nav_step *);
+HDDVD_API int hddvd_std_nav_seek(hddvd_std_nav *, size_t title, uint64_t offset,
+                                 hddvd_std_nav_step *);
 HDDVD_API int hddvd_std_nav_menu(hddvd_std_nav *, unsigned menu_id, hddvd_std_nav_step *);
 /* A menu session: one HDi application run for a player's overlay code. It
    loads the application from the disc and joins the script runtime, the
@@ -2258,7 +2264,9 @@ HDDVD_API int hddvd_std_nav_menu(hddvd_std_nav *, unsigned menu_id, hddvd_std_na
    A session is driven from one thread, and makes no callbacks other than
    decode (from update and pointer):
    - advance moves time forward (HDDVD_EINVAL backwards): timers,
-     animations and markup timing run, on the scheduler's queue;
+     animations and markup timing run, on the scheduler's queue. seek sets
+     the time after the player jumped, forwards or backwards, as a
+     discontinuity: script timers do not run for the time skipped;
    - key sends a key press or release, and post any scheduler event (a
      playback state, a title beginning or ending, a chapter, a stream
      selection, a discontinuity), stamped with the current time;
@@ -2285,6 +2293,7 @@ HDDVD_API hddvd_runtime *hddvd_menu_runtime(const hddvd_menu *);
 HDDVD_API int hddvd_menu_set_viewport(hddvd_menu *, uint32_t width, uint32_t height);
 HDDVD_API int hddvd_menu_get_transform(const hddvd_menu *, hddvd_video_transform *);
 HDDVD_API int hddvd_menu_advance(hddvd_menu *, hddvd_time);
+HDDVD_API int hddvd_menu_seek(hddvd_menu *, hddvd_time);
 HDDVD_API int hddvd_menu_key(hddvd_menu *, uint32_t key, int pressed);
 HDDVD_API int hddvd_menu_post(hddvd_menu *, const hddvd_event *);
 HDDVD_API int hddvd_menu_pointer(hddvd_menu *, int32_t x, int32_t y, int pressed);

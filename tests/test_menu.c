@@ -240,6 +240,10 @@ static void session(hddvd_ctx *ctx, const hddvd_xpl *xpl)
     assert(focus == right);
     t.ticks = 90000;
     assert(hddvd_menu_advance(menu, t) == HDDVD_EINVAL);
+    /* A seek may go back; time then moves on from there. */
+    assert(hddvd_menu_seek(menu, t) == HDDVD_OK);
+    advance(menu, 90001);
+    assert(hddvd_menu_seek(NULL, t) == HDDVD_EINVAL);
 
     /* A player event: the title ending hides the panel. */
     memset(&event, 0, sizeof(event));

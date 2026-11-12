@@ -63,6 +63,10 @@ void hddvd_title_map_get_clip_internal(const hddvd_title_map *, size_t, hddvd_ti
    HDDVD_ENOTFOUND when the title does not play it. */
 int hddvd_titles_find_cell_internal(const hddvd_titles *, size_t title, uint16_t pgc, size_t cell,
                                     size_t *extent);
+/* The reverse: the PGC and cell of a Standard Content title that hold the
+   byte at `offset` of its stream. */
+int hddvd_titles_cell_at_internal(const hddvd_titles *, size_t title, uint64_t offset,
+                                  uint16_t *pgc, size_t *cell);
 int hddvd_config_limits_valid(const hddvd_config_limits *);
 /* Strips a recognized envelope whose type is `expected` or clear text.
    Non-envelope input passes through unchanged with *owned set to NULL;

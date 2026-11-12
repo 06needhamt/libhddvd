@@ -651,6 +651,31 @@ int hddvd_std_nav_select_title(hddvd_std_nav *nav, size_t title, size_t chapter,
     return follow(nav, STAGE_ENTER, step);
 }
 
+int hddvd_std_nav_seek(hddvd_std_nav *nav, size_t title, uint64_t offset, hddvd_std_nav_step *step)
+{
+    hddvd_vmg_title entry;
+    nav_position to;
+    uint16_t pgc;
+    size_t cell, set;
+    if (!nav || !step || title >= hddvd_titles_count(nav->titles) ||
+        hddvd_vmg_get_title(nav->vmg, title, &entry) ||
+        hddvd_titles_cell_at_internal(nav->titles, title, offset, &pgc, &cell))
+        return HDDVD_EINVAL;
+    for (set = 0; set < nav->set_count && nav->sets[set].number != entry.title_set; set++)
+        ;
+    if (set == nav->set_count)
+        return HDDVD_EINVAL;
+    memset(&to, 0, sizeof(to));
+    to.domain = DOMAIN_TITLE;
+    to.set = set;
+    to.pgc = (size_t)pgc - 1;
+    to.cell = cell;
+    nav->at = to;
+    nav->has_resume = 0;
+    /* No commands run: the cell plays as if playback had reached it. */
+    return follow(nav, STAGE_CELL, step);
+}
+
 int hddvd_std_nav_start(hddvd_std_nav *nav, hddvd_std_nav_step *step)
 {
     hddvd_vts_pgc info;

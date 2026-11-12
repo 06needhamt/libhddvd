@@ -619,6 +619,27 @@ int hddvd_titles_get_extent(const hddvd_titles *titles, size_t title, size_t ext
     return HDDVD_OK;
 }
 
+int hddvd_titles_cell_at_internal(const hddvd_titles *titles, size_t title, uint64_t offset,
+                                  uint16_t *pgc, size_t *cell)
+{
+    const title_entry *t = &titles->titles[title];
+    size_t i, extent = t->info.extent_count;
+    for (i = 0; i < t->info.extent_count; i++)
+        if (offset >= t->extents[i].offset &&
+            offset - t->extents[i].offset < (uint64_t)t->extents[i].sector_count * SECTOR)
+            extent = i;
+    if (extent == t->info.extent_count)
+        return HDDVD_ENOTFOUND;
+    for (i = t->pgc_count; i > 0; i--)
+        if (t->pgc_firsts[i - 1] <= extent)
+        {
+            *pgc = t->pgcs[i - 1];
+            *cell = extent - t->pgc_firsts[i - 1];
+            return HDDVD_OK;
+        }
+    return HDDVD_ENOTFOUND;
+}
+
 int hddvd_titles_chapter_at(const hddvd_titles *titles, size_t title, uint64_t offset,
                             size_t *chapter)
 {

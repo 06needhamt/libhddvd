@@ -177,6 +177,9 @@ static void navigate(hddvd_ctx *ctx)
             step.kind == HDDVD_STD_NAV_PLAY)
             (void)hddvd_std_nav_next(nav, &step);
         (void)hddvd_std_nav_menu(nav, 2 + i, &step);
+        if (hddvd_std_nav_seek(nav, i, (uint64_t)i * 5000u, &step) == HDDVD_OK &&
+            step.kind == HDDVD_STD_NAV_PLAY)
+            (void)hddvd_std_nav_next(nav, &step);
     }
     hddvd_std_nav_close(nav);
 }
