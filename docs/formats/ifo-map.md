@@ -150,7 +150,7 @@ AACS marks encrypted packets as CSS does on DVD:
 - **Clear prefix:** VC-1 start codes (`0x0d`, `0x0e`, `0x0f`) appear only in the first 128 bytes of each sector. The rest runs at about 7.8 bits per byte, as ciphertext does. So, as with CSS, the first 128 bytes of a sector are clear and the rest is encrypted.
 - **Clear discs:** in Dragon's Lair `HV006T01.EVO` (14,370 sectors), every sector is a pack and none is scrambled.
 
-`hddvd_titles_read` therefore refuses a sector holding an audio, video, private-stream-1 or extended-stream (`0xfd`) PES packet with non-zero scrambling bits.
+`hddvd_titles_read` therefore refuses a sector holding an audio, video, private-stream-1 or extended-stream (`0xfd`) PES packet with non-zero scrambling bits. A host that is authorized to play the disc can supply the clear sector through `hddvd_titles_set_sector_provider`; the result must itself pass this check.
 
 ### VMG (`HVDVD-VMG100`)
 
@@ -293,16 +293,25 @@ A clip plays its map from `clipTimeBegin` (default 0). A title time `t` inside t
   - `CallSS` from a title remembers the cell to resume.
 
   Each run ends with a cell to play (a byte range of an `hddvd_titles` title), a stop, or a named thing it does not model. Three choices follow DVD-Video and are unconfirmed for HD DVD: a cell command runs as one command, a title set menu reached before any title has played is the first title set's, and a PGC whose post commands do not leave it ends playback (its next-PGC number is not decoded).
+- **Guesses** (`hddvd_std_nav_set_options`, off by default): for a host that wants to try a disc with what the observed disc lacks, the navigator can read DVD-Video's layout in its place. Nothing below has been seen on an HD DVD disc, and the offsets may well be wrong: the HD DVD PGC header is not DVD's (offsets at 0xa8, not 0xe4), and the bytes between 0x08 and 0xa8 hold other values on the observed disc.
+
+  | Guess | Read as DVD-Video stores it |
+  |---|---|
+  | `PGC_LINKS` | next, previous and parent PGC numbers at PGC header offset 0x9c, 0x9e and 0xa0; LinkNextPGC, LinkPrevPGC and LinkGoUpPGC follow them, and a PGC whose post commands do not leave it goes on to its next PGC |
+  | `ANGLES` | the top byte of the cell category as DVD's first cell byte: block mode in bits 31–30 (1 first, 3 last), block type in bits 29–28 (1 angle), interleaved in bit 26. An angle block plays the cell of the angle in SPRM3 and then the cell after the block; interleaved cells are refused, since ILVUs are not read |
+  | `MENU_CELLS` | menu and first-play cells are sectors of `HV000M01.EVO` (the VMG's) or `HVnnnM01.EVO` (title set nnn's), following the title EVOs' naming; the still time is category bits 15–8; buttons are the highlight information of the cell's first navigation pack, at PCI offset 0x60 (the button count at 0x71, 18-byte records from 0x8e), and a button's command runs in the VM |
+
+  `tests/fixtures/guesses` is a synthetic disc built this way. `hddvd-titles --navigate COUNT --guess` shows what the guesses make of a disc, which is how a disc that has these structures could confirm or refute them.
 
 ## What remains
 
 - **Standard Content:**
   - the cell command flags, bit 7 of the `JumpSS`/`CallSS` domain byte, and `SetSystem` sub-operation 9;
-  - menu EVOs and menu cells (none on the observed disc), and `JumpSS` to title set menus of another set (the target set is not decoded);
-  - the next, previous and parent PGC numbers in a PGC's header, which `hddvd_std_nav` would need to follow those links;
+  - menu EVOs and menu cells (none on the observed disc), and `JumpSS` to title set menus of another set (the target set is not decoded); `hddvd_std_nav` can guess the menu cells' layout (above);
+  - the next, previous and parent PGC numbers in a PGC's header, which `hddvd_std_nav` needs to follow those links, and can guess;
   - audio coding and channel bits, and the rest of the video attributes (only one combination seen);
   - frame rates other than 30000/1001;
-  - multi-angle and interleaved cells.
+  - multi-angle and interleaved cells (non-interleaved angle blocks can be guessed).
 - **The VTI attribute table:** bytes other than the video attributes and audio records.
 - **Angle and interleaved layouts:** none of the observed maps has them.
 - **Other frame rates:** whether the time-map unit or the playlist clock changes at time bases other than 60fps is unconfirmed.

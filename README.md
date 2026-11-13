@@ -29,7 +29,15 @@ Experimental open-source HD DVD inspection library.
   encrypted (AACS) sectors refused as `HDDVD_EPROTECTED`
 - Standard Content navigation (`hddvd_std_nav`): first play, menus, jumps and
   links followed through the command VM to the cell to play, plus the user's
-  title, chapter and menu choices
+  title, chapter and menu choices. Opt-in guesses (`hddvd_std_nav_set_options`)
+  read DVD-Video's layout where HD DVD's is unknown, for menu cells and their
+  buttons, angle blocks and PGC links; no disc has confirmed them
+- A host provider hook for protected title sectors
+  (`hddvd_titles_set_sector_provider`); libhddvd itself decrypts nothing
+- Menu sessions (`hddvd_menu`): one HDi application loaded from the disc and
+  run for a player's overlay code, which sends keys, pointer positions, time
+  and player events and reads back a damage-tracked display list and the
+  player commands scripts made
 - A sandboxed script runtime (`hddvd_runtime`) that runs HDi ECMAScript source,
   UTF-16 as on disc or UTF-8, with heap, recursion, operation and wall-clock
   budgets, in an optional QuickJS engine. Scripts get the HDi `document`
@@ -79,11 +87,13 @@ set or title table, its stream attributes, menus and navigation commands (in
 DVD-Video syntax), and checks its tables and every command target; given the
 title EVO, it checks them against the EVO's navigation packs and streams. For
 a title table it also runs the first-play commands and prints where they lead.
-`hddvd-titles [--read] [--navigate COUNT] DISC_ROOT` lists a disc's playable
+`hddvd-titles [--read] [--navigate COUNT [--guess]] DISC_ROOT` lists a disc's playable
 titles, Standard Content and Advanced Content, with their chapters and the EVO
 extents they play. `--read` reads every title through and says whether its
 data is clear, encrypted or damaged; `--navigate` follows a Standard Content
-disc's own commands from first play for up to COUNT cells.
+disc's own commands from first play for up to COUNT cells, and `--guess` turns
+the navigator's guesses on, listing menu cells with their buttons and pressing
+the selected one.
 `hddvd-menurun [--state] [--before FILE] [--playlist FILE.xpl [--title ID]] archive.aca
 MANIFEST.xmf [STEP...]` runs one application in the script runtime: its
 manifest's scripts, its markup and the markup loaded handler, then steps such

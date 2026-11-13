@@ -140,6 +140,68 @@ static int open_copy(const unsigned char *evo, size_t evo_size, hddvd_ctx **ctx,
     return rc;
 }
 
+/* Providers for the scrambled sector: one that supplies the clear sector
+   (the fixture's, with the scrambling bits cleared), and ones that decline,
+   fail, leave it scrambled, or return something that is not a pack. */
+static unsigned provider_calls;
+
+static int provide(void *opaque, const char *evo_uri, uint32_t sector, uint8_t data[2048])
+{
+    int mode = *(const int *)opaque;
+    provider_calls++;
+    assert(!strcmp(evo_uri, "file:///dvddisc/HVDVD_TS/HV001T01.EVO") && sector == 13);
+    assert(data[3] == 0xba && (data[20] & 0x30) == 0x10);
+    if (mode == 0)
+        data[20] &= 0xcf;
+    else if (mode == 1)
+        return HDDVD_EPROTECTED;
+    else if (mode == 2)
+        return HDDVD_EIO;
+    else if (mode == 4)
+        data[3] = 0;
+    return HDDVD_OK;
+}
+
+static void provider(void)
+{
+    size_t evo_size, got;
+    unsigned char *evo = fixture("HV001T01.EVO", &evo_size);
+    unsigned char *buffer = malloc(64u * SECTOR);
+    hddvd_ctx *ctx;
+    hddvd_titles *titles = NULL;
+    hddvd_error_detail detail;
+    int mode = 0;
+    assert(buffer);
+    evo[13u * SECTOR + 20] |= 0x10;
+    assert(open_copy(evo, evo_size, &ctx, &titles) == HDDVD_OK);
+    evo[13u * SECTOR + 20] &= 0xef;
+    assert(hddvd_titles_set_sector_provider(titles, provide, &mode) == HDDVD_OK);
+    /* The clear sector is read as if it had been stored. */
+    assert(hddvd_titles_read(titles, 0, 0, buffer, 64u * SECTOR, &got) == HDDVD_OK);
+    assert(got == 20u * SECTOR && !memcmp(buffer, evo, got) && provider_calls == 1);
+    /* Only the scrambled sector goes to the provider. */
+    assert(hddvd_titles_read(titles, 1, 0, buffer, 64u * SECTOR, &got) == HDDVD_OK);
+    assert(provider_calls == 1);
+    for (mode = 1; mode <= 4; mode++)
+    {
+        static const int expected[] = {0, HDDVD_EPROTECTED, HDDVD_EIO, HDDVD_EPROTECTED,
+                                       HDDVD_EPARSE};
+        assert(hddvd_titles_read(titles, 0, 0, buffer, 64u * SECTOR, &got) == expected[mode]);
+        assert(got == 13u * SECTOR);
+        assert(hddvd_get_last_error(ctx, &detail) == HDDVD_OK && detail.status == expected[mode]);
+    }
+    /* Without a provider again, the sector is refused. */
+    assert(hddvd_titles_set_sector_provider(titles, NULL, NULL) == HDDVD_OK);
+    provider_calls = 0;
+    assert(hddvd_titles_read(titles, 0, 0, buffer, 64u * SECTOR, &got) == HDDVD_EPROTECTED);
+    assert(provider_calls == 0);
+    assert(hddvd_titles_set_sector_provider(NULL, provide, &mode) == HDDVD_EINVAL);
+    hddvd_titles_close(titles);
+    hddvd_close(ctx);
+    free(buffer);
+    free(evo);
+}
+
 static void errors(void)
 {
     size_t evo_size, got;
@@ -204,5 +266,6 @@ int main(void)
     hddvd_titles_close(titles);
     hddvd_close(ctx);
     errors();
+    provider();
     return 0;
 }

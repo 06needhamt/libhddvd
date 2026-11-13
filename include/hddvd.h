@@ -61,6 +61,7 @@ typedef struct hddvd_vm hddvd_vm;
 typedef struct hddvd_title_map hddvd_title_map;
 typedef struct hddvd_titles hddvd_titles;
 typedef struct hddvd_std_nav hddvd_std_nav;
+typedef struct hddvd_menu hddvd_menu;
 typedef struct hddvd_scene hddvd_scene;
 typedef void (*hddvd_log_fn)(void *, int, const char *);
 typedef enum hddvd_subsystem
@@ -1289,6 +1290,13 @@ typedef struct hddvd_title_info
     uint16_t title_set_title;
     uint8_t angle_count;
 } hddvd_title_info;
+/* Supplies the clear form of a protected EVO sector to hddvd_titles_read,
+   for a host that is authorized to play the disc: libhddvd itself never
+   decrypts. sector is the 2048-byte sector's index in the EVO evo_uri names;
+   data holds the sector as stored and is replaced in place. Return HDDVD_OK
+   after replacing it, or an error (HDDVD_EPROTECTED to decline). The
+   provider must not call back into the titles being read. */
+typedef int (*hddvd_sector_fn)(void *, const char *evo_uri, uint32_t sector, uint8_t data[2048]);
 /* Where a chapter starts: its title time and byte offset in the title. */
 typedef struct hddvd_title_chapter
 {
@@ -1317,8 +1325,58 @@ typedef enum hddvd_std_nav_kind
     HDDVD_STD_NAV_STOP,
     /* The disc asked for something that is not modelled or does not exist;
        reason names it. Nothing is playing. */
-    HDDVD_STD_NAV_UNSUPPORTED
+    HDDVD_STD_NAV_UNSUPPORTED,
+    /* Only with HDDVD_STD_NAV_GUESS_MENU_CELLS: play bytes [0, size) of a
+       menu cell, read with hddvd_std_nav_read_menu (hddvd_std_nav_get_menu_cell
+       describes it). title is SIZE_MAX; title_set is 0 for the VMG's menus
+       and first play. */
+    HDDVD_STD_NAV_MENU
 } hddvd_std_nav_kind;
+/* hddvd_std_nav_set_options: each follows DVD-Video's layout where HD DVD's
+   is not known. None has been seen on a disc, so all are off by default
+   (docs/formats/ifo-map.md):
+   - PGC_LINKS reads a PGC's next, previous and parent PGC numbers at DVD's
+     header offset 0x9c and follows LinkNextPGC, LinkPrevPGC, LinkGoUpPGC
+     and, after post commands that do not leave the PGC, its next PGC;
+   - ANGLES reads a title cell's category as DVD's first cell byte (block
+     mode in bits 31-30, block type in bits 29-28, angle blocks being type
+     1): an angle block plays the cell of the angle set by SPRM3
+     (hddvd_std_nav_set_angle; the first when there is no such angle), then
+     the cell after the block. A block's interleaved cells (bit 26) are an
+     UNSUPPORTED step, since ILVUs are not read;
+   - MENU_CELLS plays menu and first-play cells as MENU steps, from
+     HVDVD_TS/HV000M01.EVO (the VMG's) or HVnnnM01.EVO (a title set's),
+     with the still time in bits 15-8 of the category and buttons from the
+     highlight information of the cell's first navigation pack, at DVD's
+     PCI offset 0x60. */
+#define HDDVD_STD_NAV_GUESS_PGC_LINKS 0x1u
+#define HDDVD_STD_NAV_GUESS_ANGLES 0x2u
+#define HDDVD_STD_NAV_GUESS_MENU_CELLS 0x4u
+/* The menu cell of the last MENU step. evo_uri is borrowed until the next
+   step. still: 0 for none, 1 to 254 seconds, 255 until a button is
+   activated (DVD's encoding). */
+typedef struct hddvd_std_nav_menu_cell
+{
+    const char *evo_uri;
+    uint32_t first_sector;
+    uint32_t sector_count;
+    uint8_t still;
+} hddvd_std_nav_menu_cell;
+/* A menu button: its rectangle in the menu video's pixels, the buttons
+   (1-based, 0 for none) the arrow keys move to, and auto_action, set when
+   selecting the button activates it. */
+typedef struct hddvd_std_nav_button
+{
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+    uint8_t up;
+    uint8_t down;
+    uint8_t left;
+    uint8_t right;
+    uint8_t auto_action;
+} hddvd_std_nav_button;
 /* title and chapter index the navigator's hddvd_titles; offset and size are
    in that title's byte stream. title_set, pgc and cell are the cell's
    1-based numbers on the disc. reason is a static string, NULL for PLAY. */
@@ -1563,6 +1621,14 @@ HDDVD_API uint64_t hddvd_runtime_generation(const hddvd_runtime *);
    recursion is an exception in the listener concerned. Budgets apply to each
    call as a whole. */
 HDDVD_API int hddvd_runtime_key(hddvd_runtime *, uint32_t, int, int *);
+/* Reports the pointer: over the markup node `node` (SIZE_MAX: over none),
+   with its button pressed or not. The element under the pointer has state
+   pointer "true" and takes the focus, and its state actioned is "true"
+   while the button is down on it, as Enter does for the focused element;
+   leaving an element clears both. No event is dispatched. This model is
+   unconfirmed against a player. HDDVD_EINVAL for a node the document
+   lacks; otherwise as hddvd_runtime_key. */
+HDDVD_API int hddvd_runtime_pointer(hddvd_runtime *, size_t node, int pressed);
 /* Moves the runtime clock forward (HDDVD_EINVAL backwards) and runs the
    timers due by then in due order (equal times in the order they were
    scheduled: enabled, or rescheduled after firing), then steps animations.
@@ -2150,6 +2216,11 @@ HDDVD_API int hddvd_title_map_locate(const hddvd_title_map *, hddvd_time, hddvd_
    PES packet in it is marked scrambled (encrypted content, which libhddvd
    does not decrypt). chapter_at gives the chapter playing at a byte offset
    (HDDVD_ENOTFOUND for a title without chapters).
+   set_sector_provider gives read a host provider for protected sectors
+   (NULL removes it): a scrambled sector is passed to it, and what it
+   returns is checked like any other sector, so a result that is still
+   scrambled is HDDVD_EPROTECTED and one that is not a pack HDDVD_EPARSE; a
+   provider's own error is returned as it is.
    A handle is single-threaded; failures are reported on the context. */
 HDDVD_API int hddvd_titles_open(hddvd_ctx *, hddvd_titles **);
 HDDVD_API int hddvd_titles_open_playlist(hddvd_ctx *, const hddvd_xpl *, hddvd_titles **);
@@ -2163,6 +2234,7 @@ HDDVD_API int hddvd_titles_get_extent(const hddvd_titles *, size_t title, size_t
                                       hddvd_title_extent *);
 HDDVD_API int hddvd_titles_chapter_at(const hddvd_titles *, size_t title, uint64_t offset,
                                       size_t *chapter);
+HDDVD_API int hddvd_titles_set_sector_provider(hddvd_titles *, hddvd_sector_fn, void *);
 HDDVD_API int hddvd_titles_read(hddvd_titles *, size_t title, uint64_t offset, void *buffer,
                                 size_t size, size_t *got);
 /* Standard Content navigation, for a player that wants a disc to play as
@@ -2179,6 +2251,10 @@ HDDVD_API int hddvd_titles_read(hddvd_titles *, size_t title, uint64_t offset, v
    - select_title is the user choosing a title and chapter (indices into
      the titles), as JumpVTS_PTT: the PGC's pre commands run, then the
      chapter's program plays. HDDVD_EINVAL when there is no such chapter;
+   - seek is the user seeking within a title: the cell holding the byte at
+     offset of the title's stream becomes the cell playing, without running
+     any command, and the step describes that whole cell (the host reads on
+     from offset). HDDVD_EINVAL for a title or offset the disc lacks;
    - menu is the user's menu key, as CallSS: menu id 2 is the disc's title
      menu, any other id a menu of the title set last played (3 is its root
      menu). The cell playing can be resumed by the menu's commands.
@@ -2191,11 +2267,13 @@ HDDVD_API int hddvd_titles_read(hddvd_titles *, size_t title, uint64_t offset, v
    NULL), else the first. Title set menus reached before any title has
    played are the first title set's.
 
-   Not modelled, each ending in an UNSUPPORTED step: menu cells (menu EVOs
-   are not decoded, and observed menus are command-only), the next,
-   previous and parent PGC links (those numbers are not decoded, so a PGC
-   whose post commands do not leave it is a STOP step), and commands the VM
-   does not run. Stills, cell flags and angle blocks are not interpreted.
+   Not modelled unless guessed (hddvd_std_nav_set_options), each ending in
+   an UNSUPPORTED step: menu cells (menu EVOs are not decoded, and observed
+   menus are command-only), the next, previous and parent PGC links (those
+   numbers are not decoded, so a PGC whose post commands do not leave it is
+   a STOP step); always, commands the VM does not run. Title cells' stills
+   and flags and PGC stills are not interpreted, and without the guess
+   every cell of an angle block plays in turn.
    HDDVD_ELIMIT when commands pass through 1024 PGCs without playing a
    cell. The VM's registers are the host's to read and set (vm): SPRM4, 5
    and 6 are set to the title, the title-set title and the PGC at each PLAY
@@ -2211,7 +2289,90 @@ HDDVD_API int hddvd_std_nav_start(hddvd_std_nav *, hddvd_std_nav_step *);
 HDDVD_API int hddvd_std_nav_next(hddvd_std_nav *, hddvd_std_nav_step *);
 HDDVD_API int hddvd_std_nav_select_title(hddvd_std_nav *, size_t title, size_t chapter,
                                          hddvd_std_nav_step *);
+HDDVD_API int hddvd_std_nav_seek(hddvd_std_nav *, size_t title, uint64_t offset,
+                                 hddvd_std_nav_step *);
 HDDVD_API int hddvd_std_nav_menu(hddvd_std_nav *, unsigned menu_id, hddvd_std_nav_step *);
+/* Guesses (HDDVD_STD_NAV_GUESS_*, above) take effect from the next step;
+   HDDVD_EINVAL for unknown bits. set_angle sets SPRM3 (1 to 9), which an
+   angle block entered later plays.
+   With a MENU step outstanding (HDDVD_EINVAL otherwise):
+   - get_menu_cell describes it, and read_menu reads its sectors as
+     hddvd_titles_read reads a title's (the titles' sector provider is
+     asked for scrambled ones);
+   - the buttons are those of the cell's first navigation pack (none when
+     it cannot be read or has no highlight); selected_button is SPRM8 / 1024,
+     the first button when that names none, and select_button sets it;
+   - activate_button runs the selected button's command and fills a step as
+     next does; a command that goes nowhere repeats the MENU step. */
+HDDVD_API int hddvd_std_nav_set_options(hddvd_std_nav *, unsigned);
+HDDVD_API int hddvd_std_nav_set_angle(hddvd_std_nav *, unsigned angle);
+HDDVD_API int hddvd_std_nav_get_menu_cell(const hddvd_std_nav *, hddvd_std_nav_menu_cell *);
+HDDVD_API int hddvd_std_nav_read_menu(hddvd_std_nav *, uint64_t offset, void *, size_t, size_t *);
+HDDVD_API size_t hddvd_std_nav_button_count(const hddvd_std_nav *);
+HDDVD_API int hddvd_std_nav_get_button(const hddvd_std_nav *, size_t, hddvd_std_nav_button *);
+HDDVD_API unsigned hddvd_std_nav_selected_button(const hddvd_std_nav *);
+HDDVD_API int hddvd_std_nav_select_button(hddvd_std_nav *, unsigned button);
+HDDVD_API int hddvd_std_nav_activate_button(hddvd_std_nav *, hddvd_std_nav_step *);
+/* A menu session: one HDi application run for a player's overlay code. It
+   loads the application from the disc and joins the script runtime, the
+   navigation scheduler, the runtime bridge, the scene builder and the
+   display list behind one handle. Needs a script engine (HDDVD_ENOTSUP
+   without one).
+
+   open reads the manifest at manifest_uri (a file:///dvddisc/ URI, as a
+   playlist's ApplicationSegment gives it; a member of an ACA archive is
+   read from the archive), evaluates its scripts in order, loads its first
+   markup and calls the markup loaded handler. Script and markup names are
+   relative to the manifest unless they are URIs. A script that cannot be
+   read or that fails does not stop the rest: see the runtime's diagnostic
+   and issues (runtime). With a playlist (borrowed until close; may be
+   NULL), scripts see it, the first title whose applications name the
+   manifest is reported as playing, and its applications are the running
+   ones. decode turns image bytes into pixels for the display list
+   (hddvd_image_cache_create); with NULL no images are drawn. Images are
+   read from the disc relative to the markup; one that is missing or
+   protected is not drawn. Failures to read or parse the manifest or markup
+   are reported on the context.
+
+   A session is driven from one thread, and makes no callbacks other than
+   decode (from update and pointer):
+   - advance moves time forward (HDDVD_EINVAL backwards): timers,
+     animations and markup timing run, on the scheduler's queue. seek sets
+     the time after the player jumped, forwards or backwards, as a
+     discontinuity: script timers do not run for the time skipped;
+   - key sends a key press or release, and post any scheduler event (a
+     playback state, a title beginning or ending, a chapter, a stream
+     selection, a discontinuity), stamped with the current time;
+   - set_viewport gives the size of the video area the menu is drawn into;
+     the 1920x1080 logical region is letterboxed or pillarboxed into it
+     (get_transform). pointer takes a position in that area and whether the
+     button is down: the element drawn there, if it can be hit, gets the
+     pointer (hddvd_runtime_pointer); outside the region or over nothing,
+     no element has it;
+   - update returns the display list for the current state, borrowed until
+     the next update or close (NULL for an application without markup).
+     *changed (may be NULL) is set when it was rebuilt, in which case its
+     damage is the area that differs from the previous list;
+   - take_command returns the next player command scripts made
+     (HDDVD_ENOTFOUND when none waits), and acknowledge answers one, which
+     reaches the scripts as an acknowledgement on the queue. Every command
+     taken must be acknowledged.
+   advance, key, post, pointer and acknowledge return the first failure of
+   the scripts they ran (as hddvd_runtime_key); the rest is still done. */
+HDDVD_API int hddvd_menu_open(hddvd_ctx *, const hddvd_xpl *playlist, const char *manifest_uri,
+                              hddvd_image_decode_fn decode, void *decode_opaque, hddvd_menu **);
+HDDVD_API void hddvd_menu_close(hddvd_menu *);
+HDDVD_API hddvd_runtime *hddvd_menu_runtime(const hddvd_menu *);
+HDDVD_API int hddvd_menu_set_viewport(hddvd_menu *, uint32_t width, uint32_t height);
+HDDVD_API int hddvd_menu_get_transform(const hddvd_menu *, hddvd_video_transform *);
+HDDVD_API int hddvd_menu_advance(hddvd_menu *, hddvd_time);
+HDDVD_API int hddvd_menu_seek(hddvd_menu *, hddvd_time);
+HDDVD_API int hddvd_menu_key(hddvd_menu *, uint32_t key, int pressed);
+HDDVD_API int hddvd_menu_post(hddvd_menu *, const hddvd_event *);
+HDDVD_API int hddvd_menu_pointer(hddvd_menu *, int32_t x, int32_t y, int pressed);
+HDDVD_API int hddvd_menu_update(hddvd_menu *, const hddvd_display_list **, int *changed);
+HDDVD_API int hddvd_menu_take_command(hddvd_menu *, hddvd_runtime_command *);
+HDDVD_API int hddvd_menu_acknowledge(hddvd_menu *, uint64_t id, hddvd_command_result);
 HDDVD_API void hddvd_free(void *);
 #ifdef __cplusplus
 }

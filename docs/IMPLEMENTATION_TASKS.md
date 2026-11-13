@@ -813,7 +813,7 @@ shared and static libraries and can report exactly which optional backends exist
 
 ### P7-02 — Implement the VLC access/demux module
 
-**Status:** In progress
+**Status:** In progress (the module and its checks are done; what remains is blocked outside this repository: the merge request, and confirmations that need discs, listed under Remaining)
 **Depends on:** P1-05, P6-02 through P6-04, P7-01
 
 Open an HD DVD root, provide authorized clear streams, map title/EVO ranges to
@@ -853,12 +853,96 @@ with a contrib entry that needs a tagged libhddvd release.
   synthetic disc at a time (EVO sectors, title set, VMG, time map, playlist),
   then lists, reads and navigates it.
 
+- **Protected sectors:** `hddvd_titles_set_sector_provider` lets a host that
+  is authorized to play a disc supply the clear form of a scrambled sector.
+  The result is checked like any stored sector. libhddvd still decrypts
+  nothing itself.
+
+**Third slice (done), the VLC module** (prepared as a patch series against
+VLC master; it lives in VLC's tree, not here). It is an access-demux like
+VLC's Blu-ray module, with a chained PS demuxer:
+- Standard Content plays as authored through `hddvd_std_nav` (first play,
+  menus that jump, cell links, the user's title, chapter and menu choices,
+  and seeks through `hddvd_std_nav_seek`).
+- Advanced Content offers the playlist's titles and runs the title's
+  application in an `hddvd_menu` session: the display list is drawn as an
+  overlay on the video, VLC's navigation keys and the mouse go to it, the
+  session's clock follows the title time (playback state reaches the
+  scheduler this way), and its player commands are carried out:
+  - jumps change the title;
+  - pause stops reading until a play command, and the player state is
+    reported back with `hddvd_runtime_set_player`;
+  - audio and subtitle choices by track number or language select the
+    stream that the playlist track's `streamNumber` names;
+  - subtitle visibility and the application's z-order are applied;
+  - activating or inactivating other applications is refused, because one
+    application runs per title.
+- Mouse positions are mapped through the size of the video under the
+  overlay, which VLC reports to the overlay's updater. The first version
+  read the size from the elementary stream's format, which VLC's PS demuxer
+  leaves at zero for MPEG-2, so every click missed.
+- Track choices needed a third VLC patch: the PS demuxer gives streams their
+  stream ids as ES ids when a private `ps-stream-ids` option is set, as
+  VLC's DVD modules already do. Without the option nothing changes.
+- Headless libvlc checks run against VLC master. They cover:
+  - navigation, title and chapter choices, and seeks through the navigator,
+    with the disc's navigation continuing from the cell sought;
+  - the menu, keys, the overlay on a real video output, and the dialog for
+    an encrypted title;
+  - mouse clicks on the menu's buttons, through VLC's own video output path
+    (a test window plugin reports the events), which pause and play, select
+    tracks, hide subtitles, reorder and inactivate the application, and
+    jump;
+  - with the experimental `--hddvd-guess` option (off by default), which
+    turns on `hddvd_std_nav`'s guesses: on `tests/fixtures/guesses`, first
+    play, the title menu holding as a still, VLC's navigation keys moving
+    between and activating buttons across two menu PGCs, the angle block,
+    the PGC links, and the encryption dialog for the menu's scrambled
+    packet; on a scratch copy whose title menu has a decodable still, a
+    2-second still holding, and the mouse selecting and activating a
+    button. Button highlights are not drawn.
+
 **Remaining:**
-- in VLC: the merge request, Advanced Content and `hddvd_std_nav` in the
-  module, forwarding playback state to the navigation scheduler, and a
-  protection provider hook;
-- in libhddvd, for lack of a disc that has them: angle blocks, menu cells and
-  the PGC link numbers.
+- in VLC: submitting the merge request, which needs two things from the
+  maintainer: a tagged libhddvd release (v0.5.0, once this work is merged to
+  main) for the contrib entry's checksum, and an account on
+  code.videolan.org. The module is licensed LGPLv2.1+, noting that
+  libhddvd is GPLv2, as VLC's dvdnav module does for libdvdnav.
+  VLC has nothing that supplies clear HD DVD sectors, so the module sets no
+  sector provider. VLC's contrib builds libhddvd without a script engine,
+  so HDi menus need a libhddvd built with QuickJS;
+- in VLC: confirming that a playlist track's `streamNumber` (1-based) names
+  the EVO substream whose number in the packet id is one less. The module
+  assumes so (audio in the low 3 bits of the substream id, subpictures in
+  the low 5), as the checks' synthetic disc is built; no disc with several
+  audio or subpicture streams has been available to check it against;
+- in libhddvd: confirming angle blocks, menu cells and the PGC link numbers
+  on a disc. The HD DVD IFO is not DVD-Video's layout (12-byte PGC search
+  pointers, 28-byte cells, command offsets at 0xa8 rather than 0xe4;
+  `docs/formats/ifo-map.md`), and the one Standard Content disc available
+  has none of them: its PGCs link nowhere, its cells form no angle blocks,
+  and its menu PGCs have no cells. The specification is licensed, and a
+  search found no public description of these structures.
+
+  `hddvd_std_nav_set_options` now implements all three as opt-in guesses
+  on DVD-Video's layout, off by default:
+  - menu and first-play cells become MENU steps, read through
+    `hddvd_std_nav_read_menu` (with the titles' checks and sector
+    provider), with buttons from the first navigation pack's highlight
+    information, which the host selects and activates;
+  - angle blocks play the cell of the angle in SPRM3
+    (`hddvd_std_nav_set_angle`); interleaved cells are refused;
+  - LinkNextPGC, LinkPrevPGC and LinkGoUpPGC are followed, and a PGC whose
+    post commands do not leave it goes on to its next PGC.
+
+  `test_std_nav_guesses.c` covers them, and every refusal, on the synthetic
+  `tests/fixtures/guesses` disc. `fuzz-titles` runs the navigator with them
+  on and fuzzes the menu EVO, and `hddvd-titles --navigate COUNT --guess`
+  shows what they make of a disc. The VLC module turns them on with
+  `--hddvd-guess`. Checking them in VLC found that the fixture's first-play
+  cell started past the end of its EVO; the fixture now has it at sectors
+  8 to 11, and `fp-past-end.IFO` keeps the old layout as a negative case.
+  A disc that has these structures is still needed to confirm the offsets.
 
 **Acceptance:** headless tests open synthetic clear layouts; seek/title/chapter
 commands land on the expected ranges; protected content produces an actionable
@@ -866,12 +950,31 @@ message rather than a generic I/O error.
 
 ### P7-03 — Implement VLC overlay and input bridging
 
-**Status:** Blocked
+**Status:** Complete (the adapter and its mock-host test here; the VLC module in the prepared patch series draws its display lists as an overlay and sends it keys and the mouse, both checked headlessly in VLC)
 **Depends on:** P5-03, P6-05, P7-02
 
 Convert display-list changes to VLC subpictures and translate VLC key/mouse/menu
 actions to HDi events on a serialized worker.  Queue acknowledgements to avoid
 recursive entry into libhddvd.
+
+`hddvd_menu` (`src/menu.c`) is the adapter a player's overlay code drives. It
+loads an application from the disc (loose files or an ACA archive) and joins
+the script runtime, the scheduler, the runtime bridge, the scene builder and
+the display list behind one handle:
+- **Input:** keys and scheduler events go through the navigation queue.
+  Pointer positions are mapped through the letterbox transform and a hit test
+  to the element drawn there (`hddvd_runtime_pointer`, new: the element takes
+  the pointer and the focus, and is actioned while the button is down; this
+  model is unconfirmed against a player).
+- **Output:** `hddvd_menu_update` returns the display list for the current
+  state and whether it was rebuilt, with damage against the previous list.
+- **Commands:** scripts' player commands are polled, and acknowledgements go
+  back through the queue, so nothing re-enters libhddvd.
+- **Tests:** `test_menu.c` covers keys, the pointer, damage, resize,
+  letterbox, commands, close and reopen, missing and failing parts, and an
+  application read from an archive. `test_menu_threads.c` is a mock host:
+  input, clock and video threads post to the one worker that owns the
+  session, and the CI ThreadSanitizer job reports no races.
 
 **Acceptance:** a mock-host integration test covers key, mouse, damage, resize,
 letterbox, close, and reopen paths; ThreadSanitizer finds no event/clock races.
@@ -920,7 +1023,7 @@ regression test in `test_object.c`.
 
 ### X-04 — Release checks
 
-**Status:** Complete for the checks below; Windows and macOS still depend on GitHub Actions running
+**Status:** Complete (the checks are in place and passed on all three systems in GitHub Actions up to run 117; from run 118 on, Actions starts no runner for any job, so later commits are verified by running the Linux jobs locally: the same steps as `ci.yml`, with every job passing on e08880c, and the `abi` job's steps, which pass against the merge base with main (25 functions added, none changed or removed; the public header is unchanged since 56eaecd, where they last ran); macOS and Windows are unverified since run 117)
 **Depends on:** X-03
 
 `ci.yml` adds four release checks:

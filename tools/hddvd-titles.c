@@ -8,7 +8,11 @@
    its chapters and the EVO extents it plays. --read also reads every title
    through and says whether its data is clear program stream, encrypted or
    damaged. --navigate follows the Standard Content disc's own commands from
-   first play for up to COUNT cells. */
+   first play for up to COUNT cells. --guess turns on the navigator's
+   guesses, which read DVD-Video's layout where HD DVD's is unknown (menu
+   cells and their buttons, angle blocks, PGC links): a menu cell is listed
+   with its buttons, and its selected button is pressed, as a test of the
+   guesses on a real disc. */
 
 static double seconds(hddvd_time time)
 {
@@ -83,16 +87,48 @@ static int list(hddvd_ctx *ctx, hddvd_titles *titles, int read)
     return unread;
 }
 
-static int navigate(hddvd_ctx *ctx, unsigned long cells)
+/* A menu step under the guesses: the cell, its buttons, then the selected
+   button pressed (or, without buttons, the next cell). */
+static int menu(hddvd_std_nav *nav, hddvd_std_nav_step *step)
+{
+    hddvd_std_nav_menu_cell cell;
+    hddvd_std_nav_button b;
+    size_t i, count = hddvd_std_nav_button_count(nav);
+    hddvd_std_nav_get_menu_cell(nav, &cell);
+    printf("navigate menu title-set=%u pgc=%u cell=%u evo=%s sectors=%lu+%lu still=%u "
+           "buttons=%zu\n",
+           step->title_set, step->pgc, step->cell, cell.evo_uri, (unsigned long)cell.first_sector,
+           (unsigned long)cell.sector_count, cell.still, count);
+    for (i = 0; i < count && hddvd_std_nav_get_button(nav, i, &b) == HDDVD_OK; i++)
+        printf("  button %zu at %lu,%lu size %lux%lu up=%u down=%u left=%u right=%u%s\n", i + 1,
+               (unsigned long)b.x, (unsigned long)b.y, (unsigned long)b.width,
+               (unsigned long)b.height, b.up, b.down, b.left, b.right,
+               b.auto_action ? " auto" : "");
+    if (!count)
+        return hddvd_std_nav_next(nav, step);
+    printf("  press button %u\n", hddvd_std_nav_selected_button(nav));
+    return hddvd_std_nav_activate_button(nav, step);
+}
+
+static int navigate(hddvd_ctx *ctx, unsigned long cells, int guess)
 {
     hddvd_std_nav *nav = NULL;
     hddvd_std_nav_step step;
     unsigned long i;
     int rc = hddvd_std_nav_open(ctx, &nav);
+    if (!rc && guess)
+        rc = hddvd_std_nav_set_options(nav, HDDVD_STD_NAV_GUESS_PGC_LINKS |
+                                                HDDVD_STD_NAV_GUESS_ANGLES |
+                                                HDDVD_STD_NAV_GUESS_MENU_CELLS);
     if (!rc)
         rc = hddvd_std_nav_start(nav, &step);
     for (i = 0; !rc && i < cells; i++)
     {
+        if (step.kind == HDDVD_STD_NAV_MENU)
+        {
+            rc = menu(nav, &step);
+            continue;
+        }
         if (step.kind != HDDVD_STD_NAV_PLAY)
         {
             printf("navigate %s: %s\n", step.kind == HDDVD_STD_NAV_STOP ? "stop" : "unsupported",
@@ -118,11 +154,13 @@ int main(int argc, char **argv)
     hddvd_error_detail detail;
     const char *root = NULL;
     unsigned long cells = 0;
-    int read = 0, a, rc, found = 0, failed = 0;
+    int read = 0, guess = 0, a, rc, found = 0, failed = 0;
     for (a = 1; a < argc; a++)
     {
         if (!strcmp(argv[a], "--read"))
             read = 1;
+        else if (!strcmp(argv[a], "--guess"))
+            guess = 1;
         else if (!strcmp(argv[a], "--navigate") && a + 1 < argc)
             cells = strtoul(argv[++a], NULL, 10);
         else if (!root && argv[a][0] != '-')
@@ -132,7 +170,7 @@ int main(int argc, char **argv)
     }
     if (!root)
     {
-        fprintf(stderr, "usage: %s [--read] [--navigate COUNT] DISC_ROOT\n", argv[0]);
+        fprintf(stderr, "usage: %s [--read] [--navigate COUNT [--guess]] DISC_ROOT\n", argv[0]);
         return 2;
     }
     ctx = hddvd_open(root);
@@ -150,7 +188,7 @@ int main(int argc, char **argv)
         hddvd_titles_close(titles);
         found = 1;
         if (cells)
-            failed += navigate(ctx, cells);
+            failed += navigate(ctx, cells, guess);
     }
     /* Not finding the VMG itself only means no Standard Content. */
     else if (rc != HDDVD_ENOTFOUND || hddvd_get_last_error(ctx, &detail) != HDDVD_OK ||

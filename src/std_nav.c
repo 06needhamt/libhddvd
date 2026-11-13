@@ -9,6 +9,17 @@
 #define SPRM_TITLE 0x84u
 #define SPRM_TITLE_SET_TITLE 0x85u
 #define SPRM_PGC 0x86u
+#define SPRM_ANGLE 0x83u
+#define SPRM_BUTTON 0x88u
+#define SECTOR 2048u
+/* DVD-Video's highlight information in a navigation pack's PCI: the button
+   count at 0x60 + 17 and 18-byte button records from 0x8e, at most 36. */
+#define PCI_HLI 0x60u
+#define PCI_BUTTONS 0x8eu
+#define BUTTON_RECORD 18u
+#define MAX_BUTTONS 36u
+#define GUESSES                                                                                    \
+    (HDDVD_STD_NAV_GUESS_PGC_LINKS | HDDVD_STD_NAV_GUESS_ANGLES | HDDVD_STD_NAV_GUESS_MENU_CELLS)
 
 typedef enum nav_domain
 {
@@ -64,6 +75,20 @@ struct hddvd_std_nav
     int has_resume;
     nav_position resume;
     char language[3];
+    unsigned options;
+    /* The last step that played something, repeated when a button goes
+       nowhere. */
+    hddvd_std_nav_step last;
+    /* The menu cell of the last MENU step, and its buttons. */
+    char menu_uri[64];
+    uint32_t menu_first;
+    uint32_t menu_count;
+    uint8_t menu_still;
+    hddvd_stream *menu_stream;
+    char menu_stream_uri[64];
+    size_t button_count;
+    hddvd_std_nav_button buttons[MAX_BUTTONS];
+    uint8_t button_commands[MAX_BUTTONS][8];
 };
 
 static int fail(const hddvd_std_nav *nav, int rc, const char *message)
@@ -125,6 +150,97 @@ static int get_command(const hddvd_std_nav *nav, const nav_position *p, hddvd_vt
         default:
             return HDDVD_EINVAL;
     }
+}
+
+static int cell_info(const hddvd_std_nav *nav, const nav_position *p, size_t cell,
+                     hddvd_vts_cell *out)
+{
+    switch (p->domain)
+    {
+        case DOMAIN_FIRST_PLAY:
+            return hddvd_vmg_get_first_play_cell_internal(nav->vmg, cell, out);
+        case DOMAIN_VMG_MENU:
+            return hddvd_vmg_get_menu_cell(nav->vmg, p->unit, p->pgc, cell, out);
+        case DOMAIN_VTS_MENU:
+            return hddvd_vts_get_menu_cell(vts_at(nav, p), p->unit, p->pgc, cell, out);
+        case DOMAIN_TITLE:
+            return hddvd_vts_get_cell(vts_at(nav, p), p->pgc, cell, out);
+        default:
+            return HDDVD_EINVAL;
+    }
+}
+
+static int links_info(const hddvd_std_nav *nav, const nav_position *p, hddvd_pgc_links *out)
+{
+    switch (p->domain)
+    {
+        case DOMAIN_FIRST_PLAY:
+            return hddvd_vmg_get_pgc_links_internal(nav->vmg, 1, 0, 0, out);
+        case DOMAIN_VMG_MENU:
+            return hddvd_vmg_get_pgc_links_internal(nav->vmg, 0, p->unit, p->pgc, out);
+        case DOMAIN_VTS_MENU:
+            return hddvd_vts_get_pgc_links_internal(vts_at(nav, p), 1, p->unit, p->pgc, out);
+        case DOMAIN_TITLE:
+            return hddvd_vts_get_pgc_links_internal(vts_at(nav, p), 0, 0, p->pgc, out);
+        default:
+            return HDDVD_EINVAL;
+    }
+}
+
+/* Under the angle guess: DVD's block mode (1 first, 2 middle, 3 last) and
+   type (1 angle) in the category's top byte. */
+static unsigned block_mode(uint32_t category)
+{
+    return category >> 30;
+}
+
+static int in_angle_block(uint32_t category)
+{
+    return ((category >> 28) & 3u) == 1u && block_mode(category);
+}
+
+/* At the first cell of an angle block, moves to the cell of the angle in
+   SPRM3. */
+static int pick_angle(hddvd_std_nav *nav, const hddvd_vts_pgc *info)
+{
+    hddvd_vts_cell cell;
+    uint16_t angle = 0;
+    size_t first = nav->at.cell, count = 1;
+    if (cell_info(nav, &nav->at, first, &cell))
+        return HDDVD_EPARSE;
+    if (!in_angle_block(cell.category) || block_mode(cell.category) != 1)
+        return HDDVD_OK;
+    while (first + count < info->cell_count)
+    {
+        if (cell_info(nav, &nav->at, first + count, &cell) || !in_angle_block(cell.category) ||
+            block_mode(cell.category) == 1)
+            break;
+        count++;
+        if (block_mode(cell.category) == 3)
+            break;
+    }
+    hddvd_vm_get_register(nav->vm, SPRM_ANGLE, &angle);
+    if (!angle || angle > count)
+        angle = 1;
+    nav->at.cell = first + angle - 1u;
+    if (cell_info(nav, &nav->at, nav->at.cell, &cell))
+        return HDDVD_EPARSE;
+    /* 1: interleaved, which is not read. */
+    return (cell.category >> 26) & 1u ? 1 : HDDVD_OK;
+}
+
+/* The cell after the current one; under the angle guess, after the angle
+   block the current cell is in. */
+static void advance_cell(hddvd_std_nav *nav)
+{
+    hddvd_vts_cell cell;
+    if ((nav->options & HDDVD_STD_NAV_GUESS_ANGLES) && nav->at.domain == DOMAIN_TITLE)
+        while (!cell_info(nav, &nav->at, nav->at.cell, &cell) && in_angle_block(cell.category) &&
+               block_mode(cell.category) != 3 &&
+               !cell_info(nav, &nav->at, nav->at.cell + 1, &cell) &&
+               in_angle_block(cell.category) && block_mode(cell.category) != 1)
+            nav->at.cell++;
+    nav->at.cell++;
 }
 
 /* Runs the current PGC's commands of one kind: all of them, or for a cell
@@ -315,6 +431,172 @@ static nav_stage play(hddvd_std_nav *nav, const hddvd_vts_pgc *info, hddvd_std_n
     return STAGE_DONE;
 }
 
+static uint16_t be16(const unsigned char *b)
+{
+    return (uint16_t)(b[0] << 8 | b[1]);
+}
+
+/* Reads sector `sector` (0-based) of the current menu cell, with the checks
+   and the sector provider hddvd_titles_read uses. */
+static int menu_sector(hddvd_std_nav *nav, uint32_t sector, unsigned char data[SECTOR])
+{
+    uint64_t at = ((uint64_t)nav->menu_first + sector) * SECTOR;
+    size_t n = 0;
+    int rc = HDDVD_OK;
+    if (!nav->menu_stream || strcmp(nav->menu_stream_uri, nav->menu_uri))
+    {
+        hddvd_stream_close(nav->menu_stream);
+        nav->menu_stream = NULL;
+        rc = hddvd_open_resource(nav->ctx, nav->menu_uri, &nav->menu_stream);
+        if (rc)
+            return rc;
+        memcpy(nav->menu_stream_uri, nav->menu_uri, sizeof(nav->menu_uri));
+    }
+    rc = hddvd_stream_read_at(nav->menu_stream, at, data, SECTOR, &n);
+    if (!rc && n != SECTOR)
+        rc = HDDVD_EPARSE;
+    if (!rc)
+        rc = hddvd_titles_check_sector_internal(data);
+    if (rc == HDDVD_EPROTECTED)
+    {
+        rc = hddvd_titles_provide_internal(nav->titles, nav->menu_uri, (uint32_t)(at / SECTOR),
+                                           data);
+        if (!rc)
+            rc = hddvd_titles_check_sector_internal(data);
+    }
+    if (rc)
+        hddvd_ctx_set_error(nav->ctx, rc, HDDVD_SUBSYSTEM_DISC, nav->menu_uri,
+                            rc == HDDVD_EPROTECTED ? "encrypted menu sector"
+                                                   : "menu sector cannot be read");
+    return rc;
+}
+
+/* The buttons of the menu cell's first navigation pack: its PCI is the
+   private-stream-2 packet whose first byte is 0, and the highlight
+   information follows DVD-Video's layout. */
+static void load_buttons(hddvd_std_nav *nav)
+{
+    unsigned char b[SECTOR];
+    const unsigned char *pci = NULL;
+    size_t at, length = 0, count, i;
+    nav->button_count = 0;
+    if (menu_sector(nav, 0, b))
+        return;
+    at = 14u + (b[13] & 7u);
+    while (at + 7 <= SECTOR && !b[at] && !b[at + 1] && b[at + 2] == 1)
+    {
+        size_t size = (size_t)b[at + 4] << 8 | b[at + 5];
+        if (b[at + 3] == 0xbf && !b[at + 6] && at + 6 + size <= SECTOR)
+        {
+            pci = b + at + 7;
+            length = size - 1;
+            break;
+        }
+        at += 6 + size;
+    }
+    if (!pci || length < PCI_BUTTONS || !(be16(pci + PCI_HLI) & 3u))
+        return;
+    count = pci[PCI_HLI + 17];
+    if (count > MAX_BUTTONS || length < PCI_BUTTONS + count * BUTTON_RECORD)
+        return;
+    for (i = 0; i < count; i++)
+    {
+        const unsigned char *r = pci + PCI_BUTTONS + i * BUTTON_RECORD;
+        hddvd_std_nav_button *button = &nav->buttons[i];
+        unsigned x0 = (unsigned)(r[0] & 0x3f) << 4 | r[1] >> 4;
+        unsigned x1 = (unsigned)(r[1] & 3) << 8 | r[2];
+        unsigned y0 = (unsigned)(r[3] & 0x3f) << 4 | r[4] >> 4;
+        unsigned y1 = (unsigned)(r[4] & 3) << 8 | r[5];
+        uint8_t links[4];
+        size_t k;
+        memset(button, 0, sizeof(*button));
+        button->x = x0;
+        button->y = y0;
+        button->width = x1 >= x0 ? x1 - x0 + 1 : 0;
+        button->height = y1 >= y0 ? y1 - y0 + 1 : 0;
+        for (k = 0; k < 4; k++)
+        {
+            links[k] = (uint8_t)(r[6 + k] & 0x3f);
+            if (links[k] > count)
+                links[k] = 0;
+        }
+        button->up = links[0];
+        button->down = links[1];
+        button->left = links[2];
+        button->right = links[3];
+        button->auto_action = (uint8_t)(r[3] >> 6 == 1);
+        memcpy(nav->button_commands[i], r + 10, 8);
+    }
+    nav->button_count = count;
+}
+
+/* Fills a MENU step for the current cell of a menu or first-play PGC. */
+static nav_stage menu_play(hddvd_std_nav *nav, hddvd_std_nav_step *step)
+{
+    hddvd_vts_cell cell;
+    uint16_t set = nav->at.domain == DOMAIN_VTS_MENU ? nav->sets[nav->at.set].number : 0;
+    if (cell_info(nav, &nav->at, nav->at.cell, &cell))
+        return unsupported(step, "menu cell does not exist");
+    if (cell.last_sector < cell.first_vobu_sector)
+        return unsupported(step, "menu cell ends before it starts");
+    snprintf(nav->menu_uri, sizeof(nav->menu_uri), "file:///dvddisc/HVDVD_TS/HV%03uM01.EVO",
+             (unsigned)set);
+    nav->menu_first = cell.first_vobu_sector;
+    nav->menu_count = cell.last_sector - cell.first_vobu_sector + 1u;
+    nav->menu_still = (uint8_t)(cell.category >> 8);
+    step->kind = HDDVD_STD_NAV_MENU;
+    step->title = SIZE_MAX;
+    step->chapter = 0;
+    step->offset = 0;
+    step->size = (uint64_t)nav->menu_count * SECTOR;
+    step->title_set = set;
+    step->pgc = (uint16_t)(nav->at.pgc + 1);
+    step->cell = (uint16_t)(nav->at.cell + 1);
+    nav->playing = 1;
+    load_buttons(nav);
+    return STAGE_DONE;
+}
+
+/* What the current cell does: a title cell plays (the cell of the angle
+   chosen, under that guess); a menu cell plays only under its guess. */
+static nav_stage enter_cell(hddvd_std_nav *nav, const hddvd_vts_pgc *info, hddvd_std_nav_step *step)
+{
+    if (nav->at.domain != DOMAIN_TITLE)
+        return nav->options & HDDVD_STD_NAV_GUESS_MENU_CELLS
+                   ? menu_play(nav, step)
+                   : unsupported(step, "menu cells are not decoded");
+    if (nav->options & HDDVD_STD_NAV_GUESS_ANGLES)
+    {
+        int rc = pick_angle(nav, info);
+        if (rc == 1)
+            return unsupported(step, "interleaved angle cells are not read");
+        if (rc)
+            return unsupported(step, "angle block cell does not exist");
+    }
+    return play(nav, info, step);
+}
+
+/* Under the PGC link guess: moves to the current PGC's next, previous or
+   parent PGC (0, 1, 2). */
+static nav_stage link_pgc(hddvd_std_nav *nav, unsigned which, hddvd_std_nav_step *step)
+{
+    hddvd_pgc_links links;
+    hddvd_vts_pgc info;
+    nav_position to = nav->at;
+    uint16_t number;
+    if (!(nav->options & HDDVD_STD_NAV_GUESS_PGC_LINKS))
+        return unsupported(step, "link instruction is not modelled");
+    if (nav->at.domain == DOMAIN_FIRST_PLAY || links_info(nav, &nav->at, &links))
+        return unsupported(step, "the first-play program chain has no PGC links");
+    number = which == 0 ? links.next : which == 1 ? links.previous : links.parent;
+    to.pgc = number ? (size_t)number - 1 : SIZE_MAX;
+    if (!number || pgc_info(nav, &to, &info))
+        return unsupported(step, "link to a program chain that does not exist");
+    nav->at = to;
+    nav->entry_cell = 0;
+    return STAGE_ENTER;
+}
+
 /* The title set commands refer to: the one whose menu or title is
    running, else the one last played. */
 static size_t current_set(const hddvd_std_nav *nav)
@@ -448,7 +730,7 @@ static nav_stage dispatch(hddvd_std_nav *nav, const hddvd_vm_result *r, nav_stag
         case 1:
             return STAGE_CELL;
         case 2:
-            nav->at.cell++;
+            advance_cell(nav);
             return STAGE_CELL;
         case 3:
             if (nav->at.cell)
@@ -477,6 +759,10 @@ static nav_stage dispatch(hddvd_std_nav *nav, const hddvd_vm_result *r, nav_stag
         case 9:
             nav->entry_cell = 0;
             return STAGE_ENTER;
+        case 10:
+        case 11:
+        case 12:
+            return link_pgc(nav, r->target - 10u, step);
         case 13:
             return STAGE_POST;
         case 16:
@@ -486,7 +772,6 @@ static nav_stage dispatch(hddvd_std_nav *nav, const hddvd_vm_result *r, nav_stag
             nav->has_resume = 0;
             return STAGE_CELL;
         default:
-            /* Next, previous and parent PGC numbers are not decoded. */
             return unsupported(step, "link instruction is not modelled");
     }
 }
@@ -497,6 +782,7 @@ static int follow(hddvd_std_nav *nav, nav_stage stage, hddvd_std_nav_step *step)
     unsigned transfers = 0;
     memset(step, 0, sizeof(*step));
     nav->playing = 0;
+    nav->button_count = 0;
     while (stage != STAGE_DONE)
     {
         hddvd_vm_result result;
@@ -516,27 +802,33 @@ static int follow(hddvd_std_nav *nav, nav_stage stage, hddvd_std_nav_step *step)
             case STAGE_CELL:
                 if (pgc_info(nav, &nav->at, &info))
                     return fail(nav, HDDVD_EPARSE, "program chain does not exist");
-                if (nav->at.cell >= info.cell_count)
-                    stage = STAGE_POST;
-                else if (nav->at.domain != DOMAIN_TITLE)
-                    stage = unsupported(step, "menu cells are not decoded");
-                else
-                    stage = play(nav, &info, step);
+                stage = nav->at.cell >= info.cell_count ? STAGE_POST : enter_cell(nav, &info, step);
                 break;
             case STAGE_POST:
                 rc = run_commands(nav, HDDVD_VTS_POST_COMMAND, 0, &result);
                 if (rc)
                     return rc;
                 /* The next PGC's number is not decoded, so a PGC whose post
-                   commands do not leave it ends playback. */
+                   commands do not leave it ends playback, unless its next
+                   PGC is guessed. */
                 stage = dispatch(nav, &result, STAGE_DONE, step);
                 if (stage == STAGE_DONE && !step->kind)
-                    stop(step, HDDVD_STD_NAV_STOP, "end of the program chain");
+                {
+                    hddvd_pgc_links links;
+                    if ((nav->options & HDDVD_STD_NAV_GUESS_PGC_LINKS) &&
+                        nav->at.domain != DOMAIN_FIRST_PLAY && !links_info(nav, &nav->at, &links) &&
+                        links.next)
+                        stage = link_pgc(nav, 0, step);
+                    else
+                        stop(step, HDDVD_STD_NAV_STOP, "end of the program chain");
+                }
                 break;
             default:
                 break;
         }
     }
+    if (step->kind == HDDVD_STD_NAV_PLAY || step->kind == HDDVD_STD_NAV_MENU)
+        nav->last = *step;
     hddvd_clear_error(nav->ctx);
     return HDDVD_OK;
 }
@@ -552,6 +844,7 @@ void hddvd_std_nav_close(hddvd_std_nav *nav)
     hddvd_vmg_close(nav->vmg);
     hddvd_titles_close(nav->titles);
     hddvd_vm_destroy(nav->vm);
+    hddvd_stream_close(nav->menu_stream);
     free(nav);
 }
 
@@ -651,6 +944,31 @@ int hddvd_std_nav_select_title(hddvd_std_nav *nav, size_t title, size_t chapter,
     return follow(nav, STAGE_ENTER, step);
 }
 
+int hddvd_std_nav_seek(hddvd_std_nav *nav, size_t title, uint64_t offset, hddvd_std_nav_step *step)
+{
+    hddvd_vmg_title entry;
+    nav_position to;
+    uint16_t pgc;
+    size_t cell, set;
+    if (!nav || !step || title >= hddvd_titles_count(nav->titles) ||
+        hddvd_vmg_get_title(nav->vmg, title, &entry) ||
+        hddvd_titles_cell_at_internal(nav->titles, title, offset, &pgc, &cell))
+        return HDDVD_EINVAL;
+    for (set = 0; set < nav->set_count && nav->sets[set].number != entry.title_set; set++)
+        ;
+    if (set == nav->set_count)
+        return HDDVD_EINVAL;
+    memset(&to, 0, sizeof(to));
+    to.domain = DOMAIN_TITLE;
+    to.set = set;
+    to.pgc = (size_t)pgc - 1;
+    to.cell = cell;
+    nav->at = to;
+    nav->has_resume = 0;
+    /* No commands run: the cell plays as if playback had reached it. */
+    return follow(nav, STAGE_CELL, step);
+}
+
 int hddvd_std_nav_start(hddvd_std_nav *nav, hddvd_std_nav_step *step)
 {
     hddvd_vts_pgc info;
@@ -674,7 +992,7 @@ int hddvd_std_nav_next(hddvd_std_nav *nav, hddvd_std_nav_step *step)
     int rc;
     if (!nav || !step || !nav->playing)
         return HDDVD_EINVAL;
-    if (hddvd_vts_get_cell(vts_at(nav, &nav->at), nav->at.pgc, nav->at.cell, &cell))
+    if (cell_info(nav, &nav->at, nav->at.cell, &cell))
         return fail(nav, HDDVD_EPARSE, "cell does not exist");
     memset(&result, 0, sizeof(result));
     rc = cell.command ? run_commands(nav, HDDVD_VTS_CELL_COMMAND, cell.command, &result) : HDDVD_OK;
@@ -682,13 +1000,14 @@ int hddvd_std_nav_next(hddvd_std_nav *nav, hddvd_std_nav_step *step)
         return rc;
     memset(step, 0, sizeof(*step));
     nav->playing = 0;
+    nav->button_count = 0;
     /* Without a cell command, or after one that ran through, the next
        cell plays. */
     if (result.action == HDDVD_VM_END ||
         (result.action == HDDVD_VM_LINK && result.link == HDDVD_VM_LINK_INSTRUCTION &&
          !result.target))
     {
-        nav->at.cell++;
+        advance_cell(nav);
         return follow(nav, STAGE_CELL, step);
     }
     stage = dispatch(nav, &result, STAGE_CELL, step);
@@ -717,4 +1036,126 @@ int hddvd_std_nav_menu(hddvd_std_nav *nav, unsigned menu_id, hddvd_std_nav_step 
     nav->at = to;
     nav->entry_cell = 0;
     return follow(nav, STAGE_ENTER, step);
+}
+
+int hddvd_std_nav_set_options(hddvd_std_nav *nav, unsigned options)
+{
+    if (!nav || (options & ~GUESSES))
+        return HDDVD_EINVAL;
+    nav->options = options;
+    return HDDVD_OK;
+}
+
+int hddvd_std_nav_set_angle(hddvd_std_nav *nav, unsigned angle)
+{
+    if (!nav || angle < 1 || angle > 9)
+        return HDDVD_EINVAL;
+    return hddvd_vm_set_register(nav->vm, SPRM_ANGLE, (uint16_t)angle);
+}
+
+static int menu_playing(const hddvd_std_nav *nav)
+{
+    return nav && nav->playing && nav->at.domain != DOMAIN_TITLE;
+}
+
+int hddvd_std_nav_get_menu_cell(const hddvd_std_nav *nav, hddvd_std_nav_menu_cell *out)
+{
+    if (!menu_playing(nav) || !out)
+        return HDDVD_EINVAL;
+    out->evo_uri = nav->menu_uri;
+    out->first_sector = nav->menu_first;
+    out->sector_count = nav->menu_count;
+    out->still = nav->menu_still;
+    return HDDVD_OK;
+}
+
+int hddvd_std_nav_read_menu(hddvd_std_nav *nav, uint64_t offset, void *buffer, size_t size,
+                            size_t *got)
+{
+    unsigned char sector[SECTOR], *out = buffer;
+    uint64_t end;
+    size_t done = 0;
+    if (got)
+        *got = 0;
+    if (!menu_playing(nav) || !got || (!buffer && size))
+        return HDDVD_EINVAL;
+    end = (uint64_t)nav->menu_count * SECTOR;
+    while (done < size && offset < end)
+    {
+        size_t skip = (size_t)(offset % SECTOR), take = SECTOR - skip;
+        int rc = menu_sector(nav, (uint32_t)(offset / SECTOR), sector);
+        if (rc)
+        {
+            *got = done;
+            return rc;
+        }
+        if (take > size - done)
+            take = size - done;
+        memcpy(out + done, sector + skip, take);
+        done += take;
+        offset += take;
+    }
+    *got = done;
+    hddvd_clear_error(nav->ctx);
+    return HDDVD_OK;
+}
+
+size_t hddvd_std_nav_button_count(const hddvd_std_nav *nav)
+{
+    return menu_playing(nav) ? nav->button_count : 0;
+}
+
+int hddvd_std_nav_get_button(const hddvd_std_nav *nav, size_t index, hddvd_std_nav_button *out)
+{
+    if (!menu_playing(nav) || !out || index >= nav->button_count)
+        return HDDVD_EINVAL;
+    *out = nav->buttons[index];
+    return HDDVD_OK;
+}
+
+unsigned hddvd_std_nav_selected_button(const hddvd_std_nav *nav)
+{
+    uint16_t value = 0;
+    unsigned button;
+    if (!menu_playing(nav) || !nav->button_count)
+        return 0;
+    hddvd_vm_get_register(nav->vm, SPRM_BUTTON, &value);
+    button = value / 1024u;
+    return button && button <= nav->button_count ? button : 1;
+}
+
+int hddvd_std_nav_select_button(hddvd_std_nav *nav, unsigned button)
+{
+    if (!menu_playing(nav) || !button || button > nav->button_count)
+        return HDDVD_EINVAL;
+    return hddvd_vm_set_register(nav->vm, SPRM_BUTTON, (uint16_t)(button * 1024u));
+}
+
+int hddvd_std_nav_activate_button(hddvd_std_nav *nav, hddvd_std_nav_step *step)
+{
+    hddvd_vm_result result;
+    hddvd_std_nav_step again;
+    nav_stage stage;
+    unsigned button;
+    int rc;
+    if (!menu_playing(nav) || !step || !nav->button_count)
+        return HDDVD_EINVAL;
+    button = hddvd_std_nav_selected_button(nav);
+    rc = hddvd_vm_run(nav->vm, nav->button_commands[button - 1], 1, 0, &result);
+    if (rc)
+        return fail(nav, rc, "button command failed");
+    again = nav->last;
+    memset(step, 0, sizeof(*step));
+    stage = dispatch(nav, &result, STAGE_DONE, step);
+    if (stage == STAGE_DONE)
+    {
+        /* A command that goes nowhere: the menu stays. */
+        if (!step->kind)
+            *step = again;
+        else
+            nav->playing = 0;
+        hddvd_clear_error(nav->ctx);
+        return HDDVD_OK;
+    }
+    return follow(nav, stage, step);
 }

@@ -494,7 +494,7 @@ static int native_node(hddvd_runtime *runtime, unsigned index, const hddvd_engin
     const char *name, *value;
     double which, part;
     size_t at;
-    int state, rc;
+    int state = 0, rc;
     if (!arg_node(runtime, args, count, &at, message))
         return HDDVD_EINVAL;
     if (hddvd_xmu_get_node(runtime->xmu, at, &node))
@@ -753,6 +753,20 @@ int hddvd_runtime_key(hddvd_runtime *runtime, uint32_t key, int down, int *preve
     if (prevented && (rc == HDDVD_OK || rc == HDDVD_ESCRIPT))
         *prevented = result == 1.0;
     return rc;
+}
+
+int hddvd_runtime_pointer(hddvd_runtime *runtime, size_t node, int pressed)
+{
+    hddvd_engine_value args[2];
+    if (!runtime ||
+        (node != SIZE_MAX && (!runtime->xmu || node >= hddvd_xmu_node_count(runtime->xmu))))
+        return HDDVD_EINVAL;
+    memset(args, 0, sizeof(args));
+    args[0].type = HDDVD_ENGINE_NUMBER;
+    args[0].number = node == SIZE_MAX ? -1.0 : (double)node;
+    args[1].type = HDDVD_ENGINE_BOOLEAN;
+    args[1].number = pressed ? 1.0 : 0.0;
+    return hddvd_runtime_run_entry(runtime, "pointer", args, 2, NULL);
 }
 
 int hddvd_runtime_advance(hddvd_runtime *runtime, hddvd_time now)

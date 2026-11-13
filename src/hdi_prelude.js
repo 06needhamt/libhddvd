@@ -31,6 +31,9 @@
     var sequence = 0;
     var now = 0;
     var markupHandler = null;
+    /* The element under the pointer (-1 for none), its document and
+       whether the button is down on it. */
+    var pointerNode = -1, pointerEpoch = 0, pointerDown = false;
     var wrappers = [];
     var idProperties = [];
 
@@ -1525,6 +1528,32 @@
             }
             runTiming();
             return proceed ? 0 : 1;
+        },
+        /* The pointer is over `node` (-1: over nothing), button down or
+           not. The element gets state pointer and the focus, and actioned
+           while the button is down on it. */
+        pointer: function (node, down) {
+            var epoch = native.epoch();
+            if (pointerEpoch !== epoch) {
+                pointerNode = -1;
+                pointerDown = false;
+            }
+            if (pointerNode >= 0 && pointerNode !== node) {
+                native.setState(epoch, pointerNode, 'pointer', 'false');
+                if (pointerDown)
+                    native.setState(epoch, pointerNode, 'actioned', 'false');
+                pointerDown = false;
+            }
+            pointerEpoch = epoch;
+            pointerNode = epoch ? node : -1;
+            if (pointerNode >= 0) {
+                native.setState(epoch, node, 'pointer', 'true');
+                native.setState(epoch, node, 'focused', 'true');
+                if (down !== pointerDown)
+                    native.setState(epoch, node, 'actioned', down ? 'true' : 'false');
+                pointerDown = down;
+            }
+            runTiming();
         },
         advance: function (ticks) {
             now = ticks;

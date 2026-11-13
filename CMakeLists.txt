@@ -115,6 +115,7 @@ set(HDDVD_SOURCES
     src/io.c
     src/limits.c
     src/map.c
+    src/menu.c
     src/object.c
     src/player.c
     src/resource.c
@@ -237,7 +238,7 @@ foreach(tool info menuinfo menurun acainfo acaextract scriptdump scriptinfo xpli
 endforeach()
 
 if(BUILD_TESTING)
-    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom runtime_player runtime_bridge runtime_timing vts vm titles titles_playlist std_nav)
+    foreach(test core disc io object uri resource application xpl xmf xmu style aca evo script_decode display events player limits ifo map title_map scene runtime runtime_dom runtime_player runtime_bridge runtime_timing vts vm titles titles_playlist std_nav std_nav_guesses menu)
         add_executable(test-${test} tests/test_${test}.c)
         target_link_libraries(test-${test} PRIVATE hddvd)
         # Test assertions also perform setup and must run in Release builds.
@@ -265,6 +266,10 @@ if(BUILD_TESTING)
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
     target_compile_definitions(test-std_nav PRIVATE
         HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+    target_compile_definitions(test-std_nav_guesses PRIVATE
+        HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+    target_compile_definitions(test-menu PRIVATE
+        HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 
     # Concurrent use of separate objects; the CI tsan job runs it under
     # ThreadSanitizer. POSIX threads only.
@@ -276,6 +281,14 @@ if(BUILD_TESTING)
         target_compile_definitions(test-threads PRIVATE
             HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
         add_test(NAME threads COMMAND test-threads)
+        # A mock player host: threads post input, time and resizes to the
+        # one worker that owns a menu session.
+        add_executable(test-menu_threads tests/test_menu_threads.c)
+        target_link_libraries(test-menu_threads PRIVATE hddvd Threads::Threads)
+        target_compile_options(test-menu_threads PRIVATE -UNDEBUG)
+        target_compile_definitions(test-menu_threads PRIVATE
+            HDDVD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+        add_test(NAME menu_threads COMMAND test-menu_threads)
     endif()
 
     if(HDDVD_ENABLE_REFERENCE_TESTS)
@@ -355,6 +368,14 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard)
     set_tests_properties(titles-fixture PROPERTIES PASS_REGULAR_EXPRESSION
         "standard-content titles=2.*title 1 duration=2.502s sectors=20 chapters=2 extents=2 title-set=1/1.*read ok.*navigate play title=2 chapter=1 sectors=0\\+16 pgc=2 cell=1.*navigate play title=1 chapter=2 sectors=12\\+8 pgc=1 cell=2.*summary ok")
+    # The navigator's guesses on the synthetic disc laid out as DVD-Video
+    # would be: first play's cell, the title menu and its buttons, then the
+    # title through its angle block.
+    add_test(NAME titles-guesses
+        COMMAND hddvd-titles --navigate 5 --guess
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/guesses)
+    set_tests_properties(titles-guesses PROPERTIES PASS_REGULAR_EXPRESSION
+        "navigate menu title-set=0 pgc=1 cell=1 evo=file:///dvddisc/HVDVD_TS/HV000M01.EVO sectors=8\\+4 still=0 buttons=0.*navigate menu title-set=0 pgc=1 cell=1 evo=[^ ]* sectors=0\\+4 still=255 buttons=2.*button 1 at 100,300 size 200x50 up=0 down=2 left=0 right=2.*press button 1.*navigate play title=1 chapter=1 sectors=0\\+8 pgc=1 cell=1.*navigate play title=1 chapter=1 sectors=8\\+4 pgc=1 cell=2.*navigate play title=1 chapter=1 sectors=16\\+4 pgc=1 cell=4.*summary ok")
     add_test(NAME titles-no-disc
         COMMAND hddvd-titles ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/objects)
     set_tests_properties(titles-no-disc PROPERTIES WILL_FAIL TRUE)

@@ -318,6 +318,168 @@ standard = {"HVDVD_TS/HV000I01.IFO": std_vmg(), "HVDVD_TS/HV001I01.IFO": std_vts
             "menu-loop.IFO": std_vmg([bytes([0x20, 0x04, 0, 0, 0, 0, 0, 1])]),
             "menu-resume.IFO": std_vmg([bytes([0x20, 0x01, 0, 0, 0, 0, 0, 0x10])])}
 
+# A second Standard Content disc for hddvd_std_nav's opt-in guesses, which
+# read DVD-Video's layout where HD DVD's is unknown (none of this has been
+# seen on a disc): PGC header fields at 0x9c (next, previous and parent PGC,
+# still time), DVD's first cell byte in the top byte of the cell category
+# (block mode, block type, interleaved), the still time in its third byte,
+# and highlight information at PCI offset 0x60 of a navigation pack.
+GUESSES = Path(__file__).resolve().parent / "guesses"
+LINK = lambda n: bytes([0x20, 0x01, 0, 0, 0, 0, 0, n])      # LinkSIns n
+JUMP_TT = lambda n: bytes([0x30, 0x02, 0, 0, 0, n, 0, 0])    # JumpTT n
+JUMP_TITLE_MENU = bytes([0x30, 0x06, 0, 0, 0, 0x92, 0, 0])   # JumpSS to the title menu
+NOP = bytes(8)
+
+def guess_pgc(cells, programs=(1,), pre=(), post=(), cell_commands=(), links=(0, 0, 0, 0)):
+    """A PGC with cells, each (first byte of the category, still, VOBU
+    count, first sector, cell command, EVOB id, cell id)."""
+    commands = list(pre) + list(post) + list(cell_commands)
+    table = (struct.pack(">HHHI", len(pre), len(post), len(cell_commands), 10 + 8 * len(commands) - 1)
+             + b"".join(commands))
+    program_map = b"".join(struct.pack(">H", p) for p in programs)
+    playback, positions, frames = b"", b"", 0
+    for flags, still, vobus, first, command, evob, cell_id in cells:
+        frames += vobus * 15
+        playback += (bytes([flags, 0, still, 0]) + std_time(vobus * 15) +
+                     struct.pack(">IIII", first, 0, first + (vobus - 1) * VOBU_SECTORS,
+                                 first + vobus * VOBU_SECTORS - 1) + bytes([0x10 if command else 0, command, 0, 0]))
+        positions += struct.pack(">HBB", evob, 0, cell_id)
+    offsets = [0xb0]
+    for part in (table, program_map, playback):
+        offsets.append(offsets[-1] + len(part))
+    header = (struct.pack(">HH", len(programs), len(cells)) + std_time(frames) + bytes(0x9c - 8) +
+              struct.pack(">HHHB", *links) + bytes(0xa8 - 0xa3) + struct.pack(">HHHH", *offsets))
+    return header + table + program_map + playback + positions
+
+def guess_vobus(count, buttons=(), scrambled=None):
+    """VOBUs of four sectors: a navigation pack (whose PCI carries the
+    buttons, each (x, y, width, height, up, down, left, right, auto action,
+    command), in every VOBU), then video, audio and subpicture packs; the
+    audio pack of VOBU `scrambled` has its PES scrambling bits set."""
+    out = bytearray()
+    for vobu in range(count):
+        pack = bytearray(b"\x00\x00\x01\xba\x44\x00\x04\x00\x04\x01\x01\x89\xc3\xf8")
+        pack += b"\x00\x00\x01\xbb\x00\x06" + bytes(6)
+        pci = bytearray(0x3d1)
+        pci[1:5] = struct.pack(">I", vobu * VOBU_SECTORS)
+        if buttons:
+            pci[0x61:0x63] = struct.pack(">H", 1)
+            pci[0x61 + 17] = len(buttons)
+            for i, (x, y, w, h, up, down, left, right, auto, command) in enumerate(buttons):
+                x1, y1 = x + w - 1, y + h - 1
+                pci[0x8f + 18 * i:0x8f + 18 * (i + 1)] = bytes([
+                    x >> 4, (x & 15) << 4 | x1 >> 8, x1 & 0xff,
+                    auto << 6 | y >> 4, (y & 15) << 4 | y1 >> 8, y1 & 0xff,
+                    up, down, left, right]) + command
+        pack += b"\x00\x00\x01\xbf" + struct.pack(">H", len(pci)) + pci
+        pack += b"\x00\x00\x01\xbe" + struct.pack(">H", 2048 - len(pack) - 6)
+        out += pack + b"\xff" * (2048 - len(pack))
+        for kind in range(VOBU_SECTORS - 1):
+            filler = bytearray(b"\x00\x00\x01\xba\x44\x00\x04\x00\x04\x01\x01\x89\xc3\xf8")
+            filler += [b"\x00\x00\x01\xe0\x00\x07\x81\x00\x00\x00\x00\x01\xb3",
+                       b"\x00\x00\x01\xbd\x00\x05" + bytes([0x91 if vobu == scrambled else 0x81]) +
+                       b"\x00\x00\xc0\x01",
+                       b"\x00\x00\x01\xbd\x00\x05\x81\x00\x00\x20\x00"][kind]
+            filler += b"\x00\x00\x01\xbe" + struct.pack(">H", 2048 - len(filler) - 6)
+            out += filler + b"\xff" * (2048 - len(filler))
+    return bytes(out)
+
+# Title cells, all in EVOB 1: (category byte, VOBUs). Cells 2 and 3 are an
+# angle block (first, last: block type 1).
+GUESS_TITLE_CELLS = [(0, 2), (0x50, 1), (0xd0, 1), (0, 1), (0, 2)]
+
+def guess_vts(angle_flags=0):
+    first = [0]
+    for _, vobus in GUESS_TITLE_CELLS:
+        first.append(first[-1] + vobus * VOBU_SECTORS)
+    cell = lambda k, command=0: (GUESS_TITLE_CELLS[k][0] | (angle_flags if GUESS_TITLE_CELLS[k][0] else 0),
+                                 0, GUESS_TITLE_CELLS[k][1], first[k], command, 1, k + 1)
+    # Title 1: chapter 1 is PGC 1 (cells 1 to 4, next PGC 2, no post
+    # commands), chapter 2 is PGC 2 (cell 5, whose command is LinkPrevPGC).
+    pgcs = [guess_pgc([cell(0), cell(1), cell(2), cell(3)], links=(2, 0, 0, 0)),
+            guess_pgc([cell(4, 1)], cell_commands=[LINK(11)], links=(0, 1, 1, 0))]
+    ptt = std_table(1, struct.pack(">I", 12) + struct.pack(">HHHH", 1, 1, 2, 1))
+    pointers, body = b"", b""
+    for number, pgc in enumerate(pgcs, 1):
+        pointers += bytes([0x80, 1, 0, 0]) + bytes(4) + struct.pack(">I", 8 + 12 * len(pgcs) + len(body))
+        body += pgc
+    pgcit = std_table(len(pgcs), pointers + body)
+    maps = []
+    for cells in ([0, 1, 2, 3], [4]):
+        vobus = [(c, first[c] // VOBU_SECTORS + i) for c in cells for i in range(GUESS_TITLE_CELLS[c][1])]
+        entries = [vobus[(k * 90000) // VOBU_TICKS] for k in range(1, len(vobus) * VOBU_TICKS // 90000 + 1)]
+        words = b"".join(struct.pack(">I", v * VOBU_SECTORS | (0x80000000 if k + 1 == len(entries) or
+                                                               entries[k + 1][0] != c else 0))
+                         for k, (c, v) in enumerate(entries))
+        maps.append(bytes([1, 0]) + struct.pack(">H", len(entries)) + words)
+    map_offsets, map_body = b"", b""
+    for m in maps:
+        map_offsets += struct.pack(">I", 8 + 4 * len(maps) + len(map_body))
+        map_body += m
+    tmapt = std_table(len(maps), map_offsets + map_body)
+    cadt = std_table(1, b"".join(struct.pack(">HBBII", 1, 0, k + 1, first[k], first[k + 1] - 1)
+                                 for k in range(len(GUESS_TITLE_CELLS))))
+    vobu_count = first[-1] // VOBU_SECTORS
+    admap = struct.pack(">I", 4 + 4 * vobu_count - 1) + b"".join(
+        struct.pack(">I", v * VOBU_SECTORS) for v in range(vobu_count))
+    # The root menu (menu id 3): one cell of HV001M01.EVO, still until a
+    # button; its one button resumes.
+    menus = std_menus([(b"en", [(bytes([0x82, 0x30, 0, 0]),
+                                 guess_pgc([(0, 255, 1, 0, 0, 1, 1)]))])])
+    tables = [ptt, pgcit, tmapt, cadt, admap, menus]
+    ifo_sectors = 1 + len(tables)
+    head = bytearray(2048)
+    head[0:12] = b"STANDARD-VTS"
+    head[0x214:0x218] = bytes([0x2b, 0x08, 0xc0, 0])
+    head[0x0c:0x10] = struct.pack(">I", 2 * ifo_sectors + first[-1] - 1)
+    head[0x1c:0x20] = struct.pack(">I", ifo_sectors - 1)
+    head[0x20:0x22] = struct.pack(">H", 0x10)
+    head[0x80:0x84] = struct.pack(">I", 0x7ff)
+    for field, value in ((0xc4, ifo_sectors), (0xc8, 1), (0xcc, 2), (0xd4, 3), (0xe0, 4), (0xe4, 5),
+                         (0xd0, 6)):
+        head[field:field + 4] = struct.pack(">I", value)
+    return bytes(head) + b"".join(sectors(t) for t in tables)
+
+def guess_vmg(next_pgc=2, first_play_sector=8):
+    titles = bytes([0x3c, 1, 0, 0]) + struct.pack(">HHHHI", 2, 0, 1, 1, 8)
+    sets = std_table(1, struct.pack(">I", 12) + bytes(4))
+    head = bytearray(2048)
+    head[0:12] = b"HVDVD-VMG100"
+    head[0x0c:0x10] = struct.pack(">I", 7)
+    head[0x1c:0x20] = struct.pack(">I", 3)
+    head[0xc4:0xc8] = struct.pack(">I", 1)
+    head[0xd0:0xd4] = struct.pack(">I", 2)
+    # The title menu (menu id 2), cell 1 of HV000M01.EVO, still until a
+    # button: button 1 plays title 1, button 2 links to the next PGC. PGC 2
+    # (cell 2): button 1 goes up to its parent, PGC 1; button 2 does nothing.
+    menus = std_menus([(b"en", [
+        (bytes([0x82, 0x20, 0, 0]), guess_pgc([(0, 255, 1, 0, 0, 1, 1)], links=(next_pgc, 0, 0, 0))),
+        (bytes([0x02, 0x20, 0, 0]), guess_pgc([(0, 255, 1, 4, 0, 1, 2)], links=(0, 1, 1, 0)))])])
+    head[0xc8:0xcc] = struct.pack(">I", 3)
+    # First play: one cell (VOBU 3 of HV000M01.EVO, no still), then JumpSS
+    # to the title menu.
+    first_play = guess_pgc([(0, 0, 1, first_play_sector, 0, 1, 3)], post=[JUMP_TITLE_MENU])
+    head[0x80:0x84] = struct.pack(">I", 0x7ff)
+    head[0x84:0x88] = struct.pack(">I", 0x400)
+    head[0x400:0x400 + len(first_play)] = first_play
+    return bytes(head) + sectors(std_table(1, titles)) + sectors(sets) + sectors(menus)
+
+VMG_BUTTONS = [(100, 300, 200, 50, 0, 2, 0, 2, 0, JUMP_TT(1)),
+               (400, 300, 200, 50, 1, 0, 1, 0, 0, LINK(10))]
+guesses = {"HVDVD_TS/HV000I01.IFO": guess_vmg(), "HVDVD_TS/HV001I01.IFO": guess_vts(),
+           "HVDVD_TS/HV001T01.EVO": guess_vobus(sum(v for _, v in GUESS_TITLE_CELLS)),
+           # Title menu VOBU (its audio scrambled), PGC 2's VOBU, first play's.
+           "HVDVD_TS/HV000M01.EVO": (guess_vobus(1, VMG_BUTTONS, scrambled=0) +
+                                     guess_vobus(1, [(100, 300, 200, 50, 0, 0, 0, 2, 0, LINK(12)),
+                                                     (400, 300, 200, 50, 0, 0, 1, 0, 0, NOP)]) +
+                                     guess_vobus(1)),
+           "HVDVD_TS/HV001M01.EVO": guess_vobus(1, [(10, 10, 100, 40, 0, 0, 0, 0, 0, LINK(16))]),
+           # Variants: interleaved angle cells, a title menu whose next PGC
+           # does not exist, and a first-play cell past the end of its EVO.
+           "angle-interleaved.IFO": guess_vts(angle_flags=0x04),
+           "bad-next.IFO": guess_vmg(next_pgc=9),
+           "fp-past-end.IFO": guess_vmg(first_play_sector=12)}
+
 # Original scripts for tools/inventory_hdi_scripts.py, in each container the
 # tool reads: bare UTF-16 with a byte-order mark, the clear AACS envelope, and
 # a protected envelope it must skip.
@@ -579,6 +741,9 @@ fuzz_seeds = {
     "titles/evo-sectors.bin": b"\0" + std_evo()[:4 * 2048],
     "titles/title-set.bin": b"\1" + std_vts(),
     "titles/vmg.bin": b"\2" + std_vmg(),
+    "titles/guess-title-set.bin": b"\1" + guess_vts(),
+    "titles/guess-vmg.bin": b"\2" + guess_vmg(),
+    "titles/guess-menu-evo.bin": b"\5" + guess_vobus(1, VMG_BUTTONS),
     "titles/time-map.bin": b"\3" + tmap(),
     "titles/playlist.bin": (
         b"\4<Playlist xmlns='http://www.dvdforum.org/2005/HDDVDVideo/Playlist'>"
@@ -664,6 +829,13 @@ for path in HDI_API.iterdir():
     if path.is_file(): path.unlink()
 for name, data in sorted(hdi_api.items()):
     (HDI_API / name).write_bytes(data)
+
+(GUESSES / "HVDVD_TS").mkdir(parents=True, exist_ok=True)
+for directory in (GUESSES, GUESSES / "HVDVD_TS"):
+    for path in directory.iterdir():
+        if path.is_file(): path.unlink()
+for name, data in sorted(guesses.items()):
+    (GUESSES / name).write_bytes(data)
 
 (STANDARD / "HVDVD_TS").mkdir(parents=True, exist_ok=True)
 for directory in (STANDARD, STANDARD / "HVDVD_TS"):

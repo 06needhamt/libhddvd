@@ -27,6 +27,9 @@
 #define PGC_SEARCH_POINTER 12u
 #define PGC_TABLE_OFFSETS 0xa8u
 #define PGC_HEADER 0xb0u
+/* DVD-Video's next, previous and parent PGC numbers and still time, which
+   hddvd_std_nav reads only when told to guess (unconfirmed for HD DVD). */
+#define PGC_DVD_LINKS 0x9cu
 #define CELL_RECORD 28u
 #define CELL_POSITION 4u
 #define CELL_ADDRESS 12u
@@ -57,6 +60,7 @@ typedef struct vts_pgc
     uint8_t map_unit;
     size_t map_count;
     hddvd_vts_map_entry *map;
+    hddvd_pgc_links links;
 } vts_pgc;
 
 /* A menu language unit and its PGCs. */
@@ -371,6 +375,10 @@ static int parse_pgc(const ifo *f, const table *t, size_t offset, hddvd_vts *vts
         return HDDVD_EPARSE;
     if (pgc->info.program_count > pgc->info.cell_count)
         return HDDVD_EPARSE;
+    pgc->links.next = be16(h + PGC_DVD_LINKS);
+    pgc->links.previous = be16(h + PGC_DVD_LINKS + 2);
+    pgc->links.parent = be16(h + PGC_DVD_LINKS + 4);
+    pgc->links.still = h[PGC_DVD_LINKS + 6];
     commands_at = offset + be16(h + PGC_TABLE_OFFSETS);
     programs_at = offset + be16(h + PGC_TABLE_OFFSETS + 2);
     cells_at = offset + be16(h + PGC_TABLE_OFFSETS + 4);
@@ -1106,4 +1114,40 @@ int hddvd_vmg_get_first_play_command(const hddvd_vmg *vmg, hddvd_vts_command_kin
     if (!vmg->has_first_play)
         return HDDVD_ENOTFOUND;
     return get_command(&vmg->first_play, kind, index, command);
+}
+
+int hddvd_vts_get_pgc_links_internal(const hddvd_vts *vts, int menu, size_t unit, size_t pgc,
+                                     hddvd_pgc_links *out)
+{
+    const vts_pgc *p;
+    if (!vts || !out)
+        return HDDVD_EINVAL;
+    p = menu ? menu_pgc(vts->menu_units, vts->menu_unit_count, unit, pgc)
+             : (pgc < vts->pgc_count ? &vts->pgcs[pgc] : NULL);
+    if (!p)
+        return HDDVD_EINVAL;
+    *out = p->links;
+    return HDDVD_OK;
+}
+
+int hddvd_vmg_get_pgc_links_internal(const hddvd_vmg *vmg, int first_play, size_t unit, size_t pgc,
+                                     hddvd_pgc_links *out)
+{
+    const vts_pgc *p;
+    if (!vmg || !out)
+        return HDDVD_EINVAL;
+    p = first_play ? (vmg->has_first_play ? &vmg->first_play : NULL)
+                   : menu_pgc(vmg->menu_units, vmg->menu_unit_count, unit, pgc);
+    if (!p)
+        return HDDVD_EINVAL;
+    *out = p->links;
+    return HDDVD_OK;
+}
+
+int hddvd_vmg_get_first_play_cell_internal(const hddvd_vmg *vmg, size_t cell, hddvd_vts_cell *out)
+{
+    if (!vmg || !out || !vmg->has_first_play || cell >= vmg->first_play.info.cell_count)
+        return HDDVD_EINVAL;
+    *out = vmg->first_play.cells[cell];
+    return HDDVD_OK;
 }
