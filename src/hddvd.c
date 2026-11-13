@@ -4,7 +4,7 @@
 #include <string.h>
 const char *hddvd_version(void)
 {
-    return "0.5.0";
+    return "0.6.0";
 }
 uint32_t hddvd_abi_version(void)
 {

@@ -6,6 +6,7 @@ includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 Name: libhddvd
 Description: HD DVD resource, inspection, display-list, and navigation library
 Version: @PROJECT_VERSION@
+License: LGPL-2.1-or-later
 Libs: -L${libdir} -lhddvd
 Requires.private: libxml-2.0
 Libs.private: @HDDVD_PC_LIBS_PRIVATE@

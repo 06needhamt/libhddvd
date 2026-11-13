@@ -1,4 +1,4 @@
-# libhddvd 0.5.0
+# libhddvd 0.6.0
 
 Experimental open-source HD DVD inspection library.
 
@@ -180,7 +180,7 @@ engine (`hddvd_runtime_engine()` names it). No feature bit implies complete HDi
 menu conformance.
 
 ```cmake
-find_package(hddvd 0.5 CONFIG REQUIRED)
+find_package(hddvd 0.6 CONFIG REQUIRED)
 target_link_libraries(my_player PRIVATE hddvd::hddvd)
 ```
 
@@ -235,6 +235,13 @@ schema.
 Parser fuzz harnesses can be built with Clang and
 `-DHDDVD_BUILD_FUZZERS=ON`; the checked-in inputs under `tests/fixtures` are
 original synthetic seeds and contain no bytes from the reference archive.
+
+## Licence
+
+libhddvd is free software under the GNU Lesser General Public License,
+version 2.1 or (at your option) any later version, as libbluray and
+libdvdnav are; see `LICENSE`. Releases up to 0.5.0 were under the GNU
+General Public License, version 2.
 
 ## Status
 

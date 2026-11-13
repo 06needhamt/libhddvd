@@ -4,7 +4,7 @@
 int main(void)
 {
     hddvd_features features;
-    assert(strcmp(hddvd_version(), "0.5.0") == 0);
+    assert(strcmp(hddvd_version(), "0.6.0") == 0);
     assert(hddvd_abi_version() == HDDVD_ABI_VERSION);
     features = hddvd_get_features();
     assert((features & HDDVD_FEATURE_OBJECT_ENVELOPE) != 0);

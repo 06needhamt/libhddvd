@@ -18,7 +18,7 @@ extern "C"
 {
 #endif
 #define HDDVD_VERSION_MAJOR 0
-#define HDDVD_VERSION_MINOR 5
+#define HDDVD_VERSION_MINOR 6
 #define HDDVD_VERSION_PATCH 0
 #define HDDVD_ABI_VERSION 1u
 #define HDDVD_PATH_MAX 1024
