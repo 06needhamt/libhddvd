@@ -813,7 +813,7 @@ shared and static libraries and can report exactly which optional backends exist
 
 ### P7-02 — Implement the VLC access/demux module
 
-**Status:** In progress
+**Status:** In progress (the module and its checks are done; what remains is blocked outside this repository: the merge request, and confirmations that need discs, listed under Remaining)
 **Depends on:** P1-05, P6-02 through P6-04, P7-01
 
 Open an HD DVD root, provide authorized clear streams, map title/EVO ranges to
@@ -1021,7 +1021,7 @@ regression test in `test_object.c`.
 
 ### X-04 — Release checks
 
-**Status:** Complete (the checks are in place and passed on all three systems in GitHub Actions up to run 117; from run 118 on, Actions starts no runner for any job, so later commits are verified by running the Linux jobs locally: the same steps as `ci.yml`, with every job passing on 56eaecd, and the `abi` job's steps, which pass against the merge base with main (25 functions added, none changed or removed); macOS and Windows are unverified since run 117)
+**Status:** Complete (the checks are in place and passed on all three systems in GitHub Actions up to run 117; from run 118 on, Actions starts no runner for any job, so later commits are verified by running the Linux jobs locally: the same steps as `ci.yml`, with every job passing on e08880c, and the `abi` job's steps, which pass against the merge base with main (25 functions added, none changed or removed; the public header is unchanged since 56eaecd, where they last ran); macOS and Windows are unverified since run 117)
 **Depends on:** X-03
 
 `ci.yml` adds four release checks:
