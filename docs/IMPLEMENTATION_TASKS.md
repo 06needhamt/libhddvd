@@ -1005,7 +1005,7 @@ regression test in `test_object.c`.
 
 ### X-04 — Release checks
 
-**Status:** Complete (the checks are in place and passed on all three systems in GitHub Actions up to run 117; from run 118 on, Actions starts no runner for any job, so later commits are verified by running the Linux jobs locally: the same steps as `ci.yml`, with every job passing on c158f9d, and the `abi` job's steps, which pass against the merge base with main (16 functions added, none changed or removed); macOS and Windows are unverified since run 117)
+**Status:** Complete (the checks are in place and passed on all three systems in GitHub Actions up to run 117; from run 118 on, Actions starts no runner for any job, so later commits are verified by running the Linux jobs locally: the same steps as `ci.yml`, with every job passing on 56eaecd, and the `abi` job's steps, which pass against the merge base with main (25 functions added, none changed or removed); macOS and Windows are unverified since run 117)
 **Depends on:** X-03
 
 `ci.yml` adds four release checks:
