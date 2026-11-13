@@ -903,9 +903,11 @@ VLC's Blu-ray module, with a chained PS demuxer:
     button. Button highlights are not drawn.
 
 **Remaining:**
-- in VLC: submitting the merge request, which needs three things from the
-  maintainer: a tagged libhddvd release for the contrib entry's checksum, a
-  licence notice in the module header, and an account on code.videolan.org.
+- in VLC: submitting the merge request, which needs two things from the
+  maintainer: a tagged libhddvd release (v0.5.0, once this work is merged to
+  main) for the contrib entry's checksum, and an account on
+  code.videolan.org. The module is licensed LGPLv2.1+, noting that
+  libhddvd is GPLv2, as VLC's dvdnav module does for libdvdnav.
   VLC has nothing that supplies clear HD DVD sectors, so the module sets no
   sector provider. VLC's contrib builds libhddvd without a script engine,
   so HDi menus need a libhddvd built with QuickJS;
