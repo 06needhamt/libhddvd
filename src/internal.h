@@ -67,6 +67,29 @@ int hddvd_titles_find_cell_internal(const hddvd_titles *, size_t title, uint16_t
    byte at `offset` of its stream. */
 int hddvd_titles_cell_at_internal(const hddvd_titles *, size_t title, uint64_t offset,
                                   uint16_t *pgc, size_t *cell);
+/* The checks hddvd_titles_read makes of each 2048-byte sector: a program
+   stream pack (HDDVD_EPARSE otherwise) whose PES packets are not scrambled
+   (HDDVD_EPROTECTED). */
+int hddvd_titles_check_sector_internal(const unsigned char *);
+/* Asks the host's sector provider for the clear form of a sector:
+   HDDVD_EPROTECTED when there is none. */
+int hddvd_titles_provide_internal(const hddvd_titles *, const char *evo_uri, uint32_t sector,
+                                  uint8_t data[2048]);
+/* vts.c, for std_nav.c: DVD-Video's PGC header fields at 0x9c (next,
+   previous and parent PGC, 1-based, 0 for none; then the still time),
+   read as stored. Their place in an HD DVD PGC is unconfirmed. */
+typedef struct hddvd_pgc_links
+{
+    uint16_t next;
+    uint16_t previous;
+    uint16_t parent;
+    uint8_t still;
+} hddvd_pgc_links;
+int hddvd_vts_get_pgc_links_internal(const hddvd_vts *, int menu, size_t unit, size_t pgc,
+                                     hddvd_pgc_links *);
+int hddvd_vmg_get_pgc_links_internal(const hddvd_vmg *, int first_play, size_t unit, size_t pgc,
+                                     hddvd_pgc_links *);
+int hddvd_vmg_get_first_play_cell_internal(const hddvd_vmg *, size_t cell, hddvd_vts_cell *);
 int hddvd_config_limits_valid(const hddvd_config_limits *);
 /* Strips a recognized envelope whose type is `expected` or clear text.
    Non-envelope input passes through unchanged with *owned set to NULL;

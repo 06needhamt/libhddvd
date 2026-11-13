@@ -660,7 +660,7 @@ int hddvd_titles_chapter_at(const hddvd_titles *titles, size_t title, uint64_t o
 
 /* A sector must be a program stream pack. A PES packet whose scrambling
    bits are set marks encrypted content (docs/formats/ifo-map.md). */
-static int check_sector(const unsigned char *b)
+int hddvd_titles_check_sector_internal(const unsigned char *b)
 {
     size_t at;
     if (b[0] || b[1] || b[2] != 1 || b[3] != 0xba || (b[4] & 0xc0) != 0x40)
@@ -676,6 +676,14 @@ static int check_sector(const unsigned char *b)
         at += 6 + length;
     }
     return HDDVD_OK;
+}
+
+int hddvd_titles_provide_internal(const hddvd_titles *titles, const char *evo_uri, uint32_t sector,
+                                  uint8_t data[2048])
+{
+    if (!titles->provider)
+        return HDDVD_EPROTECTED;
+    return titles->provider(titles->provider_opaque, evo_uri, sector, data);
 }
 
 int hddvd_titles_set_sector_provider(hddvd_titles *titles, hddvd_sector_fn provider, void *opaque)
@@ -741,7 +749,7 @@ int hddvd_titles_read(hddvd_titles *titles, size_t title, uint64_t offset, void 
         if (!rc && n != SECTOR)
             rc = HDDVD_EPARSE;
         if (!rc)
-            rc = check_sector(sector);
+            rc = hddvd_titles_check_sector_internal(sector);
         if (rc == HDDVD_EPROTECTED && titles->provider)
         {
             rc = titles->provider(titles->provider_opaque, e->evo_uri, (uint32_t)(at / SECTOR),
@@ -752,7 +760,7 @@ int hddvd_titles_read(hddvd_titles *titles, size_t title, uint64_t offset, void 
                 return fail(titles->ctx, rc, e->evo_uri,
                             "the sector provider did not supply the sector");
             }
-            rc = check_sector(sector);
+            rc = hddvd_titles_check_sector_internal(sector);
         }
         if (rc)
         {

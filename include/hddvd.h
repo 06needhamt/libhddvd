@@ -1325,8 +1325,58 @@ typedef enum hddvd_std_nav_kind
     HDDVD_STD_NAV_STOP,
     /* The disc asked for something that is not modelled or does not exist;
        reason names it. Nothing is playing. */
-    HDDVD_STD_NAV_UNSUPPORTED
+    HDDVD_STD_NAV_UNSUPPORTED,
+    /* Only with HDDVD_STD_NAV_GUESS_MENU_CELLS: play bytes [0, size) of a
+       menu cell, read with hddvd_std_nav_read_menu (hddvd_std_nav_get_menu_cell
+       describes it). title is SIZE_MAX; title_set is 0 for the VMG's menus
+       and first play. */
+    HDDVD_STD_NAV_MENU
 } hddvd_std_nav_kind;
+/* hddvd_std_nav_set_options: each follows DVD-Video's layout where HD DVD's
+   is not known. None has been seen on a disc, so all are off by default
+   (docs/formats/ifo-map.md):
+   - PGC_LINKS reads a PGC's next, previous and parent PGC numbers at DVD's
+     header offset 0x9c and follows LinkNextPGC, LinkPrevPGC, LinkGoUpPGC
+     and, after post commands that do not leave the PGC, its next PGC;
+   - ANGLES reads a title cell's category as DVD's first cell byte (block
+     mode in bits 31-30, block type in bits 29-28, angle blocks being type
+     1): an angle block plays the cell of the angle set by SPRM3
+     (hddvd_std_nav_set_angle; the first when there is no such angle), then
+     the cell after the block. A block's interleaved cells (bit 26) are an
+     UNSUPPORTED step, since ILVUs are not read;
+   - MENU_CELLS plays menu and first-play cells as MENU steps, from
+     HVDVD_TS/HV000M01.EVO (the VMG's) or HVnnnM01.EVO (a title set's),
+     with the still time in bits 15-8 of the category and buttons from the
+     highlight information of the cell's first navigation pack, at DVD's
+     PCI offset 0x60. */
+#define HDDVD_STD_NAV_GUESS_PGC_LINKS 0x1u
+#define HDDVD_STD_NAV_GUESS_ANGLES 0x2u
+#define HDDVD_STD_NAV_GUESS_MENU_CELLS 0x4u
+/* The menu cell of the last MENU step. evo_uri is borrowed until the next
+   step. still: 0 for none, 1 to 254 seconds, 255 until a button is
+   activated (DVD's encoding). */
+typedef struct hddvd_std_nav_menu_cell
+{
+    const char *evo_uri;
+    uint32_t first_sector;
+    uint32_t sector_count;
+    uint8_t still;
+} hddvd_std_nav_menu_cell;
+/* A menu button: its rectangle in the menu video's pixels, the buttons
+   (1-based, 0 for none) the arrow keys move to, and auto_action, set when
+   selecting the button activates it. */
+typedef struct hddvd_std_nav_button
+{
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+    uint8_t up;
+    uint8_t down;
+    uint8_t left;
+    uint8_t right;
+    uint8_t auto_action;
+} hddvd_std_nav_button;
 /* title and chapter index the navigator's hddvd_titles; offset and size are
    in that title's byte stream. title_set, pgc and cell are the cell's
    1-based numbers on the disc. reason is a static string, NULL for PLAY. */
@@ -2217,11 +2267,13 @@ HDDVD_API int hddvd_titles_read(hddvd_titles *, size_t title, uint64_t offset, v
    NULL), else the first. Title set menus reached before any title has
    played are the first title set's.
 
-   Not modelled, each ending in an UNSUPPORTED step: menu cells (menu EVOs
-   are not decoded, and observed menus are command-only), the next,
-   previous and parent PGC links (those numbers are not decoded, so a PGC
-   whose post commands do not leave it is a STOP step), and commands the VM
-   does not run. Stills, cell flags and angle blocks are not interpreted.
+   Not modelled unless guessed (hddvd_std_nav_set_options), each ending in
+   an UNSUPPORTED step: menu cells (menu EVOs are not decoded, and observed
+   menus are command-only), the next, previous and parent PGC links (those
+   numbers are not decoded, so a PGC whose post commands do not leave it is
+   a STOP step); always, commands the VM does not run. Title cells' stills
+   and flags and PGC stills are not interpreted, and without the guess
+   every cell of an angle block plays in turn.
    HDDVD_ELIMIT when commands pass through 1024 PGCs without playing a
    cell. The VM's registers are the host's to read and set (vm): SPRM4, 5
    and 6 are set to the title, the title-set title and the PGC at each PLAY
@@ -2240,6 +2292,27 @@ HDDVD_API int hddvd_std_nav_select_title(hddvd_std_nav *, size_t title, size_t c
 HDDVD_API int hddvd_std_nav_seek(hddvd_std_nav *, size_t title, uint64_t offset,
                                  hddvd_std_nav_step *);
 HDDVD_API int hddvd_std_nav_menu(hddvd_std_nav *, unsigned menu_id, hddvd_std_nav_step *);
+/* Guesses (HDDVD_STD_NAV_GUESS_*, above) take effect from the next step;
+   HDDVD_EINVAL for unknown bits. set_angle sets SPRM3 (1 to 9), which an
+   angle block entered later plays.
+   With a MENU step outstanding (HDDVD_EINVAL otherwise):
+   - get_menu_cell describes it, and read_menu reads its sectors as
+     hddvd_titles_read reads a title's (the titles' sector provider is
+     asked for scrambled ones);
+   - the buttons are those of the cell's first navigation pack (none when
+     it cannot be read or has no highlight); selected_button is SPRM8 / 1024,
+     the first button when that names none, and select_button sets it;
+   - activate_button runs the selected button's command and fills a step as
+     next does; a command that goes nowhere repeats the MENU step. */
+HDDVD_API int hddvd_std_nav_set_options(hddvd_std_nav *, unsigned);
+HDDVD_API int hddvd_std_nav_set_angle(hddvd_std_nav *, unsigned angle);
+HDDVD_API int hddvd_std_nav_get_menu_cell(const hddvd_std_nav *, hddvd_std_nav_menu_cell *);
+HDDVD_API int hddvd_std_nav_read_menu(hddvd_std_nav *, uint64_t offset, void *, size_t, size_t *);
+HDDVD_API size_t hddvd_std_nav_button_count(const hddvd_std_nav *);
+HDDVD_API int hddvd_std_nav_get_button(const hddvd_std_nav *, size_t, hddvd_std_nav_button *);
+HDDVD_API unsigned hddvd_std_nav_selected_button(const hddvd_std_nav *);
+HDDVD_API int hddvd_std_nav_select_button(hddvd_std_nav *, unsigned button);
+HDDVD_API int hddvd_std_nav_activate_button(hddvd_std_nav *, hddvd_std_nav_step *);
 /* A menu session: one HDi application run for a player's overlay code. It
    loads the application from the disc and joins the script runtime, the
    navigation scheduler, the runtime bridge, the scene builder and the

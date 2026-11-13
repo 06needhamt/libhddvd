@@ -901,21 +901,30 @@ VLC's Blu-ray module, with a chained PS demuxer:
   VLC has nothing that supplies clear HD DVD sectors, so the module sets no
   sector provider. VLC's contrib builds libhddvd without a script engine,
   so HDi menus need a libhddvd built with QuickJS;
-- in libhddvd: angle blocks, menu cells and the PGC link numbers. These are
-  blocked on evidence, not unstarted. The HD DVD IFO is not DVD-Video's
-  layout (12-byte PGC search pointers, 28-byte cells, command offsets at
-  0xa8 rather than 0xe4; `docs/formats/ifo-map.md`), and the one Standard
-  Content disc available has none of them:
-  - its PGCs link nowhere, so the next, previous and parent numbers cannot
-    be located among the undecoded bytes 0x08 to 0xa8;
-  - its cells form no angle blocks, so the block bits of the cell category
-    are unknown;
-  - its menu PGCs have no cells, so menu EVO names and button highlight
-    data were never seen.
+- in libhddvd: confirming angle blocks, menu cells and the PGC link numbers
+  on a disc. The HD DVD IFO is not DVD-Video's layout (12-byte PGC search
+  pointers, 28-byte cells, command offsets at 0xa8 rather than 0xe4;
+  `docs/formats/ifo-map.md`), and the one Standard Content disc available
+  has none of them: its PGCs link nowhere, its cells form no angle blocks,
+  and its menu PGCs have no cells. The specification is licensed, and a
+  search found no public description of these structures.
 
-  The specification is licensed, and a search found no public description
-  of these structures, only DVD-Video's. Taking DVD-Video's offsets would be
-  guessing. Each needs a disc that uses it.
+  `hddvd_std_nav_set_options` now implements all three as opt-in guesses
+  on DVD-Video's layout, off by default:
+  - menu and first-play cells become MENU steps, read through
+    `hddvd_std_nav_read_menu` (with the titles' checks and sector
+    provider), with buttons from the first navigation pack's highlight
+    information, which the host selects and activates;
+  - angle blocks play the cell of the angle in SPRM3
+    (`hddvd_std_nav_set_angle`); interleaved cells are refused;
+  - LinkNextPGC, LinkPrevPGC and LinkGoUpPGC are followed, and a PGC whose
+    post commands do not leave it goes on to its next PGC.
+
+  `test_std_nav_guesses.c` covers them, and every refusal, on the synthetic
+  `tests/fixtures/guesses` disc. `fuzz-titles` runs the navigator with them
+  on and fuzzes the menu EVO, and `hddvd-titles --navigate COUNT --guess`
+  shows what they make of a disc. A disc that has these structures is still
+  needed to confirm the offsets, and the VLC module does not turn them on.
 
 **Acceptance:** headless tests open synthetic clear layouts; seek/title/chapter
 commands land on the expected ranges; protected content produces an actionable
