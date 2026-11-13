@@ -494,7 +494,7 @@ static int native_node(hddvd_runtime *runtime, unsigned index, const hddvd_engin
     const char *name, *value;
     double which, part;
     size_t at;
-    int state, rc;
+    int state = 0, rc;
     if (!arg_node(runtime, args, count, &at, message))
         return HDDVD_EINVAL;
     if (hddvd_xmu_get_node(runtime->xmu, at, &node))

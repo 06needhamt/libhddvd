@@ -15,7 +15,7 @@
 /* hddvd_std_nav's opt-in guesses (HDDVD_STD_NAV_GUESS_*) on the synthetic
    disc in tests/fixtures/guesses (see generate_objects.py), which is laid
    out as DVD-Video would be where HD DVD's layout is unknown:
-   - first play is one cell of HV000M01.EVO (sectors 12 to 15), then
+   - first play is one cell of HV000M01.EVO (sectors 8 to 11), then
      JumpSS to the title menu;
    - the title menu (VMG PGC 1, sectors 0 to 3, still until a button, the
      audio packet of sector 2 scrambled) has two buttons: 1 plays title 1,
@@ -110,7 +110,9 @@ static void with(hddvd_ctx *ctx)
 
     /* First play's cell, then the title menu. */
     assert(hddvd_std_nav_start(nav, &step) == HDDVD_OK);
-    menu(nav, &step, 0, 1, 12, 0, 0);
+    menu(nav, &step, 0, 1, 8, 0, 0);
+    assert(hddvd_std_nav_read_menu(nav, 0, data, sizeof(data), &got) == HDDVD_OK);
+    assert(got == sizeof(data) && data[3] == 0xba);
     assert(hddvd_std_nav_selected_button(nav) == 0);
     assert(hddvd_std_nav_activate_button(nav, &step) == HDDVD_EINVAL);
     assert(hddvd_std_nav_next(nav, &step) == HDDVD_OK);
@@ -287,13 +289,28 @@ static void failures(void)
     hddvd_std_nav_close(nav);
     hddvd_close(ctx);
 
+    /* A first-play cell past the end of its EVO: the step stands (cells are
+       not checked against the file), and reading it fails with the EVO
+       named. */
+    ctx = variant("fp-past-end.IFO", "HVDVD_TS/HV001I01.IFO", 1);
+    assert(hddvd_std_nav_open(ctx, &nav) == HDDVD_OK);
+    assert(hddvd_std_nav_set_options(nav, ALL) == HDDVD_OK);
+    assert(hddvd_std_nav_start(nav, &step) == HDDVD_OK);
+    menu(nav, &step, 0, 1, 12, 0, 0);
+    assert(hddvd_std_nav_read_menu(nav, 0, data, sizeof(data), &got) == HDDVD_EPARSE);
+    assert(got == 0);
+    assert(hddvd_get_last_error(ctx, &detail) == HDDVD_OK);
+    assert(!strcmp(detail.resource, "file:///dvddisc/HVDVD_TS/HV000M01.EVO"));
+    hddvd_std_nav_close(nav);
+    hddvd_close(ctx);
+
     /* Without the menu EVO the menu step stands, with no buttons, and
        reading it fails with the EVO named. */
     ctx = variant("HVDVD_TS/HV000I01.IFO", "HVDVD_TS/HV001I01.IFO", 0);
     assert(hddvd_std_nav_open(ctx, &nav) == HDDVD_OK);
     assert(hddvd_std_nav_set_options(nav, ALL) == HDDVD_OK);
     assert(hddvd_std_nav_start(nav, &step) == HDDVD_OK);
-    menu(nav, &step, 0, 1, 12, 0, 0);
+    menu(nav, &step, 0, 1, 8, 0, 0);
     assert(hddvd_std_nav_read_menu(nav, 0, data, sizeof(data), &got) == HDDVD_ENOTFOUND);
     assert(got == 0);
     assert(hddvd_get_last_error(ctx, &detail) == HDDVD_OK);

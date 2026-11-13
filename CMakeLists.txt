@@ -375,7 +375,7 @@ if(BUILD_TESTING)
         COMMAND hddvd-titles --navigate 5 --guess
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/guesses)
     set_tests_properties(titles-guesses PROPERTIES PASS_REGULAR_EXPRESSION
-        "navigate menu title-set=0 pgc=1 cell=1 evo=file:///dvddisc/HVDVD_TS/HV000M01.EVO sectors=12\\+4 still=0 buttons=0.*navigate menu title-set=0 pgc=1 cell=1 evo=[^ ]* sectors=0\\+4 still=255 buttons=2.*button 1 at 100,300 size 200x50 up=0 down=2 left=0 right=2.*press button 1.*navigate play title=1 chapter=1 sectors=0\\+8 pgc=1 cell=1.*navigate play title=1 chapter=1 sectors=8\\+4 pgc=1 cell=2.*navigate play title=1 chapter=1 sectors=16\\+4 pgc=1 cell=4.*summary ok")
+        "navigate menu title-set=0 pgc=1 cell=1 evo=file:///dvddisc/HVDVD_TS/HV000M01.EVO sectors=8\\+4 still=0 buttons=0.*navigate menu title-set=0 pgc=1 cell=1 evo=[^ ]* sectors=0\\+4 still=255 buttons=2.*button 1 at 100,300 size 200x50 up=0 down=2 left=0 right=2.*press button 1.*navigate play title=1 chapter=1 sectors=0\\+8 pgc=1 cell=1.*navigate play title=1 chapter=1 sectors=8\\+4 pgc=1 cell=2.*navigate play title=1 chapter=1 sectors=16\\+4 pgc=1 cell=4.*summary ok")
     add_test(NAME titles-no-disc
         COMMAND hddvd-titles ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/objects)
     set_tests_properties(titles-no-disc PROPERTIES WILL_FAIL TRUE)

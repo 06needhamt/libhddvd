@@ -440,7 +440,7 @@ def guess_vts(angle_flags=0):
         head[field:field + 4] = struct.pack(">I", value)
     return bytes(head) + b"".join(sectors(t) for t in tables)
 
-def guess_vmg(next_pgc=2):
+def guess_vmg(next_pgc=2, first_play_sector=8):
     titles = bytes([0x3c, 1, 0, 0]) + struct.pack(">HHHHI", 2, 0, 1, 1, 8)
     sets = std_table(1, struct.pack(">I", 12) + bytes(4))
     head = bytearray(2048)
@@ -458,7 +458,7 @@ def guess_vmg(next_pgc=2):
     head[0xc8:0xcc] = struct.pack(">I", 3)
     # First play: one cell (VOBU 3 of HV000M01.EVO, no still), then JumpSS
     # to the title menu.
-    first_play = guess_pgc([(0, 0, 1, 12, 0, 1, 3)], post=[JUMP_TITLE_MENU])
+    first_play = guess_pgc([(0, 0, 1, first_play_sector, 0, 1, 3)], post=[JUMP_TITLE_MENU])
     head[0x80:0x84] = struct.pack(">I", 0x7ff)
     head[0x84:0x88] = struct.pack(">I", 0x400)
     head[0x400:0x400 + len(first_play)] = first_play
@@ -474,10 +474,11 @@ guesses = {"HVDVD_TS/HV000I01.IFO": guess_vmg(), "HVDVD_TS/HV001I01.IFO": guess_
                                                      (400, 300, 200, 50, 0, 0, 1, 0, 0, NOP)]) +
                                      guess_vobus(1)),
            "HVDVD_TS/HV001M01.EVO": guess_vobus(1, [(10, 10, 100, 40, 0, 0, 0, 0, 0, LINK(16))]),
-           # Variants: interleaved angle cells, and a title menu whose next
-           # PGC does not exist.
+           # Variants: interleaved angle cells, a title menu whose next PGC
+           # does not exist, and a first-play cell past the end of its EVO.
            "angle-interleaved.IFO": guess_vts(angle_flags=0x04),
-           "bad-next.IFO": guess_vmg(next_pgc=9)}
+           "bad-next.IFO": guess_vmg(next_pgc=9),
+           "fp-past-end.IFO": guess_vmg(first_play_sector=12)}
 
 # Original scripts for tools/inventory_hdi_scripts.py, in each container the
 # tool reads: bare UTF-16 with a byte-order mark, the clear AACS envelope, and

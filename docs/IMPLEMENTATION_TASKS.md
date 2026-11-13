@@ -892,7 +892,15 @@ VLC's Blu-ray module, with a chained PS demuxer:
   - mouse clicks on the menu's buttons, through VLC's own video output path
     (a test window plugin reports the events), which pause and play, select
     tracks, hide subtitles, reorder and inactivate the application, and
-    jump.
+    jump;
+  - with the experimental `--hddvd-guess` option (off by default), which
+    turns on `hddvd_std_nav`'s guesses: on `tests/fixtures/guesses`, first
+    play, the title menu holding as a still, VLC's navigation keys moving
+    between and activating buttons across two menu PGCs, the angle block,
+    the PGC links, and the encryption dialog for the menu's scrambled
+    packet; on a scratch copy whose title menu has a decodable still, a
+    2-second still holding, and the mouse selecting and activating a
+    button. Button highlights are not drawn.
 
 **Remaining:**
 - in VLC: submitting the merge request, which needs three things from the
@@ -901,6 +909,11 @@ VLC's Blu-ray module, with a chained PS demuxer:
   VLC has nothing that supplies clear HD DVD sectors, so the module sets no
   sector provider. VLC's contrib builds libhddvd without a script engine,
   so HDi menus need a libhddvd built with QuickJS;
+- in VLC: confirming that a playlist track's `streamNumber` (1-based) names
+  the EVO substream whose number in the packet id is one less. The module
+  assumes so (audio in the low 3 bits of the substream id, subpictures in
+  the low 5), as the checks' synthetic disc is built; no disc with several
+  audio or subpicture streams has been available to check it against;
 - in libhddvd: confirming angle blocks, menu cells and the PGC link numbers
   on a disc. The HD DVD IFO is not DVD-Video's layout (12-byte PGC search
   pointers, 28-byte cells, command offsets at 0xa8 rather than 0xe4;
@@ -923,8 +936,11 @@ VLC's Blu-ray module, with a chained PS demuxer:
   `test_std_nav_guesses.c` covers them, and every refusal, on the synthetic
   `tests/fixtures/guesses` disc. `fuzz-titles` runs the navigator with them
   on and fuzzes the menu EVO, and `hddvd-titles --navigate COUNT --guess`
-  shows what they make of a disc. A disc that has these structures is still
-  needed to confirm the offsets, and the VLC module does not turn them on.
+  shows what they make of a disc. The VLC module turns them on with
+  `--hddvd-guess`. Checking them in VLC found that the fixture's first-play
+  cell started past the end of its EVO; the fixture now has it at sectors
+  8 to 11, and `fp-past-end.IFO` keeps the old layout as a negative case.
+  A disc that has these structures is still needed to confirm the offsets.
 
 **Acceptance:** headless tests open synthetic clear layouts; seek/title/chapter
 commands land on the expected ranges; protected content produces an actionable
