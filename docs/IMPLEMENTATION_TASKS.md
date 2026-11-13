@@ -904,9 +904,11 @@ VLC's Blu-ray module, with a chained PS demuxer:
 
 **Remaining:**
 - in VLC: submitting the merge request, which needs two things from the
-  maintainer: a tagged libhddvd release (v0.5.0, on main's merge commit 1817288
-  for #33; the tag is created by the maintainer) for the contrib entry's
-  checksum, and an account on
+  maintainer: a downloadable libhddvd release for the contrib entry and its
+  checksum. v0.5.0 is tagged (on 1817288, main's merge of #33), but the
+  repository is private, so the tag's tarball, which VLC's contrib build
+  downloads, cannot be fetched; the repository staying private for now is
+  the maintainer's choice, and an account on
   code.videolan.org. The module is licensed LGPLv2.1+, noting that
   libhddvd is GPLv2, as VLC's dvdnav module does for libdvdnav.
   VLC has nothing that supplies clear HD DVD sectors, so the module sets no
