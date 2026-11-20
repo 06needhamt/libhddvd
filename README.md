@@ -1,4 +1,4 @@
-# libhddvd 0.5.0
+# libhddvd 0.6.0
 
 Experimental open-source HD DVD inspection library.
 
@@ -87,13 +87,21 @@ set or title table, its stream attributes, menus and navigation commands (in
 DVD-Video syntax), and checks its tables and every command target; given the
 title EVO, it checks them against the EVO's navigation packs and streams. For
 a title table it also runs the first-play commands and prints where they lead.
-`hddvd-titles [--read] [--navigate COUNT [--guess]] DISC_ROOT` lists a disc's playable
+`hddvd-titles [--read] [--navigate COUNT [--guess]] [--streams [--scan MIB]] DISC_ROOT` lists a disc's playable
 titles, Standard Content and Advanced Content, with their chapters and the EVO
 extents they play. `--read` reads every title through and says whether its
 data is clear, encrypted or damaged; `--navigate` follows a Standard Content
 disc's own commands from first play for up to COUNT cells, and `--guess` turns
 the navigator's guesses on, listing menu cells with their buttons and pressing
-the selected one.
+the selected one. `--streams` sets a disc's three accounts of its audio and
+subpicture streams side by side: each playlist title's tracks (streamNumber,
+language, codec), the audio streams of its clips' VTI attribute record, and
+the stream and substream ids in the clips' EVO packet headers (Standard
+Content: each title set's stream attributes and its title EVO's streams).
+Packet headers are clear on AACS discs, so encrypted discs can be probed;
+packets marked scrambled are counted apart. Each EVO is scanned for `--scan`
+MiB (256 by default, 0 for all of it). Its output describes a real disc, so
+it is for the user's own reference and is not to be committed.
 `hddvd-menurun [--state] [--before FILE] [--playlist FILE.xpl [--title ID]] archive.aca
 MANIFEST.xmf [STEP...]` runs one application in the script runtime: its
 manifest's scripts, its markup and the markup loaded handler, then steps such
@@ -172,7 +180,7 @@ engine (`hddvd_runtime_engine()` names it). No feature bit implies complete HDi
 menu conformance.
 
 ```cmake
-find_package(hddvd 0.5 CONFIG REQUIRED)
+find_package(hddvd 0.6 CONFIG REQUIRED)
 target_link_libraries(my_player PRIVATE hddvd::hddvd)
 ```
 
@@ -227,6 +235,13 @@ schema.
 Parser fuzz harnesses can be built with Clang and
 `-DHDDVD_BUILD_FUZZERS=ON`; the checked-in inputs under `tests/fixtures` are
 original synthetic seeds and contain no bytes from the reference archive.
+
+## Licence
+
+libhddvd is free software under the GNU Lesser General Public License,
+version 2.1 or (at your option) any later version, as libbluray and
+libdvdnav are; see `LICENSE`. Releases up to 0.5.0 were under the GNU
+General Public License, version 2.
 
 ## Status
 

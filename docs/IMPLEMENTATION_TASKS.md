@@ -847,7 +847,9 @@ with a contrib entry that needs a tagged libhddvd release.
   explicit step: menu cells, the next/previous/parent PGC links, and commands
   the VM does not run.
 - **Tool:** `hddvd-titles` lists both kinds of title, reads them through
-  (`--read`) and follows a disc's navigation (`--navigate`).
+  (`--read`), follows a disc's navigation (`--navigate`), and sets a disc's
+  playlist tracks, stream attributes and EVO substreams side by side
+  (`--streams`, from packet headers, which AACS leaves clear).
 - **Coverage:** `test_titles_playlist.c` and `test_std_nav.c` cover both on
   synthetic discs, with every rejection. `fuzz-titles` replaces one file of a
   synthetic disc at a time (EVO sectors, title set, VMG, time map, playlist),
@@ -904,10 +906,15 @@ VLC's Blu-ray module, with a chained PS demuxer:
 
 **Remaining:**
 - in VLC: submitting the merge request, which needs two things from the
-  maintainer: a tagged libhddvd release (v0.5.0, once this work is merged to
-  main) for the contrib entry's checksum, and an account on
-  code.videolan.org. The module is licensed LGPLv2.1+, noting that
-  libhddvd is GPLv2, as VLC's dvdnav module does for libdvdnav.
+  maintainer. First, a downloadable libhddvd release for the contrib entry
+  and its checksum: the contrib entry names v0.6.0, the first release under
+  the LGPL, which is to be tagged once this version is on main, and the
+  repository is private, so no tag's tarball can be fetched yet (staying
+  private for now is the maintainer's choice). Second, an account on
+  code.videolan.org. libhddvd is LGPL-2.1-or-later from 0.6.0, as
+  libbluray and libdvdnav are (releases up to 0.5.0 were GPLv2), so the
+  module, also LGPLv2.1+, needs no GPL notice and the contrib entry no GPL
+  gate.
   VLC has nothing that supplies clear HD DVD sectors, so the module sets no
   sector provider. VLC's contrib builds libhddvd without a script engine,
   so HDi menus need a libhddvd built with QuickJS;
@@ -915,7 +922,11 @@ VLC's Blu-ray module, with a chained PS demuxer:
   the EVO substream whose number in the packet id is one less. The module
   assumes so (audio in the low 3 bits of the substream id, subpictures in
   the low 5), as the checks' synthetic disc is built; no disc with several
-  audio or subpicture streams has been available to check it against;
+  audio or subpicture streams has been available to check it against.
+  `hddvd-titles --streams DISC` prints what such a disc needs to settle it
+  (each title's tracks with streamNumber and language, its clips' VTI audio
+  attributes, and the substreams in the EVO's packet headers), and works on
+  encrypted discs; `tests/fixtures/streams` exercises it;
 - in libhddvd: confirming angle blocks, menu cells and the PGC link numbers
   on a disc. The HD DVD IFO is not DVD-Video's layout (12-byte PGC search
   pointers, 28-byte cells, command offsets at 0xa8 rather than 0xe4;

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(libhddvd VERSION 0.5.0 LANGUAGES C)
+project(libhddvd VERSION 0.6.0 LANGUAGES C)
 
 include(GNUInstallDirs)
 include(CTest)
@@ -376,6 +376,22 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/guesses)
     set_tests_properties(titles-guesses PROPERTIES PASS_REGULAR_EXPRESSION
         "navigate menu title-set=0 pgc=1 cell=1 evo=file:///dvddisc/HVDVD_TS/HV000M01.EVO sectors=8\\+4 still=0 buttons=0.*navigate menu title-set=0 pgc=1 cell=1 evo=[^ ]* sectors=0\\+4 still=255 buttons=2.*button 1 at 100,300 size 200x50 up=0 down=2 left=0 right=2.*press button 1.*navigate play title=1 chapter=1 sectors=0\\+8 pgc=1 cell=1.*navigate play title=1 chapter=1 sectors=8\\+4 pgc=1 cell=2.*navigate play title=1 chapter=1 sectors=16\\+4 pgc=1 cell=4.*summary ok")
+    # --streams sets the playlist's tracks, the VTI's audio attributes and
+    # the EVO's substreams side by side (a scrambled packet counted apart,
+    # and an EVO two titles play listed once), and a title set's stream
+    # attributes beside its title EVO's streams.
+    add_test(NAME titles-streams
+        COMMAND hddvd-titles --streams ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/streams)
+    set_tests_properties(titles-streams PROPERTIES PASS_REGULAR_EXPRESSION
+        "streams title 1 id=main\n  track audio 1 streamNumber=1 language=en:00 codec=DD\\+\n  track audio 2 streamNumber=2 language=fr:00 codec=DD\\+\n  track subpicture 1 streamNumber=1 language=en:00 codec=8bitSP\n  track audio 1 streamNumber=1 language=- codec=DD\\+ secondary\n  clip file:///dvddisc/HVDVD_TS/STREAMS.MAP vti=HVA00001.VTI evob=1 attributes=1\n    vti audio 1 language=en raw=1c04c400656e0000\n    vti audio 2 language=fr raw=1c04c40066720000\n    evo file:///dvddisc/HVDVD_TS/STREAMS.EVO scanned=8 sectors packs=8 other=0\n      stream 0xe0 MPEG-2 video packets=2 scrambled=0\n      stream 0xbd/0xc0 AC-3/E-AC-3 packets=1 scrambled=0\n      stream 0xbd/0xc1 AC-3/E-AC-3 packets=2 scrambled=1\n      stream 0xbd/0x20 subpicture packets=1 scrambled=0\nstreams title 2 id=again\n  clip [^\n]*\n(    vti[^\n]*\n)*    evo file:///dvddisc/HVDVD_TS/STREAMS.EVO listed above\nsummary ok")
+    add_test(NAME titles-streams-standard
+        COMMAND hddvd-titles --streams --scan 0 ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/standard)
+    set_tests_properties(titles-streams-standard PROPERTIES PASS_REGULAR_EXPRESSION
+        "streams title-set 1\n    ifo audio 1 language=en raw=1c04d400656e001f\n    ifo subpicture 1 language=en raw=2108656e0000\n    evo file:///dvddisc/HVDVD_TS/HV001T01.EVO scanned=36 sectors packs=36 other=0\n      stream 0xe0 MPEG-2 video packets=9 scrambled=0\n      stream 0xbd/0xc0 AC-3/E-AC-3 packets=9 scrambled=0\n      stream 0xbd/0x20 subpicture packets=9 scrambled=0\nsummary ok")
+    # --scan without its value is a usage error.
+    add_test(NAME titles-streams-usage
+        COMMAND hddvd-titles --streams --scan)
+    set_tests_properties(titles-streams-usage PROPERTIES WILL_FAIL TRUE)
     add_test(NAME titles-no-disc
         COMMAND hddvd-titles ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/objects)
     set_tests_properties(titles-no-disc PROPERTIES WILL_FAIL TRUE)

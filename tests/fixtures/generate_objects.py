@@ -75,26 +75,28 @@ TMAP_START = 5000
 tmap_units = sum(units for _, units, _ in TMAP_ENTRIES)
 tmap_sectors = sum(size for _, _, size in TMAP_ENTRIES)
 
-def tmap():
+def tmap(entries=TMAP_ENTRIES, vti_name=b"ORIGINAL.VTI"):
     head = bytearray(0x1a0)
     head[0:12] = b"HDDVD_TMAP00"
-    head[0x72:0x7e] = b"ORIGINAL.VTI"
-    head[0x180:0x188] = struct.pack(">IHH", 0x1a0, 1, len(TMAP_ENTRIES))
+    head[0x72:0x72 + len(vti_name)] = vti_name
+    head[0x180:0x188] = struct.pack(">IHH", 0x1a0, 1, len(entries))
     body = b"".join(struct.pack(">I", ref << 21 | units << 11 | size)
-                    for ref, units, size in TMAP_ENTRIES)
+                    for ref, units, size in entries)
     return sectors(bytes(head) + body)
 
-def vti():
+def vti(evo=b"ORIGINAL.EVO", start=TMAP_START, units=tmap_units, evo_sectors=tmap_sectors,
+        languages=(b"en",)):
     record = bytearray(0x140)
-    record[2:14] = b"ORIGINAL.EVO"
-    record[0x108:0x118] = struct.pack(">HIIIH", 1, TMAP_START,
-                                      TMAP_START + tmap_units * 3003 // 8, tmap_sectors, 1)
+    record[2:2 + len(evo)] = evo
+    record[0x108:0x118] = struct.pack(">HIIIH", 1, start, start + units * 3003 // 8, evo_sectors, 1)
     table = struct.pack(">HHII", 0, 1, 8 + 4 + len(record) - 1, 12) + bytes(record)
-    # One attribute record, which the EVOB names: VC-1 video and one English
-    # audio stream.
+    # One attribute record, which the EVOB names: VC-1 video and an AC-3
+    # audio stream in each language.
     attributes = bytearray(1024)
     attributes[2:6] = bytes([0x6b, 0x10, 0xc0, 0])
-    attributes[0x0e:0x18] = struct.pack(">H", 1) + bytes([0x1c, 0x04, 0xc4, 0]) + b"en" + bytes(2)
+    attributes[0x0e:0x10] = struct.pack(">H", len(languages))
+    for i, language in enumerate(languages):
+        attributes[0x10 + 8 * i:0x18 + 8 * i] = bytes([0x1c, 0x04, 0xc4, 0]) + language + bytes(2)
     attribute_table = struct.pack(">HHII", 1, 0, 0x10 + 1024 - 1, 0x10) + bytes(4) + bytes(attributes)
     head = bytearray(2048)
     head[0:12] = b"ADVANCED-VTS"
@@ -104,6 +106,70 @@ def vti():
     return bytes(head) + sectors(table) + sectors(attribute_table)
 
 timemaps = {"original.map": tmap(), "original.vti": vti()}
+
+# An original Advanced Content disc for hddvd-titles --streams: a playlist
+# whose title has English and French audio, an English subtitle and a
+# secondary audio track, all on one primary clip; its time map and VTI (two
+# audio attribute records, English then French); and its EVO, two 4-sector
+# EVOBUs of a navigation pack and packets of video, AC-3 substreams 0xc0 and
+# 0xc1 and subpicture substream 0x20, one 0xc1 packet marked scrambled. A
+# second title plays the same clip. How streamNumber, the attribute records
+# and the substreams correspond is what the tool shows on a real disc; this
+# disc only exercises it.
+STREAMS = Path(__file__).resolve().parent / "streams"
+STREAM_ENTRIES = [(1, 40, 4), (1, 40, 4)]
+
+def stream_pack(sid, sub=None, flags=0x81):
+    pack = bytearray(b"\x00\x00\x01\xba\x44\x00\x04\x00\x04\x01\x01\x89\xc3\xf8")
+    if sid == 0xbf:
+        pack += b"\x00\x00\x01\xbb\x00\x06" + bytes(6)
+        pack += b"\x00\x00\x01\xbf" + struct.pack(">H", 0x20) + b"\x01" + bytes(0x1f)
+    else:
+        payload = bytes([sub]) if sub is not None else b""
+        pack += b"\x00\x00\x01" + bytes([sid]) + struct.pack(">H", 3 + len(payload) + 1)
+        pack += bytes([flags, 0, 0]) + payload + b"\x00"
+    pack += b"\x00\x00\x01\xbe" + struct.pack(">H", 2048 - len(pack) - 6)
+    return bytes(pack + b"\xff" * (2048 - len(pack)))
+
+def streams_evo():
+    first = [stream_pack(0xbf), stream_pack(0xe0), stream_pack(0xbd, 0xc0), stream_pack(0xbd, 0xc1)]
+    second = [stream_pack(0xbf), stream_pack(0xe0), stream_pack(0xbd, 0x20),
+              stream_pack(0xbd, 0xc1, flags=0x91)]
+    return b"".join(first + second)
+
+STREAMS_XPL = b"""<Playlist xmlns='http://www.dvdforum.org/2005/HDDVDVideo/Playlist'>
+<MediaAttributeList>
+  <VideoAttributeItem index='1' codec='VC-1'/>
+  <AudioAttributeItem index='1' codec='DD+' channels='6'/>
+  <SubpictureAttributeItem index='1' codec='8bitSP'/>
+</MediaAttributeList>
+<TitleSet timeBase='60fps'>
+  <Title id='main' titleDuration='00:00:00:10'>
+    <PrimaryAudioVideoClip src='file:///dvddisc/HVDVD_TS/STREAMS.MAP'
+        titleTimeBegin='00:00:00:00' titleTimeEnd='00:00:00:10'>
+      <Video track='1' mediaAttr='1'/>
+      <Audio track='1' streamNumber='1' mediaAttr='1' langcode='en:00'/>
+      <Audio track='2' streamNumber='2' mediaAttr='1' langcode='fr:00'/>
+      <Subtitle track='1' streamNumber='1' mediaAttr='1' langcode='en:00'/>
+      <SubAudio track='1' streamNumber='1' mediaAttr='1'/>
+    </PrimaryAudioVideoClip>
+  </Title>
+  <Title id='again' titleDuration='00:00:00:10'>
+    <PrimaryAudioVideoClip src='file:///dvddisc/HVDVD_TS/STREAMS.MAP'
+        titleTimeBegin='00:00:00:00' titleTimeEnd='00:00:00:10'>
+      <Video track='1' mediaAttr='1'/>
+    </PrimaryAudioVideoClip>
+  </Title>
+</TitleSet>
+</Playlist>
+"""
+
+streams_disc = {
+    "ADV_OBJ/VPLST000.XPL": STREAMS_XPL,
+    "HVDVD_TS/STREAMS.MAP": tmap(STREAM_ENTRIES, b"HVA00001.VTI"),
+    "HVDVD_TS/HVA00001.VTI": vti(b"STREAMS.EVO", 1000, 80, 8, (b"en", b"fr")),
+    "HVDVD_TS/STREAMS.EVO": streams_evo(),
+}
 
 # An original Standard Content disc in the layout of docs/formats/ifo-map.md:
 # a title set with two titles (PGC 1: two cells, PGC 2: one), its title EVO
@@ -843,6 +909,13 @@ for directory in (STANDARD, STANDARD / "HVDVD_TS"):
         if path.is_file(): path.unlink()
 for name, data in sorted(standard.items()):
     (STANDARD / name).write_bytes(data)
+
+for directory in (STREAMS / "ADV_OBJ", STREAMS / "HVDVD_TS"):
+    directory.mkdir(parents=True, exist_ok=True)
+    for path in directory.iterdir():
+        if path.is_file(): path.unlink()
+for name, data in sorted(streams_disc.items()):
+    (STREAMS / name).write_bytes(data)
 
 APP.mkdir(exist_ok=True)
 for name, data in sorted(app.items()):
