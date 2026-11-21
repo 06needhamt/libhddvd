@@ -1,0 +1,1091 @@
+From 5a4699f5739513f54c01fb8d152c5ad59dce33f4 Mon Sep 17 00:00:00 2001
+From: Tom Needham <06needhamt@gmail.com>
+Date: Sat, 21 Nov 2026 10:15:21 +0000
+Subject: [PATCH] avformat: add HD DVD demuxer using libhddvd
+
+Demuxes a title of an HD DVD disc, in the manner of the dvdvideo demuxer:
+libhddvd lists the disc's titles (Standard Content titles from its title
+table, Advanced Content titles from its playlist) with their chapters, and
+reads a title's cells or clips from the disc's EVO files as one MPEG
+program stream, which a nested MPEG-PS demuxer parses. The PS demuxer
+already knows the EVO substreams (AC-3/E-AC-3, DTS-HD, LPCM, MLP, VC-1).
+
+The sub-demuxer is restarted where the title's data jumps from one cell or
+clip to one that does not follow it on the disc. Each extent's timestamps
+are moved onto the title's time: by the title's time maps for Advanced
+Content, whose clips can start inside an EVOBU, or else by the first video
+timestamp at the extent's start, as Standard Content cells start on the
+frame they play first. Timestamps so stay continuous across joins, chapter
+ranges and seeks. Chapters are exported, and audio and subtitle streams take their
+language from the title set's stream attributes or the playlist's tracks.
+
+Options: title (default: the longest title), chapter_start and
+chapter_end. libhddvd (LGPL 2.1 or later) does not decrypt AACS: a
+protected sector ends demuxing with an error. Menus and angles are not
+supported.
+---
+ Changelog                |   1 +
+ configure                |   5 +
+ doc/demuxers.texi        |  65 +++
+ libavformat/Makefile     |   1 +
+ libavformat/allformats.c |   1 +
+ libavformat/hddvddec.c   | 884 +++++++++++++++++++++++++++++++++++++++
+ libavformat/version.h    |   2 +-
+ 7 files changed, 958 insertions(+), 1 deletion(-)
+ create mode 100644 libavformat/hddvddec.c
+
+diff --git a/Changelog b/Changelog
+index 5603844..3071540 100644
+--- a/Changelog
++++ b/Changelog
+@@ -8,6 +8,7 @@ version <next>:
+ - No longer disabling GCC autovectorization on PowerPC, RISC-V, MIPS and LoongArch
+ - PCM PAMF decoder
+ - Super Audio CD (SACD) demuxer
++- HD DVD demuxer, powered by libhddvd
+ 
+ version 9.1:
+ - ASTC image encoding and decoding via libastcenc, with .astc and KTX 1.0 muxers and demuxers
+diff --git a/configure b/configure
+index 89d8970..a1e826e 100755
+--- a/configure
++++ b/configure
+@@ -239,6 +239,7 @@ External library support:
+   --enable-libfreetype     enable libfreetype, needed for drawtext filter [no]
+   --enable-libfribidi      enable libfribidi, improves drawtext filter [no]
+   --enable-libharfbuzz     enable libharfbuzz, needed for drawtext filter [no]
++  --enable-libhddvd        enable libhddvd, needed for HD DVD demuxing [no]
+   --enable-libgme          enable Game Music Emu via libgme [no]
+   --enable-libgsm          enable GSM de/encoding via libgsm [no]
+   --enable-libiec61883     enable iec61883 via libiec61883 [no]
+@@ -2079,6 +2080,7 @@ EXTERNAL_LIBRARY_LIST="
+     libfreetype
+     libfribidi
+     libharfbuzz
++    libhddvd
+     libgme
+     libgsm
+     libiec61883
+@@ -3934,6 +3936,8 @@ fifo_muxer_deps="threads"
+ flac_demuxer_select="flac_parser"
+ flv_muxer_select="aac_adtstoasc_bsf iso_writer"
+ gxf_muxer_select="pcm_rechunk_bsf"
++hddvd_demuxer_select="mpegps_demuxer mpegvideo_demuxer h264_demuxer"
++hddvd_demuxer_deps="libhddvd"
+ hds_muxer_select="flv_muxer"
+ hls_demuxer_select="aac_demuxer ac3_demuxer adts_header ac3_parser eac3_demuxer mov_demuxer mpegts_demuxer"
+ hls_muxer_select="mov_muxer mpegts_muxer webvtt_muxer"
+@@ -7318,6 +7322,7 @@ enabled libfontconfig     && require_pkg_config libfontconfig fontconfig "fontco
+ enabled libfreetype       && require_pkg_config libfreetype freetype2 "ft2build.h FT_FREETYPE_H" FT_Init_FreeType
+ enabled libfribidi        && require_pkg_config libfribidi fribidi fribidi.h fribidi_version_info
+ enabled libharfbuzz       && require_pkg_config libharfbuzz harfbuzz hb.h hb_buffer_create
++enabled libhddvd          && require_pkg_config libhddvd "libhddvd >= 0.6.0" hddvd.h hddvd_titles_open
+ enabled libgme            && { check_pkg_config libgme libgme gme/gme.h gme_new_emu ||
+                                require libgme gme/gme.h gme_new_emu -lgme -lstdc++; }
+ enabled libgsm            && { for gsm_hdr in "gsm.h" "gsm/gsm.h"; do
+diff --git a/doc/demuxers.texi b/doc/demuxers.texi
+index e21b887..57a3138 100644
+--- a/doc/demuxers.texi
++++ b/doc/demuxers.texi
+@@ -559,6 +559,71 @@ used to end the output video at the length of the shortest input file,
+ which in this case is @file{input.mp4} as the GIF in this example loops
+ infinitely.
+ 
++@section hddvd
++
++HD DVD demuxer, powered by libhddvd.
++
++Demuxes a title of an HD DVD disc: a Standard Content title from the disc's
++title table (@file{HVDVD_TS/HV000I01.IFO}), or an Advanced Content title from
++its playlist (the highest-numbered @file{ADV_OBJ/VPLSTnnn.XPL}). libhddvd
++reads the title's cells or clips from the disc's EVO files as one MPEG program
++stream, which the MPEG-PS demuxer parses. Timestamps follow the title's own
++time, across the joins between cells or clips. The title's chapters are
++exported, and audio and subtitle streams get their language from the title
++set's stream attributes (Standard Content) or from the playlist's tracks
++(Advanced Content, where a track's @code{streamNumber} is taken to name the
++substream: unconfirmed on a disc).
++
++The input is the directory of a mounted disc, or of a copy of the disc's
++files; ISO images and drives are not read directly.
++Activate with @code{-f hddvd} in front of the input.
++
++This demuxer does NOT decrypt anything, and neither does libhddvd: a title
++protected by AACS fails to read when the first protected sector is reached.
++Menus, interactive Advanced Content applications, angles and secondary
++(picture-in-picture) streams are not supported.
++
++FFmpeg must be built with the configure switch @code{--enable-libhddvd}.
++
++@subsection Options
++
++@table @option
++
++@item title @var{int}
++The title number to demux, counted from 1 in the disc's title table or in
++its playlist. Advanced Content titles that play no audio or video (e.g. a
++title that only runs a menu application) cannot be chosen.
++Default is 0, the longest title with audio or video.
++
++@item chapter_start @var{int}
++The chapter to start demuxing from. Timestamps then start at the chapter's
++start. Default is 1, the first chapter.
++
++@item chapter_end @var{int}
++The last chapter to demux, inclusive. Default is 0, the title's last chapter.
++
++@end table
++
++Seeking is supported. It estimates the position within a cell or clip from
++its duration and reads from about a second before the requested time.
++
++@subsection Examples
++
++@itemize
++@item
++Remux the longest title of a disc copied to @file{/media/disc}, with its
++chapters:
++@example
++ffmpeg -f hddvd -i /media/disc -map 0 -c copy out.mkv
++@end example
++
++@item
++Demux chapters 3 to 6 of title 2:
++@example
++ffmpeg -f hddvd -title 2 -chapter_start 3 -chapter_end 6 -i /media/disc ...
++@end example
++@end itemize
++
+ @section hls
+ 
+ HLS demuxer
+diff --git a/libavformat/Makefile b/libavformat/Makefile
+index 93c9aa5..7b45854 100644
+--- a/libavformat/Makefile
++++ b/libavformat/Makefile
+@@ -272,6 +272,7 @@ OBJS-$(CONFIG_H264_MUXER)                += rawenc.o
+ OBJS-$(CONFIG_HASH_MUXER)                += hashenc.o
+ OBJS-$(CONFIG_HCA_DEMUXER)               += hca.o
+ OBJS-$(CONFIG_HCOM_DEMUXER)              += hcom.o pcm.o
++OBJS-$(CONFIG_HDDVD_DEMUXER)             += hddvddec.o
+ OBJS-$(CONFIG_HDS_MUXER)                 += hdsenc.o
+ OBJS-$(CONFIG_HEVC_DEMUXER)              += hevcdec.o rawdec.o
+ OBJS-$(CONFIG_HEVC_MUXER)                += rawenc.o
+diff --git a/libavformat/allformats.c b/libavformat/allformats.c
+index db5656c..c7a505f 100644
+--- a/libavformat/allformats.c
++++ b/libavformat/allformats.c
+@@ -592,6 +592,7 @@ extern const FFInputFormat  ff_image_xwd_pipe_demuxer;
+ extern const FFInputFormat  ff_avisynth_demuxer;
+ extern const FFOutputFormat ff_chromaprint_muxer;
+ extern const FFInputFormat  ff_dvdvideo_demuxer;
++extern const FFInputFormat  ff_hddvd_demuxer;
+ extern const FFInputFormat  ff_libgme_demuxer;
+ extern const FFInputFormat  ff_libmodplug_demuxer;
+ extern const FFInputFormat  ff_libopenmpt_demuxer;
+diff --git a/libavformat/hddvddec.c b/libavformat/hddvddec.c
+new file mode 100644
+index 0000000..47c2625
+--- /dev/null
++++ b/libavformat/hddvddec.c
+@@ -0,0 +1,884 @@
++/*
++ * HD DVD demuxer, powered by libhddvd
++ *
++ * Copyright (c) 2026 Tom Needham
++ *
++ * This file is part of FFmpeg.
++ *
++ * FFmpeg is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * FFmpeg is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with FFmpeg; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++/**
++ * @file
++ * HD DVD demuxer, powered by libhddvd
++ *
++ * libhddvd lists an HD DVD disc's titles (Standard Content titles from the
++ * disc's title table, Advanced Content titles from its playlist) and reads
++ * a title's EVO sectors as one MPEG program stream, which a nested MPEG-PS
++ * demuxer parses. The sub-demuxer is restarted wherever the title's data
++ * jumps (from one cell or clip to one that does not follow it on the disc)
++ * and after a seek, and timestamps are rebased onto the title's own time.
++ *
++ * libhddvd does not decrypt AACS-protected content, and neither does this
++ * demuxer: protected sectors fail to read.
++ */
++
++#include <inttypes.h>
++#include <string.h>
++
++#include <hddvd.h>
++
++#include "libavutil/avstring.h"
++#include "libavutil/intreadwrite.h"
++#include "libavutil/mathematics.h"
++#include "libavutil/mem.h"
++#include "libavutil/opt.h"
++
++#include "avformat.h"
++#include "avio_internal.h"
++#include "avlanguage.h"
++#include "demux.h"
++#include "internal.h"
++
++#define HDDVD_SECTOR_SIZE   2048
++#define HDDVD_BUFFER_SIZE   (16 * HDDVD_SECTOR_SIZE)
++#define HDDVD_TIME_BASE     (AVRational) { 1, 90000 }
++/* Packets dropped while waiting for a video key frame after a (re)start,
++   before giving up on video and starting with whatever comes. */
++#define HDDVD_MAX_WAIT      1024
++/* Sectors read from an extent's start to find its first timestamp. */
++#define HDDVD_PTS_SCAN      32
++/* How far before the requested time a seek aims (90 kHz), so that it lands
++   on a key frame before it: EVOBUs are up to about a second long. */
++#define HDDVD_SEEK_MARGIN   90000
++
++typedef struct HDDVDDemuxContext {
++    const AVClass *class;
++
++    /* options */
++    int opt_title;                      /* title number, 1-based (0=longest) */
++    int opt_chapter_start;              /* first chapter, 1-based */
++    int opt_chapter_end;                /* last chapter, 1-based (0=last) */
++
++    /* disc */
++    hddvd_ctx       *ctx;
++    hddvd_xpl       *playlist;          /* Advanced Content only */
++    hddvd_titles    *titles;
++    hddvd_title_map *map;               /* Advanced Content: the title's time maps */
++    size_t           title;             /* 0-based title index */
++    hddvd_title_info info;
++    /* Standard Content: the title set's audio and subpicture languages */
++    char             audio_lang[8][3];
++    char             subp_lang[32][3];
++
++    /* range of the title's byte stream and time being demuxed */
++    uint64_t range_start;
++    uint64_t range_end;
++    int64_t  time_start;                /* 90 kHz title time of range_start */
++    int64_t  time_end;                  /* and of range_end */
++
++    /* reading */
++    uint64_t pos;                       /* next byte of the title to read */
++    uint64_t run_end;                   /* end of the contiguous data being read */
++    int      read_error;                /* AVERROR of a failed read, or 0 */
++    int      restart;                   /* at run_end: restart the sub-demuxer */
++
++    /* sub-demuxer */
++    FFIOContext      mpeg_pb;
++    AVFormatContext *mpeg_ctx;
++    int64_t          shift;             /* 90 kHz: title time minus EVO timestamp */
++    int              have_shift;
++    int64_t          run_time;          /* else: title time of its first key frame */
++    int              started;
++    int              waited;
++    int              seek_warned;
++} HDDVDDemuxContext;
++
++static int hddvddec_error(AVFormatContext *s, int status, const char *what)
++{
++    HDDVDDemuxContext *c = s->priv_data;
++    hddvd_error_detail detail;
++
++    if (c->ctx && hddvd_get_last_error(c->ctx, &detail) == HDDVD_OK && detail.message[0])
++        av_log(s, AV_LOG_ERROR, "%s: %s%s%s (%s)\n", what, detail.resource,
++               detail.resource[0] ? ": " : "", detail.message, hddvd_strerror(status));
++    else
++        av_log(s, AV_LOG_ERROR, "%s: %s\n", what, hddvd_strerror(status));
++
++    switch (status) {
++    case HDDVD_EPROTECTED:
++        av_log(s, AV_LOG_ERROR, "This HD DVD title is protected by AACS, "
++                                "and libhddvd does not decrypt protected content\n");
++        return AVERROR(EACCES);
++    case HDDVD_ENOTFOUND:
++        return AVERROR(ENOENT);
++    case HDDVD_ENOMEM:
++        return AVERROR(ENOMEM);
++    case HDDVD_EIO:
++        return AVERROR(EIO);
++    case HDDVD_ENOTSUP:
++        return AVERROR_PATCHWELCOME;
++    default:
++        return AVERROR_INVALIDDATA;
++    }
++}
++
++/* The end of the data that plays on from pos without a jump: the extent
++   holding pos (returned in found), and the extents after it that continue
++   it on the disc. */
++static uint64_t hddvddec_run_end(const HDDVDDemuxContext *c, uint64_t pos,
++                                 hddvd_title_extent *found)
++{
++    hddvd_title_extent ext, next;
++    size_t i;
++
++    for (i = 0; i < c->info.extent_count; i++) {
++        uint64_t end;
++
++        if (hddvd_titles_get_extent(c->titles, c->title, i, &ext) != HDDVD_OK)
++            break;
++        end = ext.offset + (uint64_t)ext.sector_count * HDDVD_SECTOR_SIZE;
++        if (pos >= end)
++            continue;
++        if (found)
++            *found = ext;
++        while (i + 1 < c->info.extent_count &&
++               hddvd_titles_get_extent(c->titles, c->title, i + 1, &next) == HDDVD_OK &&
++               next.offset == end && !strcmp(next.evo_uri, ext.evo_uri) &&
++               next.first_sector == ext.first_sector + ext.sector_count) {
++            ext = next;
++            end = ext.offset + (uint64_t)ext.sector_count * HDDVD_SECTOR_SIZE;
++            i++;
++        }
++        return FFMIN(end, c->range_end);
++    }
++
++    return c->range_end;
++}
++
++/* The first video timestamp in the PES headers of an extent's first
++   sectors (which are clear even where the payload is scrambled), else the
++   first timestamp of any stream, else AV_NOPTS_VALUE. */
++static int64_t hddvddec_extent_pts(HDDVDDemuxContext *c, const hddvd_title_extent *ext)
++{
++    uint8_t b[HDDVD_SECTOR_SIZE];
++    int64_t any = AV_NOPTS_VALUE;
++
++    for (uint32_t n = 0; n < FFMIN(ext->sector_count, HDDVD_PTS_SCAN); n++) {
++        size_t got = 0, at;
++
++        if (hddvd_titles_read(c->titles, c->title, ext->offset + (uint64_t)n * HDDVD_SECTOR_SIZE,
++                              b, sizeof(b), &got) != HDDVD_OK || got != sizeof(b))
++            break;
++        /* an MPEG-2 pack header and its stuffing */
++        if (AV_RB32(b) != 0x1ba || (b[4] & 0xc0) != 0x40)
++            break;
++        at = 14 + (b[13] & 7);
++        while (at + 9 <= sizeof(b) && AV_RB24(b + at) == 1) {
++            int id = b[at + 3];
++            size_t len = AV_RB16(b + at + 4);
++
++            if (id != 0xbb && id != 0xbe && id != 0xbf && len >= 8 &&
++                (b[at + 6] & 0xc0) == 0x80 && (b[at + 7] & 0x80) && at + 14 <= sizeof(b)) {
++                const uint8_t *p = b + at + 9;
++                int64_t pts = (int64_t)(p[0] & 0x0e) << 29 | AV_RB16(p + 1) >> 1 << 15 |
++                              AV_RB16(p + 3) >> 1;
++
++                if ((id >= 0xe0 && id <= 0xef) || id == 0xfd)
++                    return pts;
++                if (any == AV_NOPTS_VALUE)
++                    any = pts;
++            }
++            at += 6 + len;
++        }
++    }
++
++    return any;
++}
++
++static int hddvddec_subdemux_read_data(void *opaque, uint8_t *buf, int buf_size)
++{
++    AVFormatContext *s = opaque;
++    HDDVDDemuxContext *c = s->priv_data;
++    size_t got = 0;
++    int status;
++
++    if (c->read_error)
++        return c->read_error;
++    if (c->pos >= c->run_end) {
++        c->restart = c->pos < c->range_end;
++        return AVERROR_EOF;
++    }
++
++    status = hddvd_titles_read(c->titles, c->title, c->pos, buf,
++                               (size_t)FFMIN((uint64_t)buf_size, c->run_end - c->pos), &got);
++    if (status != HDDVD_OK) {
++        c->read_error = hddvddec_error(s, status, "Reading the title failed");
++        return c->read_error;
++    }
++    if (!got)
++        return AVERROR_EOF;
++
++    c->pos += got;
++
++    return (int)got;
++}
++
++static void hddvddec_subdemux_close(AVFormatContext *s)
++{
++    HDDVDDemuxContext *c = s->priv_data;
++
++    if (c->mpeg_pb.pub.buffer)
++        av_freep(&c->mpeg_pb.pub.buffer);
++    avformat_close_input(&c->mpeg_ctx);
++}
++
++/* The difference between title time and EVO timestamps in an extent:
++   from the title's time maps (Advanced Content), which give the EVO time at
++   which the extent's clip starts, when the first video timestamp at the
++   extent's start agrees with them to a second; else from that timestamp,
++   taken to play at the extent's start (exact where an extent starts on the
++   frame it plays first, as Standard Content cells do). 0 if neither. */
++static int hddvddec_extent_shift(AVFormatContext *s, const hddvd_title_extent *ext,
++                                 int64_t *shift)
++{
++    HDDVDDemuxContext *c = s->priv_data;
++    int64_t base = hddvddec_extent_pts(c, ext);
++    hddvd_title_position p;
++
++    if (c->map && hddvd_title_map_locate(c->map, ext->start, &p) == HDDVD_OK &&
++        !strcmp(p.evo_uri, ext->evo_uri) &&
++        (base == AV_NOPTS_VALUE ||
++         FFABS(base - (int64_t)p.entry_pts.ticks) <= HDDVD_SEEK_MARGIN)) {
++        *shift = (int64_t)ext->start.ticks - (int64_t)p.pts.ticks;
++        return 1;
++    }
++    if (c->map)
++        av_log(s, AV_LOG_VERBOSE, "The time map of the clip at title time %" PRIu64 " does not "
++                                  "match its timestamps; using the timestamps\n",
++               ext->start.ticks);
++    if (base == AV_NOPTS_VALUE)
++        return 0;
++    *shift = (int64_t)ext->start.ticks - base;
++
++    return 1;
++}
++
++/* Starts a sub-demuxer at pos. Its timestamps are moved onto the title's
++   time by the extent holding pos (hddvddec_extent_shift). Without a shift
++   from it, the first key frame read is taken to play at title time time. */
++static int hddvddec_subdemux_open(AVFormatContext *s, uint64_t pos, int64_t time)
++{
++    HDDVDDemuxContext *c = s->priv_data;
++    extern const FFInputFormat ff_mpegps_demuxer;
++    hddvd_title_extent ext;
++    uint8_t *buf;
++    int ret;
++
++    hddvddec_subdemux_close(s);
++
++    memset(&ext, 0, sizeof(ext));
++    c->pos        = pos;
++    c->run_end    = hddvddec_run_end(c, pos, &ext);
++    c->shift      = 0;
++    c->have_shift = ext.sector_count && hddvddec_extent_shift(s, &ext, &c->shift);
++    c->run_time   = time;
++    c->restart    = 0;
++    c->read_error = 0;
++    c->started    = 0;
++    c->waited     = 0;
++
++    if (!(buf = av_mallocz(HDDVD_BUFFER_SIZE)))
++        return AVERROR(ENOMEM);
++
++    ffio_init_context(&c->mpeg_pb, buf, HDDVD_BUFFER_SIZE, 0, s,
++                      hddvddec_subdemux_read_data, NULL, NULL);
++    c->mpeg_pb.pub.seekable = 0;
++
++    if (!(c->mpeg_ctx = avformat_alloc_context()))
++        return AVERROR(ENOMEM);
++
++    if ((ret = ff_copy_whiteblacklists(c->mpeg_ctx, s)) < 0) {
++        avformat_free_context(c->mpeg_ctx);
++        c->mpeg_ctx = NULL;
++
++        return ret;
++    }
++
++    c->mpeg_ctx->flags                = AVFMT_FLAG_CUSTOM_IO | AVFMT_FLAG_GENPTS;
++    c->mpeg_ctx->ctx_flags           |= AVFMTCTX_UNSEEKABLE;
++    /* the default probesize, for the codec probes of the video streams */
++    c->mpeg_ctx->interrupt_callback   = s->interrupt_callback;
++    c->mpeg_ctx->pb                   = &c->mpeg_pb.pub;
++    c->mpeg_ctx->io_open              = NULL;
++
++    return avformat_open_input(&c->mpeg_ctx, "", &ff_mpegps_demuxer.p, NULL);
++}
++
++/* The language the disc gives a stream, by its PS stream id, or NULL. */
++static const char *hddvddec_stream_language(AVFormatContext *s, int id, enum AVMediaType type)
++{
++    HDDVDDemuxContext *c = s->priv_data;
++    int number;
++
++    /* private stream 1 substreams: audio 0x80-0xcf, subpictures 0x20-0x3f */
++    if (type == AVMEDIA_TYPE_AUDIO && id >= 0x80 && id <= 0xcf)
++        number = id & 0x07;
++    else if (type == AVMEDIA_TYPE_SUBTITLE && id >= 0x20 && id <= 0x3f)
++        number = id & 0x1f;
++    else
++        return NULL;
++
++    if (c->playlist) {
++        /* a playlist track's streamNumber (1-based) names the substream */
++        hddvd_xpl_media_kind kind = type == AVMEDIA_TYPE_AUDIO ? HDDVD_XPL_MEDIA_AUDIO
++                                                               : HDDVD_XPL_MEDIA_SUBPICTURE;
++
++        for (size_t i = 0; i < hddvd_xpl_track_count(c->playlist, c->title); i++) {
++            hddvd_xpl_track track;
++            hddvd_xpl_track_details details;
++            uint32_t stream;
++
++            if (hddvd_xpl_get_track(c->playlist, c->title, i, &track) != HDDVD_OK ||
++                track.kind != kind || !track.language ||
++                hddvd_xpl_get_track_details(c->playlist, c->title, i, &details) != HDDVD_OK ||
++                details.secondary)
++                continue;
++            stream = track.has_stream_number ? track.stream_number : track.track;
++            if (stream == (uint32_t)number + 1)
++                return track.language;
++        }
++
++        return NULL;
++    }
++
++    /* the title set's stream attributes, in stream number order */
++    if (type == AVMEDIA_TYPE_AUDIO)
++        return (size_t)number < FF_ARRAY_ELEMS(c->audio_lang) ? c->audio_lang[number] : NULL;
++
++    return (size_t)number < FF_ARRAY_ELEMS(c->subp_lang) ? c->subp_lang[number] : NULL;
++}
++
++/* Reads a Standard Content title set's stream languages. Failing to is
++   not an error: the streams are then left without one. */
++static void hddvddec_load_languages(AVFormatContext *s)
++{
++    HDDVDDemuxContext *c = s->priv_data;
++    hddvd_stream_attributes attr;
++    hddvd_stream *stream = NULL;
++    hddvd_vts *vts = NULL;
++    char uri[64];
++    int status;
++
++    if (c->playlist || !c->info.title_set)
++        return;
++
++    snprintf(uri, sizeof(uri), "file:///dvddisc/HVDVD_TS/HV%03uI01.IFO", c->info.title_set);
++    status = hddvd_open_resource(c->ctx, uri, &stream);
++    if (status == HDDVD_OK)
++        status = hddvd_vts_open(stream, &vts);
++    hddvd_stream_close(stream);
++    if (status != HDDVD_OK) {
++        av_log(s, AV_LOG_WARNING, "Reading the stream languages of title set %u failed: %s\n",
++               c->info.title_set, hddvd_strerror(status));
++        return;
++    }
++
++    for (size_t i = 0; i < FF_ARRAY_ELEMS(c->audio_lang) &&
++                       i < hddvd_vts_stream_count(vts, HDDVD_STREAM_AUDIO); i++)
++        if (hddvd_vts_get_stream_attributes(vts, HDDVD_STREAM_AUDIO, i, &attr) == HDDVD_OK)
++            av_strlcpy(c->audio_lang[i], attr.language, sizeof(c->audio_lang[i]));
++    for (size_t i = 0; i < FF_ARRAY_ELEMS(c->subp_lang) &&
++                       i < hddvd_vts_stream_count(vts, HDDVD_STREAM_SUBPICTURE); i++)
++        if (hddvd_vts_get_stream_attributes(vts, HDDVD_STREAM_SUBPICTURE, i, &attr) == HDDVD_OK)
++            av_strlcpy(c->subp_lang[i], attr.language, sizeof(c->subp_lang[i]));
++
++    hddvd_vts_close(vts);
++}
++
++static int hddvddec_stream_add(AVFormatContext *s, const AVStream *st_subdemux, AVStream **out)
++{
++    AVStream *st;
++    const char *lang, *type;
++    int ret;
++
++    if (!(st = avformat_new_stream(s, NULL)))
++        return AVERROR(ENOMEM);
++
++    if ((ret = avcodec_parameters_copy(st->codecpar, st_subdemux->codecpar)) < 0)
++        return ret;
++
++    st->id = st_subdemux->id;
++    avpriv_set_pts_info(st, 64, st_subdemux->time_base.num, st_subdemux->time_base.den);
++
++    /* an ISO 639 code, of a playlist's langcode perhaps with an extension
++       ("en:00") */
++    lang = hddvddec_stream_language(s, st->id, st->codecpar->codec_type);
++    if (lang) {
++        char code[4] = { 0 };
++
++        for (int i = 0; i < 3; i++) {
++            int letter = av_tolower(lang[i]);
++
++            if (letter < 'a' || letter > 'z')
++                break;
++            code[i] = letter;
++        }
++        if (strlen(code) >= 2) {
++            const char *iso = ff_convert_lang_to(code, AV_LANG_ISO639_2_BIBL);
++
++            av_dict_set(&st->metadata, "language", iso ? iso : code, 0);
++        }
++    }
++
++    type = av_get_media_type_string(st->codecpar->codec_type);
++    av_log(s, AV_LOG_VERBOSE, "Added stream id 0x%x (%s)%s%s\n", st->id,
++           type ? type : "unknown",
++           lang && lang[0] ? ", language " : "", lang && lang[0] ? lang : "");
++
++    *out = st;
++
++    return 0;
++}
++
++static AVStream *hddvddec_find_stream(AVFormatContext *s, int id)
++{
++    for (unsigned i = 0; i < s->nb_streams; i++)
++        if (s->streams[i]->id == id)
++            return s->streams[i];
++
++    return NULL;
++}
++
++/* Gives every stream the sub-demuxer has found a stream of ours with the
++   same stream id, and follows its codec as the sub-demuxer probes it. */
++static int hddvddec_sync_streams(AVFormatContext *s)
++{
++    HDDVDDemuxContext *c = s->priv_data;
++    int ret;
++
++    for (unsigned i = 0; i < c->mpeg_ctx->nb_streams; i++) {
++        const AVStream *st_subdemux = c->mpeg_ctx->streams[i];
++        AVStream *st = hddvddec_find_stream(s, st_subdemux->id);
++
++        if (!st) {
++            if ((ret = hddvddec_stream_add(s, st_subdemux, &st)) < 0)
++                return ret;
++        } else if (st->codecpar->codec_id   == AV_CODEC_ID_NONE &&
++                   st_subdemux->codecpar->codec_id != AV_CODEC_ID_NONE) {
++            if ((ret = avcodec_parameters_copy(st->codecpar, st_subdemux->codecpar)) < 0)
++                return ret;
++            ffstream(st)->need_context_update = 1;
++        }
++    }
++
++    return 0;
++}
++
++static int hddvddec_open_disc(AVFormatContext *s)
++{
++    HDDVDDemuxContext *c = s->priv_data;
++    int status;
++
++    /* (a directory: a mounted disc or a copy of its files) */
++    if (!(c->ctx = hddvd_open(s->url))) {
++        av_log(s, AV_LOG_ERROR, "Unable to open %s as an HD DVD: it must be the directory "
++                                "of a mounted disc or of a copy of its files\n", s->url);
++        return AVERROR(ENOENT);
++    }
++
++    /* Standard Content titles from the title table, else the playlist's. */
++    status = hddvd_titles_open(c->ctx, &c->titles);
++    if (status == HDDVD_ENOTFOUND && hddvd_has_advanced_content(c->ctx)) {
++        status = hddvd_open_playlist(c->ctx, &c->playlist);
++        if (status == HDDVD_OK)
++            status = hddvd_titles_open_playlist(c->ctx, c->playlist, &c->titles);
++    }
++    if (status == HDDVD_ENOTFOUND && !c->playlist && !hddvd_has_advanced_content(c->ctx)) {
++        av_log(s, AV_LOG_ERROR, "%s is not an HD DVD: it has neither a Standard Content "
++                                "title table nor an Advanced Content playlist\n", s->url);
++        return AVERROR_INVALIDDATA;
++    }
++    if (status != HDDVD_OK)
++        return hddvddec_error(s, status, "Opening the disc's titles failed");
++
++    av_log(s, AV_LOG_VERBOSE, "%s Content disc with %zu titles (libhddvd %s)\n",
++           c->playlist ? "Advanced" : "Standard", hddvd_titles_count(c->titles),
++           hddvd_version());
++
++    return 0;
++}
++
++static int hddvddec_select_title(AVFormatContext *s)
++{
++    HDDVDDemuxContext *c = s->priv_data;
++    size_t count = hddvd_titles_count(c->titles);
++    hddvd_title_info info;
++    int status;
++
++    if (c->opt_title > 0) {
++        if ((size_t)c->opt_title > count) {
++            av_log(s, AV_LOG_ERROR, "Title %d does not exist (the disc has %zu)\n",
++                   c->opt_title, count);
++            return AVERROR(EINVAL);
++        }
++        c->title = (size_t)c->opt_title - 1;
++    } else {
++        /* the longest title with data to play */
++        uint64_t longest = 0;
++        int found = 0;
++
++        for (size_t i = 0; i < count; i++) {
++            if (hddvd_titles_get_info(c->titles, i, &info) != HDDVD_OK || !info.size)
++                continue;
++            if (!found || info.duration.ticks > longest) {
++                c->title = i;
++                longest  = info.duration.ticks;
++                found    = 1;
++            }
++        }
++        if (!found) {
++            av_log(s, AV_LOG_ERROR, "The disc has no title with audio or video to play\n");
++            return AVERROR_INVALIDDATA;
++        }
++        av_log(s, AV_LOG_INFO, "Defaulting to the longest title, #%zu. "
++                               "Use -title to choose another.\n", c->title + 1);
++    }
++
++    if ((status = hddvd_titles_get_info(c->titles, c->title, &c->info)) != HDDVD_OK)
++        return hddvddec_error(s, status, "Reading the title failed");
++
++    if (!c->info.size) {
++        av_log(s, AV_LOG_ERROR, "Title %zu has no audio or video to play\n", c->title + 1);
++        return AVERROR_INVALIDDATA;
++    }
++
++    hddvddec_load_languages(s);
++
++    /* Advanced Content: the time maps anchor the clips' timestamps */
++    if (c->playlist &&
++        (status = hddvd_title_map_open(c->ctx, c->playlist, c->title, &c->map)) != HDDVD_OK) {
++        av_log(s, AV_LOG_VERBOSE, "Opening the title's time maps failed (%s): the clips' "
++                                  "own timestamps are used\n", hddvd_strerror(status));
++        c->map = NULL;
++    }
++
++    return 0;
++}
++
++static int hddvddec_setup_range(AVFormatContext *s)
++{
++    HDDVDDemuxContext *c = s->priv_data;
++    size_t chapters = c->info.chapter_count;
++    size_t first = 0, last = chapters ? chapters - 1 : 0;
++    int64_t time_end = (int64_t)c->info.duration.ticks;
++    hddvd_title_chapter ch;
++    int status;
++
++    c->range_start = 0;
++    c->range_end   = c->info.size;
++    c->time_start  = 0;
++
++    if (c->opt_chapter_start > 1 || c->opt_chapter_end > 0) {
++        if ((size_t)c->opt_chapter_start > chapters ||
++            (c->opt_chapter_end > 0 && ((size_t)c->opt_chapter_end > chapters ||
++                                        c->opt_chapter_end < c->opt_chapter_start))) {
++            av_log(s, AV_LOG_ERROR, "Chapter range [%d, %d] is invalid (title %zu has %zu)\n",
++                   c->opt_chapter_start, c->opt_chapter_end, c->title + 1, chapters);
++            return AVERROR(EINVAL);
++        }
++        first = (size_t)c->opt_chapter_start - 1;
++        if (c->opt_chapter_end > 0)
++            last = (size_t)c->opt_chapter_end - 1;
++
++        if ((status = hddvd_titles_get_chapter(c->titles, c->title, first, &ch)) != HDDVD_OK)
++            return hddvddec_error(s, status, "Reading the chapters failed");
++        c->range_start = ch.offset;
++        c->time_start  = (int64_t)ch.start.ticks;
++
++        if (last + 1 < chapters) {
++            if ((status = hddvd_titles_get_chapter(c->titles, c->title, last + 1, &ch)) != HDDVD_OK)
++                return hddvddec_error(s, status, "Reading the chapters failed");
++            c->range_end = ch.offset;
++            time_end     = (int64_t)ch.start.ticks;
++        }
++        if (c->range_end <= c->range_start) {
++            av_log(s, AV_LOG_ERROR, "The chosen chapters have no data\n");
++            return AVERROR_INVALIDDATA;
++        }
++    }
++
++    for (size_t i = first; chapters && i <= last; i++) {
++        hddvd_title_chapter next;
++        int64_t start, end = time_end;
++
++        if ((status = hddvd_titles_get_chapter(c->titles, c->title, i, &ch)) != HDDVD_OK)
++            return hddvddec_error(s, status, "Reading the chapters failed");
++        if (i + 1 <= last &&
++            hddvd_titles_get_chapter(c->titles, c->title, i + 1, &next) == HDDVD_OK)
++            end = (int64_t)next.start.ticks;
++        start = (int64_t)ch.start.ticks - c->time_start;
++        end  -= c->time_start;
++        if (!avpriv_new_chapter(s, (int64_t)i, HDDVD_TIME_BASE, start,
++                                FFMAX(start, end), NULL))
++            return AVERROR(ENOMEM);
++    }
++
++    c->time_end = FFMAX(time_end, c->time_start);
++    s->duration = av_rescale_q(c->time_end - c->time_start, HDDVD_TIME_BASE, AV_TIME_BASE_Q);
++
++    return 0;
++}
++
++static int hddvddec_read_header(AVFormatContext *s)
++{
++    HDDVDDemuxContext *c = s->priv_data;
++    int ret;
++
++    if ((ret = hddvddec_open_disc(s)) < 0 ||
++        (ret = hddvddec_select_title(s)) < 0 ||
++        (ret = hddvddec_setup_range(s)) < 0)
++        return ret;
++
++    av_log(s, AV_LOG_VERBOSE, "Title %zu: %zu chapters, %zu extents, %" PRIu64 " bytes, "
++                              "demuxing bytes [%" PRIu64 ", %" PRIu64 ")\n",
++           c->title + 1, c->info.chapter_count, c->info.extent_count, c->info.size,
++           c->range_start, c->range_end);
++
++    /* streams are added as the sub-demuxer finds them */
++    s->ctx_flags |= AVFMTCTX_NOHEADER;
++
++    return hddvddec_subdemux_open(s, c->range_start, c->time_start);
++}
++
++static int hddvddec_read_packet(AVFormatContext *s, AVPacket *pkt)
++{
++    HDDVDDemuxContext *c = s->priv_data;
++    AVStream *st_subdemux, *st = NULL;
++    int ret;
++
++    /* (none after a restart or seek failed to open one) */
++    if (!c->mpeg_ctx)
++        return c->read_error ? c->read_error : AVERROR(EIO);
++
++    ret = av_read_frame(c->mpeg_ctx, pkt);
++    if (ret < 0) {
++        if (c->read_error)
++            return c->read_error;
++        if (c->restart && ret == AVERROR_EOF) {
++            hddvd_title_extent ext;
++
++            /* the next run starts where its extent does */
++            memset(&ext, 0, sizeof(ext));
++            hddvddec_run_end(c, c->pos, &ext);
++            av_log(s, AV_LOG_VERBOSE, "Restarting the sub-demuxer at byte %" PRIu64 "\n",
++                   c->pos);
++            if ((ret = hddvddec_subdemux_open(s, c->pos, (int64_t)ext.start.ticks)) < 0)
++                return ret;
++
++            return FFERROR_REDO;
++        }
++
++        return ret;
++    }
++
++    if ((ret = hddvddec_sync_streams(s)) < 0) {
++        av_packet_unref(pkt);
++        return ret;
++    }
++
++    st_subdemux = c->mpeg_ctx->streams[pkt->stream_index];
++    st          = hddvddec_find_stream(s, st_subdemux->id);
++    pkt->stream_index = st->index;
++
++    if (pkt->pts == AV_NOPTS_VALUE || pkt->dts == AV_NOPTS_VALUE)
++        goto discard;
++
++    if (!c->started) {
++        /* start on a video key frame, if the data has video */
++        int has_video = 0;
++
++        for (unsigned i = 0; i < c->mpeg_ctx->nb_streams; i++)
++            if (c->mpeg_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
++                has_video = 1;
++
++        /* (data without video starts after a few packets) */
++        if (c->waited < (has_video ? HDDVD_MAX_WAIT : 64) &&
++            (st_subdemux->codecpar->codec_type != AVMEDIA_TYPE_VIDEO ||
++             !(pkt->flags & AV_PKT_FLAG_KEY))) {
++            c->waited++;
++            goto discard;
++        }
++        if (c->waited >= HDDVD_MAX_WAIT)
++            av_log(s, AV_LOG_WARNING, "No video key frame found, starting without one\n");
++
++        if (!c->have_shift) {
++            c->shift = c->run_time -
++                       av_rescale_q(pkt->pts, st_subdemux->time_base, HDDVD_TIME_BASE);
++            c->have_shift = 1;
++            av_log(s, AV_LOG_VERBOSE, "No timestamp at the extent's start: taking the first "
++                                      "key frame to play at %" PRId64 "\n", c->run_time);
++        }
++        c->started = 1;
++    }
++
++    {
++        int64_t shift = av_rescale_q(c->shift - c->time_start, HDDVD_TIME_BASE, st->time_base);
++
++        pkt->pts += shift;
++        pkt->dts += shift;
++    }
++
++    /* the data of a chapter range runs a little past its start and end */
++    if (pkt->pts < 0 ||
++        ((c->opt_chapter_start > 1 || c->opt_chapter_end > 0) &&
++         av_compare_ts(pkt->pts, st->time_base, c->time_end - c->time_start,
++                       HDDVD_TIME_BASE) >= 0))
++        goto discard;
++
++    pkt->pos = -1;
++
++    return 0;
++
++discard:
++    av_log(s, AV_LOG_TRACE, "Discarding packet st=%d pts=%" PRId64 "\n",
++           pkt->stream_index, pkt->pts);
++    av_packet_unref(pkt);
++
++    return FFERROR_REDO;
++}
++
++static int hddvddec_read_seek(AVFormatContext *s, int stream_index, int64_t timestamp, int flags)
++{
++    HDDVDDemuxContext *c = s->priv_data;
++    hddvd_title_extent ext;
++    hddvd_title_chapter ch;
++    int64_t target, aim;
++    uint64_t pos = c->range_end;
++
++    if (flags & AVSEEK_FLAG_BYTE)
++        return AVERROR(ENOSYS);
++
++    if (stream_index >= 0)
++        target = av_rescale_q(timestamp, s->streams[stream_index]->time_base, HDDVD_TIME_BASE);
++    else
++        target = av_rescale_q(timestamp, AV_TIME_BASE_Q, HDDVD_TIME_BASE);
++
++    if (target < 0 || target > av_rescale_q(s->duration, AV_TIME_BASE_Q, HDDVD_TIME_BASE))
++        return AVERROR(EINVAL);
++
++    target += c->time_start;
++    aim     = FFMAX(target - HDDVD_SEEK_MARGIN, c->time_start);
++
++    if (!c->seek_warned) {
++        av_log(s, AV_LOG_VERBOSE, "Seeking interpolates within a cell or clip, and starts "
++                                  "reading about a second before the requested time\n");
++        c->seek_warned = 1;
++    }
++
++    /* the extent playing at aim, or the next one; within it, interpolate
++       from its start, or from a chapter that starts in it before aim */
++    for (size_t i = 0; i < c->info.extent_count; i++) {
++        int64_t from_time, from_end;
++        uint64_t from_pos, end;
++
++        if (hddvd_titles_get_extent(c->titles, c->title, i, &ext) != HDDVD_OK)
++            return AVERROR_INVALIDDATA;
++        end      = ext.offset + (uint64_t)ext.sector_count * HDDVD_SECTOR_SIZE;
++        from_end = (int64_t)(ext.start.ticks + ext.duration.ticks);
++        if (aim >= from_end && i + 1 < c->info.extent_count)
++            continue;
++
++        from_time = (int64_t)ext.start.ticks;
++        from_pos  = ext.offset;
++        for (size_t j = 0; j < c->info.chapter_count; j++) {
++            if (hddvd_titles_get_chapter(c->titles, c->title, j, &ch) != HDDVD_OK)
++                break;
++            if (ch.offset >= ext.offset && ch.offset < end &&
++                (int64_t)ch.start.ticks <= aim && (int64_t)ch.start.ticks >= from_time) {
++                from_time = (int64_t)ch.start.ticks;
++                from_pos  = ch.offset;
++            }
++        }
++
++        if (aim <= from_time || from_end <= from_time) {
++            pos = from_pos;
++        } else {
++            uint64_t sectors = (end - from_pos) / HDDVD_SECTOR_SIZE;
++
++            pos = from_pos + (uint64_t)av_rescale(aim - from_time, (int64_t)sectors,
++                                                  from_end - from_time) * HDDVD_SECTOR_SIZE;
++            pos = FFMIN(pos, end - HDDVD_SECTOR_SIZE);
++        }
++        break;
++    }
++
++    pos = av_clip64(pos, c->range_start, c->range_end);
++
++    av_log(s, AV_LOG_DEBUG, "Seeking to title time %" PRId64 ": reading from byte %" PRIu64
++                            ", for title time %" PRId64 "\n", target, pos, aim);
++
++    return hddvddec_subdemux_open(s, pos, aim);
++}
++
++static int hddvddec_close(AVFormatContext *s)
++{
++    HDDVDDemuxContext *c = s->priv_data;
++
++    hddvddec_subdemux_close(s);
++    if (c->map)
++        hddvd_title_map_close(c->map);
++    c->map = NULL;
++    if (c->titles)
++        hddvd_titles_close(c->titles);
++    c->titles = NULL;
++    if (c->playlist)
++        hddvd_xpl_close(c->playlist);
++    c->playlist = NULL;
++    if (c->ctx)
++        hddvd_close(c->ctx);
++    c->ctx = NULL;
++
++    return 0;
++}
++
++#define OFFSET(x) offsetof(HDDVDDemuxContext, x)
++static const AVOption hddvddec_options[] = {
++    {"chapter_end",   "last chapter number (0=last)",   OFFSET(opt_chapter_end),   AV_OPT_TYPE_INT, { .i64=0 }, 0, INT_MAX, AV_OPT_FLAG_DECODING_PARAM },
++    {"chapter_start", "first chapter number",           OFFSET(opt_chapter_start), AV_OPT_TYPE_INT, { .i64=1 }, 1, INT_MAX, AV_OPT_FLAG_DECODING_PARAM },
++    {"title",         "title number (0=longest)",       OFFSET(opt_title),         AV_OPT_TYPE_INT, { .i64=0 }, 0, INT_MAX, AV_OPT_FLAG_DECODING_PARAM },
++    {NULL}
++};
++
++static const AVClass hddvddec_class = {
++    .class_name = "HD DVD demuxer",
++    .item_name  = av_default_item_name,
++    .option     = hddvddec_options,
++    .version    = LIBAVUTIL_VERSION_INT
++};
++
++const FFInputFormat ff_hddvd_demuxer = {
++    .p.name         = "hddvd",
++    .p.long_name    = NULL_IF_CONFIG_SMALL("HD DVD"),
++    .p.priv_class   = &hddvddec_class,
++    .p.flags        = AVFMT_SHOW_IDS | AVFMT_TS_DISCONT   | AVFMT_SEEK_TO_PTS |
++                      AVFMT_NOFILE   | AVFMT_NO_BYTE_SEEK | AVFMT_NOGENSEARCH | AVFMT_NOBINSEARCH,
++    .priv_data_size = sizeof(HDDVDDemuxContext),
++    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
++    .read_close     = hddvddec_close,
++    .read_header    = hddvddec_read_header,
++    .read_packet    = hddvddec_read_packet,
++    .read_seek      = hddvddec_read_seek
++};
+diff --git a/libavformat/version.h b/libavformat/version.h
+index 683184d..d8fc959 100644
+--- a/libavformat/version.h
++++ b/libavformat/version.h
+@@ -31,7 +31,7 @@
+ 
+ #include "version_major.h"
+ 
+-#define LIBAVFORMAT_VERSION_MINOR  21
++#define LIBAVFORMAT_VERSION_MINOR  22
+ #define LIBAVFORMAT_VERSION_MICRO 100
+ 
+ #define LIBAVFORMAT_VERSION_INT AV_VERSION_INT(LIBAVFORMAT_VERSION_MAJOR, \
+-- 
+2.43.0
+

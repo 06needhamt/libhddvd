@@ -195,6 +195,8 @@ FFmpeg's `hddvd` demuxer (`libavformat/hddvddec.c`, built with
 `--enable-libhddvd`) is developed in FFmpeg's tree in the same way, as its
 `dvdvideo` demuxer over libdvdnav is. It demuxes one title through
 `hddvd_titles`, with its chapters and stream languages; it has no menus.
+`contrib/ffmpeg/` holds the patch against FFmpeg master, its checks over
+synthetic discs and a review of it (see its README).
 
 Context-bound resource failures are available through
 `hddvd_get_last_error()`, which reports a stable status, subsystem, resource URI,

@@ -1006,7 +1006,8 @@ and failures identify the missing feature or protection provider.
 ### P7-05 — FFmpeg demuxer
 
 **Status:** Complete (prepared as a patch against FFmpeg master; it lives in
-FFmpeg's tree, not here)
+FFmpeg's tree, and the patch, its checks and a review are kept in
+`contrib/ffmpeg/` until it is submitted)
 **Depends on:** P6 titles (`hddvd_titles`), P7-01
 
 An FFmpeg demuxer over libhddvd, for transcoding and remuxing a disc's titles.
