@@ -1003,6 +1003,43 @@ playback under leak and race detectors.
 remain synchronized behind the overlay, zero required capabilities are unknown,
 and failures identify the missing feature or protection provider.
 
+### P7-05 — FFmpeg demuxer
+
+**Status:** Complete (prepared as a patch against FFmpeg master; it lives in
+FFmpeg's tree, not here)
+**Depends on:** P6 titles (`hddvd_titles`), P7-01
+
+An FFmpeg demuxer over libhddvd, for transcoding and remuxing a disc's titles.
+FFmpeg's `dvdvideo` demuxer is the model: `libavformat/hddvddec.c`, enabled with
+`--enable-libhddvd` (libhddvd 0.6.0 or later; LGPL, so no `--enable-gpl`),
+opens a disc directory with `-f hddvd`, chooses a title (`-title`, by default
+the longest with audio or video) and optionally a chapter range
+(`-chapter_start`, `-chapter_end`), and reads it with `hddvd_titles_read` into a
+nested MPEG-PS demuxer, which already knows the EVO substreams (AC-3/E-AC-3,
+DTS-HD, LPCM, MLP, subpictures, VC-1). The sub-demuxer is restarted where the
+title's data jumps (a cell or clip that does not follow the previous one on the
+disc). Each extent's timestamps are moved onto the title's time by the first
+video PTS in the PES headers at the extent's start (clear even on AACS discs),
+so timestamps stay continuous across joins, chapter ranges and seeks. A seek
+interpolates within the extent (from a chapter's offset when one starts in it)
+and reads from about a second early. Chapters are exported; audio and
+subpicture streams take their language from the title set's stream attributes
+(Standard Content) or from the playlist track whose streamNumber matches the
+substream (Advanced Content; unconfirmed on a disc, as in the VLC module).
+Protected sectors fail the read with `AVERROR(EACCES)` and an AACS message.
+Menus, angles and secondary streams are not supported.
+
+**Acceptance (met on synthetic discs):** built with FFmpeg's default
+configuration and a minimal one, and under ASan and UBSan; `fate-source`
+passes. On decodable synthetic discs (MPEG-2 video and two AC-3 streams, built
+outside this tree): an Advanced Content title of two clips from two EVOs and a
+Standard Content title whose second cell comes before its first on the disc
+decode with every frame, in order and with steady timestamps across the join;
+chapter ranges start and end at their chapters; seeks land at the requested
+frame; remuxing to Matroska keeps the streams, languages and chapters; a
+scrambled packet ends demuxing with the AACS error; directories that are not
+discs, missing paths and bad titles or chapters are refused.
+
 ## Phase 8 — release hardening
 
 The original cross-cutting tasks remain independently reviewable and keep their
