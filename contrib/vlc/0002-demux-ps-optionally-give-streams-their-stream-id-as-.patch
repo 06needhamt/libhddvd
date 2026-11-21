@@ -1,0 +1,69 @@
+From fb2581a4c9ee0000e78c135cc54e76fc79402408 Mon Sep 17 00:00:00 2001
+From: Tom Needham <06needhamt@gmail.com>
+Date: Thu, 12 Nov 2026 22:24:20 +0000
+Subject: [PATCH 2/3] demux: ps: optionally give streams their stream id as ES
+ id
+
+A module that chains the PS demuxer, as the HD DVD module does for EVO
+files, cannot otherwise tell its elementary streams apart: the ES ids are
+assigned in the order streams appear. With the private ps-stream-ids
+option, set by the chaining module on its own object, each stream gets its
+MPEG stream id (and substream id) as its ES id, as the DVD modules do.
+Without it nothing changes.
+---
+ modules/demux/mpeg/ps.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/modules/demux/mpeg/ps.c b/modules/demux/mpeg/ps.c
+index c50c23e..8e80920 100644
+--- a/modules/demux/mpeg/ps.c
++++ b/modules/demux/mpeg/ps.c
+@@ -45,6 +45,11 @@
+     "to calculate position and duration. However sometimes this might not " \
+     "be usable. Disable this option to calculate from the bitrate instead." )
+ 
++#define STREAM_IDS_TEXT N_("Use stream ids as ES ids")
++#define STREAM_IDS_LONGTEXT N_("Give each elementary stream its MPEG stream " \
++    "id (and substream id) as its ES id, as the DVD modules do, so that a " \
++    "module chaining this demuxer can tell the streams apart.")
++
+ #define PS_PACKET_PROBE 3
+ #define CDXA_HEADER_SIZE 44
+ #define CDXA_SECTOR_SIZE 2352
+@@ -67,6 +72,8 @@ vlc_module_begin ()
+     add_bool( "ps-trust-timestamps", true, TIME_TEXT,
+                  TIME_LONGTEXT )
+         change_safe ()
++    add_bool( "ps-stream-ids", false, STREAM_IDS_TEXT, STREAM_IDS_LONGTEXT )
++        change_private ()
+ vlc_module_end ()
+ 
+ /*****************************************************************************
+@@ -92,6 +99,7 @@ typedef struct
+     int         i_aob_mlp_count;
+ 
+     bool  b_lost_sync;
++    bool  b_stream_ids;
+     bool  b_have_pack;
+     bool  b_bad_scr;
+     bool  b_seekable;
+@@ -228,6 +236,7 @@ static int Open( vlc_object_t *p_this )
+     p_sys->i_lastpack_byte = i_skip;
+ 
+     p_sys->b_lost_sync = false;
++    p_sys->b_stream_ids = var_InheritBool( p_demux, "ps-stream-ids" );
+     p_sys->b_have_pack = false;
+     p_sys->b_bad_scr   = false;
+     p_sys->b_seekable  = false;
+@@ -548,6 +557,8 @@ static int Demux( demux_t *p_demux )
+                             tk->fmt.audio.i_rate = 8000;
+                         }
+                     }
++                    if( p_sys->b_stream_ids )
++                        tk->fmt.i_id = i_id;
+                     b_new = true;
+                     tk->b_configured = true;
+                     tk->b_updated = true;
+-- 
+2.43.0
+

@@ -189,7 +189,8 @@ tree, as VLC's modules for libdvdnav and libbluray are. This library supplies
 the versioned ABI, capability negotiation, playable titles (`hddvd_titles`),
 Standard Content navigation (`hddvd_std_nav`),
 renderer-neutral display list, and serialized navigation foundations those
-modules consume.
+modules consume. `contrib/vlc/` holds the patch series against VLC master and
+its headless checks (see its README).
 
 FFmpeg's `hddvd` demuxer (`libavformat/hddvddec.c`, built with
 `--enable-libhddvd`) is developed in FFmpeg's tree in the same way, as its

@@ -1,0 +1,2159 @@
+From df0efa5108b72919153d58cbd5d3d0bf033ae92b Mon Sep 17 00:00:00 2001
+From: Tom Needham <06needhamt@gmail.com>
+Date: Thu, 12 Nov 2026 21:56:32 +0000
+Subject: [PATCH 3/3] access: add HD DVD module using libhddvd
+
+An access-demux for HD DVD discs, in the manner of the Blu-ray module.
+libhddvd lists the disc's titles and chapters and reads a title's EVO
+sectors as one MPEG program stream, which a chained PS demuxer parses.
+
+Standard Content discs play as authored: first play, menus that jump and
+the links between cells are followed through libhddvd's navigator, which
+also takes the user's title, chapter and menu choices and seeks.
+
+The experimental hddvd-guess option (off by default) turns on libhddvd's
+guesses at the parts of Standard Content navigation whose HD DVD layout is
+not known, read as DVD-Video lays them out: menu and first-play cells
+play, with their stills; VLC's navigation keys move between their buttons
+and activate them, and the mouse selects and activates the button under
+it; angle blocks play one angle; and PGC links are followed. None of these
+layouts has been confirmed on a disc. A menu cell has no length and
+cannot be sought in, and button highlights are not drawn.
+
+On Advanced Content discs the playlist's titles are offered, and the
+title's HDi application runs in a libhddvd menu session: its display list
+is drawn as an overlay on the video, and VLC's navigation keys and the
+mouse are sent to it (mouse positions are mapped through the size of the
+video under the overlay, which its updater reports). Its player commands
+are carried out: title and chapter jumps; pause, which stops reading until
+it plays again; audio and subtitle choices by track number or language,
+whose playlist streamNumber names the EVO substream (the PS demuxer gives
+streams their stream ids for this); subtitle visibility; and the z-order
+of its application. Starting or stopping other applications is refused,
+as one application runs per title. hddvd-menu turns both kinds of menu
+off.
+
+AACS-protected titles are reported in an error dialog: libhddvd does not
+decrypt.
+---
+ NEWS                       |    3 +
+ configure.ac               |    5 +
+ meson_options.txt          |    5 +
+ modules/access/Makefile.am |    7 +
+ modules/access/hddvd.c     | 2004 ++++++++++++++++++++++++++++++++++++
+ modules/access/meson.build |   11 +
+ po/POTFILES.in             |    1 +
+ 7 files changed, 2036 insertions(+)
+ create mode 100644 modules/access/hddvd.c
+
+diff --git a/NEWS b/NEWS
+index 3d5952b..7626bbc 100644
+--- a/NEWS
++++ b/NEWS
+@@ -122,6 +122,9 @@ Access:
+  * Replace Audio CD CDDB lookups in favor of more accurate MusicBrainz
+  * Improve CD-TEXT and add Shift-JIS encoding support
+  * Improve DVD seeking and chapter timing support
++ * Add HD DVD playback with libhddvd: titles and chapters, Standard Content
++   navigation and interactive (HDi) menus; AACS-protected titles are reported,
++   not decrypted
+  * Add support for forced DVD subtitles
+  * Improve VNC color handling and fix a possible buffer overflow
+  * Improve FTP directory listings, including MLST metadata and LIST fallbacks
+diff --git a/configure.ac b/configure.ac
+index 36507a7..43e9e6a 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -2410,6 +2410,11 @@ dnl  Blu-ray Disc Support with libbluray
+ dnl
+ PKG_ENABLE_MODULES_VLC([BLURAY], [libbluray], [libbluray >= 1.1.0], (libbluray for Blu-ray disc support ) )
+ 
++dnl
++dnl  HD DVD support with libhddvd
++dnl
++PKG_ENABLE_MODULES_VLC([HDDVD], [], [libhddvd >= 0.6.0], [HD DVD input module (libhddvd)], [auto])
++
+ dnl
+ dnl  OpenCV wrapper and example filters
+ dnl
+diff --git a/meson_options.txt b/meson_options.txt
+index c4dcedc..09bab69 100644
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -650,6 +650,11 @@ option('bluray',
+     value: 'auto',
+     description: 'Blu-ray input module (libbluray)')
+ 
++option('hddvd',
++    type: 'feature',
++    value: 'auto',
++    description: 'HD DVD input module (libhddvd)')
++
+ option('shout',
+     type: 'feature',
+     value: 'auto',
+diff --git a/modules/access/Makefile.am b/modules/access/Makefile.am
+index 863c499..6e1d1df 100644
+--- a/modules/access/Makefile.am
++++ b/modules/access/Makefile.am
+@@ -312,6 +312,13 @@ liblibbluray_plugin_la_LDFLAGS = $(AM_LDFLAGS) $(access_RPATH)
+ access_PLUGINS += $(LTLIBlibbluray)
+ EXTRA_LTLIBRARIES += liblibbluray_plugin.la
+ 
++libhddvd_plugin_la_SOURCES = access/hddvd.c
++libhddvd_plugin_la_CFLAGS = $(AM_CFLAGS) $(HDDVD_CFLAGS)
++libhddvd_plugin_la_LIBADD = $(HDDVD_LIBS)
++libhddvd_plugin_la_LDFLAGS = $(AM_LDFLAGS) $(access_RPATH)
++access_PLUGINS += $(LTLIBhddvd)
++EXTRA_LTLIBRARIES += libhddvd_plugin.la
++
+ ### Digital TV ###
+ 
+ libdtv_plugin_la_SOURCES = \
+diff --git a/modules/access/hddvd.c b/modules/access/hddvd.c
+new file mode 100644
+index 0000000..c529f23
+--- /dev/null
++++ b/modules/access/hddvd.c
+@@ -0,0 +1,2004 @@
++/*****************************************************************************
++ * hddvd.c: HD DVD input through libhddvd
++ *****************************************************************************
++ * Copyright (C) 2026 VLC authors and VideoLAN
++ *
++ * Authors: Tom Needham <06needhamt@gmail.com>
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU Lesser General Public License as published by
++ * the Free Software Foundation; either version 2.1 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
++ *****************************************************************************/
++
++/* An access-demux for HD DVD discs, in the manner of the Blu-ray module.
++   libhddvd lists the disc's titles and chapters and reads a title's EVO
++   sectors as one MPEG program stream, which a chained PS demuxer parses.
++   - Standard Content: the disc's own navigation (first play, menus that
++     jump, links between cells) is followed through hddvd_std_nav.
++   - Advanced Content (a disc without Standard Content): the playlist's
++     titles; the title's HDi application runs in an hddvd_menu session,
++     drawn as an overlay on the video, with VLC's navigation keys and the
++     mouse sent to it and its player commands carried out: jumps, play
++     and pause (pausing stops reading, so playback stops once what is
++     buffered has played), track and language choices (a playlist track's
++     streamNumber names the EVO substream), subtitle visibility, and the
++     z-order of its single application. Starting or stopping other
++     applications is refused: one application runs per title.
++   Encrypted (AACS) titles stop with an error dialog: libhddvd does not
++   decrypt, and VLC has nothing that supplies clear sectors to it. */
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include <limits.h>
++#include <stdatomic.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include <vlc_common.h>
++#include <vlc_plugin.h>
++#include <vlc_arrays.h>
++#include <vlc_atomic.h>
++#include <vlc_block.h>
++#include <vlc_demux.h>
++#include <vlc_dialog.h>
++#include <vlc_es_out.h>
++#include <vlc_image.h>
++#include <vlc_input.h>
++#include <vlc_mouse.h>
++#include <vlc_subpicture.h>
++#include <vlc_text_style.h>
++
++#include <hddvd.h>
++
++#define SECTOR 2048u
++#define READ_SECTORS 16u
++/* How much the parser may hold unread before reading waits for it. */
++#define MAX_PENDING (512u * SECTOR)
++#define MOUSE_QUEUE 16u
++#define MENU_WIDTH 1920u
++#define MENU_HEIGHT 1080u
++
++#define MENU_TEXT N_("HD DVD menus")
++#define MENU_LONGTEXT N_("Follow the disc's navigation and show its interactive menus.")
++#define GUESS_TEXT N_("Guess Standard Content menus (experimental)")
++#define GUESS_LONGTEXT                                                                             \
++    N_("Read the parts of a Standard Content disc's navigation whose HD DVD layout is not "      \
++       "known as DVD-Video lays them out: menu cells and their buttons, angle blocks and PGC "    \
++       "links. Unconfirmed on any disc.")
++
++static int Open(vlc_object_t *);
++static void Close(vlc_object_t *);
++
++vlc_module_begin()
++    set_shortname(N_("HD DVD"))
++    set_description(N_("HD DVD input (libhddvd)"))
++    set_subcategory(SUBCAT_INPUT_ACCESS)
++    /* Tried for file:// before the file system access, as dvdnav and bluray
++       are, so that opening a disc directory finds its titles. Open accepts
++       only directories with HD DVD titles. */
++    set_capability("access", 300)
++    add_bool("hddvd-menu", true, MENU_TEXT, MENU_LONGTEXT)
++    add_bool("hddvd-guess", false, GUESS_TEXT, GUESS_LONGTEXT)
++    add_shortcut("hddvd", "file")
++    set_callbacks(Open, Close)
++vlc_module_end()
++
++/* The size of the video under the overlay, as the video output gives it
++   to the overlay's updater: mouse positions are in its pixels. The demuxer
++   and every overlay it made hold a reference, since the video output may
++   keep an overlay a while after the demuxer let it go. */
++typedef struct
++{
++    vlc_mutex_t lock;
++    unsigned width;
++    unsigned height;
++    vlc_atomic_rc_t rc;
++} hddvd_video_size;
++
++static void VideoSizeRelease(hddvd_video_size *size)
++{
++    if (size != NULL && vlc_atomic_rc_dec(&size->rc))
++        free(size);
++}
++
++/* The ES output the chained demuxer writes to: it passes everything on and
++   remembers the video ES, which the menu overlay is attached to. */
++typedef struct
++{
++    es_out_t out;
++    es_out_t *dst;
++    demux_t *demux;
++    vlc_mutex_t lock;
++    es_out_id_t *video;
++    unsigned width;
++    unsigned height;
++    /* The video ES went away: an overlay on it went with it. */
++    bool video_lost;
++    /* At the end of playback the parser is closed so that all it holds has
++       been sent, but its elementary streams are kept until the module
++       closes, so that what they still buffer plays out. */
++    bool keep;
++    es_out_id_t **kept;
++    int kept_count;
++    /* A parser that is being replaced: what it still sends is dropped. */
++    bool discard;
++    /* The parser's audio and subpicture streams, with their packet ids. */
++    struct hddvd_es
++    {
++        es_out_id_t *id;
++        int cat;
++        int packet;
++    } *streams;
++    int stream_count;
++    /* The streams the disc's application chose (-1: none), selected as they
++       appear, since every new parser makes new ones. */
++    int wanted_audio;
++    int wanted_spu;
++    bool spu_hidden;
++} hddvd_es_out;
++
++typedef struct
++{
++    hddvd_ctx *ctx;
++    /* Standard Content: the navigator, which owns the titles. */
++    hddvd_std_nav *nav;
++    /* Advanced Content: the playlist the titles were listed from. */
++    hddvd_xpl *playlist;
++    hddvd_titles *titles;
++    bool own_titles;
++    /* The libhddvd index of each title offered: those with data to play. */
++    size_t *map;
++    size_t count;
++    input_title_t **list;
++
++    unsigned title;
++    unsigned seekpoint;
++    uint64_t offset;
++    /* Where reading stops for now: the end of the cell the navigator gave,
++       or of the title. */
++    uint64_t end;
++    bool navigating;
++    bool menus;
++    bool failed;
++    bool eof;
++    /* The end was reached; the parser is still working through its data. */
++    bool finishing;
++    unsigned updates;
++    /* Bytes sent to the parser that it has not read yet. */
++    atomic_size_t pending;
++
++    vlc_demux_chained_t *parser;
++    hddvd_es_out *es_out;
++
++    /* The title's application and its overlay. */
++    hddvd_menu *menu;
++    hddvd_video_size *video_size;
++    image_handler_t *images;
++    bool overlay_shown;
++    size_t overlay_channel;
++    bool overlay_dirty;
++
++    /* The application paused playback: nothing is read until it plays. */
++    bool held;
++    /* Standard Content with the guesses: a menu cell is playing, read with
++       hddvd_std_nav_read_menu, and its still time (DVD's encoding). */
++    bool menu_cell;
++    hddvd_std_nav_step menu_step;
++    uint8_t still;
++    vlc_tick_t still_until;
++    bool mouse_pressed;
++    /* Track numbers the application chose (1-based, 0: none). */
++    uint32_t audio_track;
++    uint32_t subtitle_track;
++
++    /* Mouse states from the video output, in order: a click can come and
++       go between two calls of the demuxer. When the queue is full, the
++       newest state replaces the last one. */
++    vlc_mutex_t mouse_lock;
++    struct
++    {
++        int x;
++        int y;
++        bool pressed;
++    } mouse[MOUSE_QUEUE];
++    unsigned mouse_count;
++} demux_sys_t;
++
++/*****************************************************************************
++ * The ES output wrapper
++ *****************************************************************************/
++static void OnMouse(const vlc_mouse_t *mouse, void *data)
++{
++    demux_t *demux = data;
++    demux_sys_t *sys = demux->p_sys;
++
++    if (mouse == NULL)
++        return;
++    vlc_mutex_lock(&sys->mouse_lock);
++    if (sys->mouse_count == MOUSE_QUEUE)
++        sys->mouse_count--;
++    sys->mouse[sys->mouse_count].x = mouse->i_x;
++    sys->mouse[sys->mouse_count].y = mouse->i_y;
++    sys->mouse[sys->mouse_count].pressed = vlc_mouse_IsLeftPressed(mouse);
++    sys->mouse_count++;
++    vlc_mutex_unlock(&sys->mouse_lock);
++}
++
++/* The number of an EVO stream in its packet id: the substream's low bits. */
++static int StreamNumber(int cat, int packet)
++{
++    return packet & (cat == SPU_ES ? 0x1f : 0x07);
++}
++
++static es_out_id_t *EsOutAdd(es_out_t *out, input_source_t *in, const es_format_t *fmt)
++{
++    hddvd_es_out *priv = container_of(out, hddvd_es_out, out);
++    es_out_id_t *id = priv->dst->cbs->add(priv->dst, in, fmt);
++
++    if (id != NULL && (fmt->i_cat == AUDIO_ES || fmt->i_cat == SPU_ES))
++    {
++        struct hddvd_es stream = {id, fmt->i_cat, fmt->i_id};
++        bool select;
++
++        vlc_mutex_lock(&priv->lock);
++        TAB_APPEND(priv->stream_count, priv->streams, stream);
++        select = fmt->i_cat == AUDIO_ES
++                     ? priv->wanted_audio == StreamNumber(AUDIO_ES, fmt->i_id)
++                     : !priv->spu_hidden && priv->wanted_spu == StreamNumber(SPU_ES, fmt->i_id);
++        vlc_mutex_unlock(&priv->lock);
++        if (select)
++            es_out_Control(priv->dst, ES_OUT_SET_ES, id);
++    }
++
++    if (id != NULL && fmt->i_cat == VIDEO_ES)
++    {
++        vlc_mutex_lock(&priv->lock);
++        if (priv->video == NULL)
++        {
++            priv->video = id;
++            priv->width = fmt->video.i_visible_width;
++            priv->height = fmt->video.i_visible_height;
++            es_out_Control(priv->dst, ES_OUT_VOUT_SET_MOUSE_EVENT, id, OnMouse, priv->demux);
++        }
++        vlc_mutex_unlock(&priv->lock);
++    }
++    return id;
++}
++
++static int EsOutSend(es_out_t *out, es_out_id_t *id, block_t *block)
++{
++    hddvd_es_out *priv = container_of(out, hddvd_es_out, out);
++    bool discard;
++
++    vlc_mutex_lock(&priv->lock);
++    discard = priv->discard;
++    vlc_mutex_unlock(&priv->lock);
++    if (discard)
++    {
++        block_Release(block);
++        return VLC_SUCCESS;
++    }
++    return es_out_Send(priv->dst, id, block);
++}
++
++static void ForgetStream(hddvd_es_out *priv, es_out_id_t *id)
++{
++    for (int i = 0; i < priv->stream_count; i++)
++        if (priv->streams[i].id == id)
++        {
++            TAB_ERASE(priv->stream_count, priv->streams, i);
++            break;
++        }
++}
++
++static void EsOutDel(es_out_t *out, es_out_id_t *id)
++{
++    hddvd_es_out *priv = container_of(out, hddvd_es_out, out);
++
++    vlc_mutex_lock(&priv->lock);
++    if (priv->keep)
++    {
++        TAB_APPEND(priv->kept_count, priv->kept, id);
++        vlc_mutex_unlock(&priv->lock);
++        return;
++    }
++    ForgetStream(priv, id);
++    if (priv->video == id)
++    {
++        priv->video = NULL;
++        priv->video_lost = true;
++    }
++    vlc_mutex_unlock(&priv->lock);
++    es_out_Del(priv->dst, id);
++}
++
++/* Deletes the elementary streams kept at the end of playback. */
++static void EsOutDropKept(hddvd_es_out *priv)
++{
++    vlc_mutex_lock(&priv->lock);
++    priv->keep = false;
++    for (int i = 0; i < priv->kept_count; i++)
++    {
++        if (priv->video == priv->kept[i])
++        {
++            priv->video = NULL;
++            priv->video_lost = true;
++        }
++        ForgetStream(priv, priv->kept[i]);
++        es_out_Del(priv->dst, priv->kept[i]);
++    }
++    TAB_CLEAN(priv->kept_count, priv->kept);
++    vlc_mutex_unlock(&priv->lock);
++}
++
++static int EsOutControl(es_out_t *out, input_source_t *in, int query, va_list args)
++{
++    hddvd_es_out *priv = container_of(out, hddvd_es_out, out);
++
++    return priv->dst->cbs->control(priv->dst, in, query, args);
++}
++
++static void EsOutDestroy(es_out_t *out)
++{
++    hddvd_es_out *priv = container_of(out, hddvd_es_out, out);
++
++    TAB_CLEAN(priv->stream_count, priv->streams);
++    free(priv);
++}
++
++static const struct es_out_callbacks es_out_callbacks = {
++    .add = EsOutAdd,
++    .send = EsOutSend,
++    .del = EsOutDel,
++    .control = EsOutControl,
++    .destroy = EsOutDestroy,
++};
++
++/*****************************************************************************
++ * Titles
++ *****************************************************************************/
++static vlc_tick_t ToTick(hddvd_time time)
++{
++    return vlc_tick_from_samples(time.ticks, 90000);
++}
++
++static size_t LibraryTitle(const demux_sys_t *sys)
++{
++    return sys->map[sys->title];
++}
++
++/* The offered index of a libhddvd title, or -1 when it has nothing to play. */
++static int OfferedTitle(const demux_sys_t *sys, size_t title)
++{
++    for (size_t i = 0; i < sys->count; i++)
++        if (sys->map[i] == title)
++            return (int)i;
++    return -1;
++}
++
++static input_title_t *NewTitle(const hddvd_titles *titles, size_t index)
++{
++    hddvd_title_info info;
++    input_title_t *title;
++
++    if (hddvd_titles_get_info(titles, index, &info) != HDDVD_OK)
++        return NULL;
++    title = vlc_input_title_New();
++    if (title == NULL)
++        return NULL;
++    title->i_length = ToTick(info.duration);
++    for (size_t i = 0; i < info.chapter_count; i++)
++    {
++        hddvd_title_chapter chapter;
++        seekpoint_t *seekpoint = vlc_seekpoint_New();
++
++        if (seekpoint == NULL || hddvd_titles_get_chapter(titles, index, i, &chapter) != HDDVD_OK)
++        {
++            if (seekpoint != NULL)
++                vlc_seekpoint_Delete(seekpoint);
++            vlc_input_title_Delete(title);
++            return NULL;
++        }
++        seekpoint->i_time_offset = ToTick(chapter.start);
++        TAB_APPEND(title->i_seekpoint, title->seekpoint, seekpoint);
++    }
++    return title;
++}
++
++/* The title time of the current byte position, from the extents. */
++static hddvd_time TitleTime(const demux_sys_t *sys)
++{
++    hddvd_title_info info;
++    hddvd_time time = {0};
++
++    if (hddvd_titles_get_info(sys->titles, LibraryTitle(sys), &info) != HDDVD_OK)
++        return time;
++    for (size_t i = 0; i < info.extent_count; i++)
++    {
++        hddvd_title_extent extent;
++        uint64_t size;
++
++        if (hddvd_titles_get_extent(sys->titles, LibraryTitle(sys), i, &extent) != HDDVD_OK)
++            break;
++        size = (uint64_t)extent.sector_count * SECTOR;
++        if (sys->offset < extent.offset)
++            break;
++        time.ticks = extent.start.ticks;
++        if (sys->offset - extent.offset < size)
++        {
++            time.ticks += extent.duration.ticks * (sys->offset - extent.offset) / size;
++            break;
++        }
++        time.ticks += extent.duration.ticks;
++    }
++    return time;
++}
++
++/* The byte offset that plays a title time, at a sector boundary. */
++static uint64_t OffsetAt(const demux_sys_t *sys, size_t title, hddvd_time time)
++{
++    hddvd_title_info info;
++    uint64_t offset = 0;
++
++    if (hddvd_titles_get_info(sys->titles, title, &info) != HDDVD_OK)
++        return 0;
++    for (size_t i = 0; i < info.extent_count; i++)
++    {
++        hddvd_title_extent extent;
++
++        if (hddvd_titles_get_extent(sys->titles, title, i, &extent) != HDDVD_OK ||
++            time.ticks < extent.start.ticks)
++            break;
++        offset = extent.offset;
++        if (extent.duration.ticks > 0 && time.ticks - extent.start.ticks < extent.duration.ticks)
++        {
++            offset += (uint64_t)extent.sector_count * (time.ticks - extent.start.ticks) /
++                      extent.duration.ticks * SECTOR;
++            break;
++        }
++        offset += (uint64_t)extent.sector_count * SECTOR;
++    }
++    return offset < info.size ? offset : 0;
++}
++
++static void UpdateSeekpoint(demux_sys_t *sys)
++{
++    size_t chapter;
++
++    if (hddvd_titles_chapter_at(sys->titles, LibraryTitle(sys), sys->offset, &chapter) ==
++            HDDVD_OK &&
++        chapter != sys->seekpoint)
++    {
++        sys->seekpoint = (unsigned)chapter;
++        sys->updates |= INPUT_UPDATE_SEEKPOINT;
++    }
++}
++
++/*****************************************************************************
++ * The chained demuxer
++ *****************************************************************************/
++/* A block for the parser that is counted until the parser has read it. */
++typedef struct
++{
++    block_t self;
++    atomic_size_t *pending;
++    size_t size;
++} hddvd_block;
++
++static void BlockFree(block_t *block)
++{
++    hddvd_block *counted = container_of(block, hddvd_block, self);
++
++    atomic_fetch_sub(counted->pending, counted->size);
++    free(counted);
++}
++
++static const struct vlc_frame_callbacks block_callbacks = {BlockFree};
++
++static block_t *NewBlock(demux_sys_t *sys, size_t size)
++{
++    hddvd_block *counted = malloc(sizeof(*counted) + size);
++
++    if (counted == NULL)
++        return NULL;
++    block_Init(&counted->self, &block_callbacks, counted + 1, size);
++    counted->pending = &sys->pending;
++    counted->size = size;
++    atomic_fetch_add(&sys->pending, size);
++    return &counted->self;
++}
++
++/* A new parser for a new position: the old one's elementary streams go,
++   and with them any overlay. What the old parser still holds is dropped,
++   and the decoders are flushed first, which releases the parser if it is
++   waiting on them (as it is while playback is paused). */
++static void RestartParser(demux_t *demux)
++{
++    demux_sys_t *sys = demux->p_sys;
++
++    if (sys->parser != NULL)
++    {
++        vlc_mutex_lock(&sys->es_out->lock);
++        sys->es_out->discard = true;
++        vlc_mutex_unlock(&sys->es_out->lock);
++        es_out_Control(demux->out, ES_OUT_RESET_PCR);
++        vlc_demux_chained_Delete(sys->parser);
++        vlc_mutex_lock(&sys->es_out->lock);
++        sys->es_out->discard = false;
++        vlc_mutex_unlock(&sys->es_out->lock);
++    }
++    sys->finishing = false;
++    EsOutDropKept(sys->es_out);
++    sys->parser = vlc_demux_chained_New(VLC_OBJECT(demux), "ps", &sys->es_out->out);
++    if (sys->parser == NULL)
++        msg_Err(demux, "cannot create the program stream demuxer");
++    es_out_Control(demux->out, ES_OUT_RESET_PCR);
++}
++
++/* Ends playback. Nothing may reach the ES output once the input has been
++   told of the end, so the parser first reads all it was sent (the demuxer
++   is called again meanwhile, and stays responsive) and is then closed,
++   which waits for what it is still sending. */
++static int Finish(demux_t *demux)
++{
++    demux_sys_t *sys = demux->p_sys;
++
++    sys->finishing = true;
++    if (sys->parser != NULL)
++    {
++        if (atomic_load(&sys->pending) > 0)
++        {
++            vlc_tick_sleep(VLC_TICK_FROM_MS(10));
++            return VLC_DEMUXER_SUCCESS;
++        }
++        vlc_mutex_lock(&sys->es_out->lock);
++        sys->es_out->keep = true;
++        vlc_mutex_unlock(&sys->es_out->lock);
++        vlc_demux_chained_Delete(sys->parser);
++        sys->parser = NULL;
++    }
++    sys->eof = true;
++    return VLC_DEMUXER_EOF;
++}
++
++/*****************************************************************************
++ * The menu overlay
++ *****************************************************************************/
++static void ReleasePlane(void *opaque, const uint8_t *pixels)
++{
++    VLC_UNUSED(opaque);
++    free((void *)pixels);
++}
++
++/* libhddvd's image decoder: VLC's image handler, to premultiplied RGBA. An
++   image VLC cannot decode becomes one transparent pixel, so the rest of
++   the menu still shows. */
++static int DecodeImage(void *opaque, const char *id, const void *data, size_t size,
++                       hddvd_image_plane *plane)
++{
++    demux_t *demux = opaque;
++    demux_sys_t *sys = demux->p_sys;
++    const uint8_t *bytes = data;
++    picture_t *picture = NULL;
++    es_format_t in;
++    video_format_t out;
++    vlc_fourcc_t codec = 0;
++    uint8_t *pixels;
++
++    if (size >= 8 && !memcmp(bytes, "\x89PNG", 4))
++        codec = VLC_CODEC_PNG;
++    else if (size >= 3 && bytes[0] == 0xff && bytes[1] == 0xd8)
++        codec = VLC_CODEC_JPEG;
++    if (codec != 0 && sys->images != NULL)
++    {
++        block_t *block = block_Alloc(size);
++
++        if (block != NULL)
++        {
++            memcpy(block->p_buffer, data, size);
++            es_format_Init(&in, VIDEO_ES, codec);
++            video_format_Init(&out, VLC_CODEC_RGBA);
++            picture = image_Read(sys->images, block, &in, &out);
++            es_format_Clean(&in);
++        }
++    }
++    memset(plane, 0, sizeof(*plane));
++    plane->release = ReleasePlane;
++    if (picture == NULL)
++    {
++        msg_Warn(demux, "menu image %s cannot be decoded", id);
++        pixels = calloc(1, 4);
++        if (pixels == NULL)
++            return HDDVD_ENOMEM;
++        plane->pixels = pixels;
++        plane->width = plane->height = 1;
++        plane->stride = 4;
++        return HDDVD_OK;
++    }
++
++    unsigned width = picture->format.i_visible_width;
++    unsigned height = picture->format.i_visible_height;
++
++    pixels = vlc_alloc(height, (size_t)width * 4);
++    if (pixels == NULL || width == 0 || height == 0)
++    {
++        free(pixels);
++        picture_Release(picture);
++        return HDDVD_ENOMEM;
++    }
++    for (unsigned y = 0; y < height; y++)
++    {
++        const uint8_t *from = picture->p[0].p_pixels + (size_t)y * picture->p[0].i_pitch;
++        uint8_t *to = pixels + (size_t)y * width * 4;
++
++        for (unsigned x = 0; x < width; x++, from += 4, to += 4)
++        {
++            unsigned alpha = from[3];
++
++            to[0] = (uint8_t)(from[0] * alpha / 255);
++            to[1] = (uint8_t)(from[1] * alpha / 255);
++            to[2] = (uint8_t)(from[2] * alpha / 255);
++            to[3] = (uint8_t)alpha;
++        }
++    }
++    picture_Release(picture);
++    plane->pixels = pixels;
++    plane->width = width;
++    plane->height = height;
++    plane->stride = (size_t)width * 4;
++    return HDDVD_OK;
++}
++
++/* The part of a quad that is drawn: its destination within its clip and
++   the menu's area. */
++static bool VisibleRect(const hddvd_display_quad *quad, hddvd_rect *out)
++{
++    int64_t x0 = quad->destination.x, y0 = quad->destination.y;
++    int64_t x1 = x0 + quad->destination.width, y1 = y0 + quad->destination.height;
++
++    if (quad->clip.width > 0 && quad->clip.height > 0)
++    {
++        x0 = __MAX(x0, quad->clip.x);
++        y0 = __MAX(y0, quad->clip.y);
++        x1 = __MIN(x1, (int64_t)quad->clip.x + quad->clip.width);
++        y1 = __MIN(y1, (int64_t)quad->clip.y + quad->clip.height);
++    }
++    x0 = __MAX(x0, 0);
++    y0 = __MAX(y0, 0);
++    x1 = __MIN(x1, MENU_WIDTH);
++    y1 = __MIN(y1, MENU_HEIGHT);
++    if (x1 <= x0 || y1 <= y0)
++        return false;
++    out->x = (int32_t)x0;
++    out->y = (int32_t)y0;
++    out->width = (uint32_t)(x1 - x0);
++    out->height = (uint32_t)(y1 - y0);
++    return true;
++}
++
++static subpicture_region_t *NewRegion(const hddvd_rect *rect)
++{
++    video_format_t fmt;
++    subpicture_region_t *region;
++
++    video_format_Init(&fmt, VLC_CODEC_RGBA);
++    video_format_Setup(&fmt, VLC_CODEC_RGBA, rect->width, rect->height, rect->width,
++                       rect->height, 1, 1);
++    region = subpicture_region_New(&fmt);
++    if (region != NULL)
++    {
++        region->b_absolute = true;
++        region->b_in_window = false;
++        region->i_x = rect->x;
++        region->i_y = rect->y;
++    }
++    return region;
++}
++
++/* A fill: color is 0xRRGGBBAA. */
++static subpicture_region_t *FillRegion(const hddvd_display_item *item, const hddvd_rect *rect)
++{
++    subpicture_region_t *region = NewRegion(rect);
++    const uint8_t rgba[4] = {(uint8_t)(item->color >> 24), (uint8_t)(item->color >> 16),
++                             (uint8_t)(item->color >> 8),
++                             (uint8_t)((item->color & 0xff) * item->quad.opacity / 255)};
++
++    if (region == NULL)
++        return NULL;
++    for (unsigned y = 0; y < rect->height; y++)
++    {
++        uint8_t *line = region->p_picture->p[0].p_pixels +
++                        (size_t)y * region->p_picture->p[0].i_pitch;
++
++        for (unsigned x = 0; x < rect->width; x++)
++            memcpy(line + (size_t)x * 4, rgba, 4);
++    }
++    return region;
++}
++
++/* An image: the source rectangle of the plane, scaled to the destination
++   by nearest neighbour, from premultiplied to straight alpha. */
++static subpicture_region_t *ImageRegion(const hddvd_display_item *item, const hddvd_rect *rect)
++{
++    const hddvd_display_quad *quad = &item->quad;
++    subpicture_region_t *region;
++
++    if (quad->image.pixels == NULL || quad->source.width == 0 || quad->source.height == 0 ||
++        quad->destination.width == 0 || quad->destination.height == 0)
++        return NULL;
++    region = NewRegion(rect);
++    if (region == NULL)
++        return NULL;
++    for (unsigned y = 0; y < rect->height; y++)
++    {
++        uint8_t *to = region->p_picture->p[0].p_pixels +
++                      (size_t)y * region->p_picture->p[0].i_pitch;
++        uint64_t dy = (uint64_t)(rect->y - quad->destination.y) + y;
++        uint64_t sy = (uint64_t)quad->source.y + dy * quad->source.height / quad->destination.height;
++
++        if (sy >= quad->image.height)
++            sy = quad->image.height - 1;
++        for (unsigned x = 0; x < rect->width; x++, to += 4)
++        {
++            uint64_t dx = (uint64_t)(rect->x - quad->destination.x) + x;
++            uint64_t sx =
++                (uint64_t)quad->source.x + dx * quad->source.width / quad->destination.width;
++            const uint8_t *from;
++            unsigned alpha;
++
++            if (sx >= quad->image.width)
++                sx = quad->image.width - 1;
++            from = quad->image.pixels + sy * quad->image.stride + sx * 4;
++            alpha = from[3];
++            for (int c = 0; c < 3; c++)
++                to[c] = alpha ? (uint8_t)__MIN(255u, from[c] * 255u / alpha) : 0;
++            to[3] = (uint8_t)(alpha * quad->opacity / 255);
++        }
++    }
++    return region;
++}
++
++static subpicture_region_t *TextRegion(const hddvd_display_item *item, const hddvd_rect *rect)
++{
++    subpicture_region_t *region;
++
++    if (item->text == NULL || item->text[0] == '\0')
++        return NULL;
++    region = subpicture_region_NewText();
++    if (region == NULL)
++        return NULL;
++    region->p_text = text_segment_New(item->text);
++    if (region->p_text == NULL)
++    {
++        subpicture_region_Delete(region);
++        return NULL;
++    }
++    region->p_text->style = text_style_Create(STYLE_NO_DEFAULTS);
++    if (region->p_text->style != NULL)
++    {
++        if (item->font_size > 0)
++            region->p_text->style->i_font_size = (int)item->font_size;
++        if (item->has_color)
++        {
++            region->p_text->style->i_font_color = item->color >> 8;
++            region->p_text->style->i_features |= STYLE_HAS_FONT_COLOR;
++        }
++    }
++    region->b_absolute = true;
++    region->b_in_window = false;
++    region->i_x = rect->x;
++    region->i_y = rect->y;
++    region->i_max_width = (int)rect->width;
++    region->i_max_height = (int)rect->height;
++    region->i_align = SUBPICTURE_ALIGN_LEFT | SUBPICTURE_ALIGN_TOP;
++    return region;
++}
++
++static void OverlayUpdate(subpicture_t *subpicture,
++                          const struct vlc_spu_updater_configuration *cfg)
++{
++    hddvd_video_size *size = subpicture->updater.sys;
++    const video_format_t *video = cfg->current.video_src;
++
++    if (video == NULL || video->i_visible_width == 0 || video->i_visible_height == 0)
++        return;
++    vlc_mutex_lock(&size->lock);
++    size->width = video->i_visible_width;
++    size->height = video->i_visible_height;
++    vlc_mutex_unlock(&size->lock);
++}
++
++static void OverlayDestroy(subpicture_t *subpicture)
++{
++    VideoSizeRelease(subpicture->updater.sys);
++}
++
++static const struct vlc_spu_updater_ops overlay_ops = {
++    .update = OverlayUpdate,
++    .destroy = OverlayDestroy,
++};
++
++static subpicture_t *NewOverlay(demux_t *demux, const hddvd_display_list *list)
++{
++    demux_sys_t *sys = demux->p_sys;
++    subpicture_updater_t updater = {sys->video_size, &overlay_ops};
++    subpicture_t *subpicture = subpicture_New(&updater);
++    size_t regions = 0;
++
++    if (subpicture == NULL)
++        return NULL;
++    vlc_atomic_rc_inc(&sys->video_size->rc);
++    subpicture->i_original_picture_width = MENU_WIDTH;
++    subpicture->i_original_picture_height = MENU_HEIGHT;
++    subpicture->b_ephemer = false;
++    for (size_t i = 0; i < hddvd_display_item_count(list); i++)
++    {
++        hddvd_display_item item;
++        hddvd_rect rect;
++        subpicture_region_t *region = NULL;
++
++        if (hddvd_display_get_item(list, i, &item) != HDDVD_OK || !VisibleRect(&item.quad, &rect))
++            continue;
++        switch (item.kind)
++        {
++            case HDDVD_DISPLAY_ITEM_FILL:
++                region = FillRegion(&item, &rect);
++                break;
++            case HDDVD_DISPLAY_ITEM_IMAGE:
++                region = ImageRegion(&item, &rect);
++                break;
++            case HDDVD_DISPLAY_ITEM_TEXT:
++                region = TextRegion(&item, &rect);
++                break;
++        }
++        if (region != NULL)
++        {
++            vlc_spu_regions_push(&subpicture->regions, region);
++            regions++;
++        }
++    }
++    msg_Dbg(demux, "menu overlay: %zu regions", regions);
++    return subpicture;
++}
++
++/* Shows the menu's current display list on the video, once there is one. */
++static void UpdateOverlay(demux_t *demux)
++{
++    demux_sys_t *sys = demux->p_sys;
++    hddvd_es_out *out = sys->es_out;
++    const hddvd_display_list *list = NULL;
++    es_out_id_t *video;
++    int changed = 0;
++
++    vlc_mutex_lock(&out->lock);
++    video = out->video;
++    if (out->video_lost)
++    {
++        out->video_lost = false;
++        sys->overlay_shown = false;
++        sys->overlay_dirty = true;
++    }
++    vlc_mutex_unlock(&out->lock);
++
++    if (hddvd_menu_update(sys->menu, &list, &changed) != HDDVD_OK || list == NULL)
++        return;
++    if (changed)
++    {
++        sys->overlay_dirty = true;
++        msg_Dbg(demux, "menu changed: %zu items, focus %zu", hddvd_display_item_count(list),
++                hddvd_runtime_focus(hddvd_menu_runtime(sys->menu)));
++    }
++    if (!sys->overlay_dirty || video == NULL)
++        return;
++
++    subpicture_t *subpicture = NewOverlay(demux, list);
++
++    if (subpicture == NULL)
++        return;
++    if (sys->overlay_shown)
++    {
++        es_out_Control(demux->out, ES_OUT_VOUT_DEL_OVERLAY, video, sys->overlay_channel);
++        sys->overlay_shown = false;
++    }
++    /* Fails until the video has an output; tried again on the next call. */
++    if (es_out_Control(demux->out, ES_OUT_VOUT_ADD_OVERLAY, video, subpicture,
++                       &sys->overlay_channel) == VLC_SUCCESS)
++    {
++        sys->overlay_shown = true;
++        sys->overlay_dirty = false;
++        msg_Dbg(demux, "menu overlay shown");
++    }
++    else
++        subpicture_Delete(subpicture);
++}
++
++static void CloseMenu(demux_t *demux)
++{
++    demux_sys_t *sys = demux->p_sys;
++
++    if (sys->menu == NULL)
++        return;
++    if (sys->overlay_shown)
++    {
++        vlc_mutex_lock(&sys->es_out->lock);
++        es_out_id_t *video = sys->es_out->video;
++        vlc_mutex_unlock(&sys->es_out->lock);
++        if (video != NULL)
++            es_out_Control(demux->out, ES_OUT_VOUT_DEL_OVERLAY, video, sys->overlay_channel);
++        sys->overlay_shown = false;
++    }
++    hddvd_menu_close(sys->menu);
++    sys->menu = NULL;
++}
++
++/* Runs the application of the title now playing, if it has one. */
++static void OpenMenu(demux_t *demux)
++{
++    demux_sys_t *sys = demux->p_sys;
++    size_t title = LibraryTitle(sys);
++
++    CloseMenu(demux);
++    if (!sys->menus || sys->playlist == NULL)
++        return;
++    for (size_t i = 0; i < hddvd_xpl_application_count(sys->playlist, title); i++)
++    {
++        hddvd_xpl_application application;
++        hddvd_event event;
++        int status;
++
++        if (hddvd_xpl_get_application(sys->playlist, title, i, &application) != HDDVD_OK ||
++            application.src == NULL)
++            continue;
++        status = hddvd_menu_open(sys->ctx, sys->playlist, application.src, DecodeImage, demux,
++                                 &sys->menu);
++        if (status != HDDVD_OK)
++        {
++            msg_Warn(demux, "menu %s cannot run: %s", application.src, hddvd_strerror(status));
++            continue;
++        }
++        /* The application may run in several titles: say which one this is. */
++        memset(&event, 0, sizeof(event));
++        event.type = HDDVD_EVENT_TITLE_BEGIN;
++        event.data.position.title = (uint32_t)title;
++        hddvd_menu_post(sys->menu, &event);
++        sys->overlay_dirty = true;
++        msg_Dbg(demux, "menu %s runs for title %u", application.src, sys->title);
++        return;
++    }
++}
++
++/*****************************************************************************
++ * Positions
++ *****************************************************************************/
++/* Plays an offered title from a byte offset to its end. */
++static void PlayTitle(demux_t *demux, unsigned title, uint64_t offset)
++{
++    demux_sys_t *sys = demux->p_sys;
++    hddvd_title_info info;
++    bool changed = title != sys->title;
++
++    sys->title = title;
++    sys->offset = offset - offset % SECTOR;
++    sys->end = 0;
++    if (hddvd_titles_get_info(sys->titles, LibraryTitle(sys), &info) == HDDVD_OK)
++        sys->end = info.size;
++    sys->failed = false;
++    sys->eof = false;
++    sys->held = false;
++    sys->menu_cell = false;
++    sys->updates |= INPUT_UPDATE_TITLE | INPUT_UPDATE_SEEKPOINT;
++    sys->seekpoint = 0;
++    UpdateSeekpoint(sys);
++    msg_Dbg(demux, "title %u chapter %u at offset %" PRIu64, sys->title, sys->seekpoint,
++            sys->offset);
++    if (changed || sys->menu == NULL)
++        OpenMenu(demux);
++    else
++        hddvd_menu_seek(sys->menu, TitleTime(sys));
++}
++
++/* Acts on what the Standard Content navigator arrived at. Returns false
++   when nothing is left to play. */
++static bool ApplyStep(demux_t *demux, const hddvd_std_nav_step *step)
++{
++    demux_sys_t *sys = demux->p_sys;
++    int title;
++
++    switch (step->kind)
++    {
++        case HDDVD_STD_NAV_PLAY:
++            title = OfferedTitle(sys, step->title);
++            if (title < 0)
++                break;
++            if ((unsigned)title != sys->title)
++                sys->updates |= INPUT_UPDATE_TITLE | INPUT_UPDATE_SEEKPOINT;
++            sys->title = (unsigned)title;
++            sys->offset = step->offset;
++            sys->end = step->offset + step->size;
++            sys->navigating = true;
++            sys->eof = false;
++            sys->held = false;
++            sys->menu_cell = false;
++            UpdateSeekpoint(sys);
++            msg_Dbg(demux, "navigation: title %u cell %u at offset %" PRIu64, sys->title,
++                    step->cell, sys->offset);
++            return true;
++        case HDDVD_STD_NAV_MENU:
++        {
++            /* A menu or first-play cell, which only the guesses give. */
++            hddvd_std_nav_menu_cell cell;
++
++            if (hddvd_std_nav_get_menu_cell(sys->nav, &cell) != HDDVD_OK)
++                break;
++            if (sys->title == UINT_MAX)
++                sys->title = 0;
++            sys->offset = 0;
++            sys->end = step->size;
++            sys->navigating = true;
++            sys->eof = false;
++            sys->held = false;
++            sys->menu_cell = true;
++            sys->menu_step = *step;
++            sys->still = cell.still;
++            sys->still_until = VLC_TICK_INVALID;
++            msg_Dbg(demux,
++                    "navigation: menu cell %u of PGC %u (title set %u), still %u, %zu buttons",
++                    step->cell, step->pgc, step->title_set, cell.still,
++                    hddvd_std_nav_button_count(sys->nav));
++            return true;
++        }
++        case HDDVD_STD_NAV_STOP:
++            msg_Dbg(demux, "navigation ended: %s", step->reason);
++            sys->eof = true;
++            return false;
++        default:
++            break;
++    }
++    /* Something the navigator does not model: the title plays on plainly. */
++    msg_Warn(demux, "disc navigation not followed: %s",
++             step->reason != NULL ? step->reason : "the title has nothing to play");
++    sys->navigating = false;
++    return false;
++}
++
++/*****************************************************************************
++ * Standard Content menu cells (the guesses)
++ *****************************************************************************/
++/* Runs the selected button's command and goes where it leads. */
++static int StdMenuActivate(demux_t *demux)
++{
++    demux_sys_t *sys = demux->p_sys;
++    hddvd_std_nav_step step;
++    unsigned title = sys->title;
++    unsigned button = hddvd_std_nav_selected_button(sys->nav);
++
++    if (hddvd_std_nav_activate_button(sys->nav, &step) != HDDVD_OK)
++        return VLC_EGENERIC;
++    msg_Dbg(demux, "menu button %u activated", button);
++    /* A command that goes nowhere repeats the cell, which plays on. */
++    if (step.kind == HDDVD_STD_NAV_MENU && sys->menu_cell &&
++        step.title_set == sys->menu_step.title_set && step.pgc == sys->menu_step.pgc &&
++        step.cell == sys->menu_step.cell)
++        return VLC_SUCCESS;
++    sys->failed = false;
++    if (!ApplyStep(demux, &step))
++        sys->eof = true;
++    else if (sys->title != title)
++        sys->updates |= INPUT_UPDATE_TITLE | INPUT_UPDATE_SEEKPOINT;
++    RestartParser(demux);
++    return VLC_SUCCESS;
++}
++
++static int StdMenuSelect(demux_t *demux, unsigned button)
++{
++    demux_sys_t *sys = demux->p_sys;
++    hddvd_std_nav_button info;
++
++    if (button == 0 || hddvd_std_nav_select_button(sys->nav, button) != HDDVD_OK)
++        return VLC_EGENERIC;
++    msg_Dbg(demux, "menu button %u selected", button);
++    if (hddvd_std_nav_get_button(sys->nav, button - 1, &info) == HDDVD_OK && info.auto_action)
++        return StdMenuActivate(demux);
++    return VLC_SUCCESS;
++}
++
++/* An arrow (0 up, 1 down, 2 left, 3 right) or, for -1, activation. */
++static int StdMenuKey(demux_t *demux, int direction)
++{
++    demux_sys_t *sys = demux->p_sys;
++    hddvd_std_nav_button info;
++    unsigned button = hddvd_std_nav_selected_button(sys->nav);
++
++    if (button == 0)
++        return VLC_EGENERIC;
++    if (direction < 0)
++        return StdMenuActivate(demux);
++    if (hddvd_std_nav_get_button(sys->nav, button - 1, &info) != HDDVD_OK)
++        return VLC_EGENERIC;
++    switch (direction)
++    {
++        case 0:
++            button = info.up;
++            break;
++        case 1:
++            button = info.down;
++            break;
++        case 2:
++            button = info.left;
++            break;
++        default:
++            button = info.right;
++            break;
++    }
++    if (button == hddvd_std_nav_selected_button(sys->nav))
++        return VLC_SUCCESS;
++    return StdMenuSelect(demux, button);
++}
++
++/* The button under a position in the menu video's pixels, or 0. */
++static unsigned StdMenuButtonAt(demux_sys_t *sys, int x, int y)
++{
++    size_t count = hddvd_std_nav_button_count(sys->nav);
++
++    if (x < 0 || y < 0)
++        return 0;
++    for (size_t i = 0; i < count; i++)
++    {
++        hddvd_std_nav_button info;
++
++        if (hddvd_std_nav_get_button(sys->nav, i, &info) == HDDVD_OK &&
++            (uint64_t)x >= info.x && (uint64_t)x < (uint64_t)info.x + info.width &&
++            (uint64_t)y >= info.y && (uint64_t)y < (uint64_t)info.y + info.height)
++            return (unsigned)i + 1;
++    }
++    return 0;
++}
++
++/* Mouse positions are in the video's pixels, as the buttons' are: moving
++   over a button selects it and pressing it activates it. */
++static void StdMenuMouse(demux_t *demux)
++{
++    demux_sys_t *sys = demux->p_sys;
++    unsigned count;
++
++    vlc_mutex_lock(&sys->mouse_lock);
++    count = sys->mouse_count;
++    vlc_mutex_unlock(&sys->mouse_lock);
++    for (unsigned i = 0; i < count && sys->menu_cell; i++)
++    {
++        int x, y;
++        bool pressed, press;
++        unsigned button;
++
++        vlc_mutex_lock(&sys->mouse_lock);
++        x = sys->mouse[i].x;
++        y = sys->mouse[i].y;
++        pressed = sys->mouse[i].pressed;
++        vlc_mutex_unlock(&sys->mouse_lock);
++        press = pressed && !sys->mouse_pressed;
++        sys->mouse_pressed = pressed;
++        button = StdMenuButtonAt(sys, x, y);
++        msg_Dbg(demux, "menu pointer at %d,%d%s: button %u", x, y, pressed ? " pressed" : "",
++                button);
++        if (button == 0)
++            continue;
++        if (button != hddvd_std_nav_selected_button(sys->nav))
++            StdMenuSelect(demux, button);
++        if (press && sys->menu_cell && button == hddvd_std_nav_selected_button(sys->nav))
++            StdMenuActivate(demux);
++    }
++    vlc_mutex_lock(&sys->mouse_lock);
++    memmove(sys->mouse, sys->mouse + count, (sys->mouse_count - count) * sizeof(sys->mouse[0]));
++    sys->mouse_count -= count;
++    vlc_mutex_unlock(&sys->mouse_lock);
++}
++
++/*****************************************************************************
++ * Menu commands
++ *****************************************************************************/
++/* Tells the application what the player is doing. */
++static void ReportPlayer(demux_t *demux)
++{
++    demux_sys_t *sys = demux->p_sys;
++    hddvd_runtime_player player;
++
++    if (sys->menu == NULL)
++        return;
++    memset(&player, 0, sizeof(player));
++    player.title = LibraryTitle(sys);
++    player.elapsed = TitleTime(sys);
++    player.state = sys->held ? HDDVD_PLAYBACK_PAUSED : HDDVD_PLAYBACK_PLAYING;
++    player.audio_track = sys->audio_track;
++    player.subtitle_track = sys->subtitle_track;
++    vlc_mutex_lock(&sys->es_out->lock);
++    player.subtitle_visible = !sys->es_out->spu_hidden;
++    vlc_mutex_unlock(&sys->es_out->lock);
++    hddvd_runtime_set_player(hddvd_menu_runtime(sys->menu), &player);
++}
++
++/* The playlist track of the title now playing with a number, or with a
++   language when language is not NULL. */
++static bool FindTrack(const demux_sys_t *sys, hddvd_xpl_media_kind kind, uint32_t number,
++                      const char *language, hddvd_xpl_track *out)
++{
++    size_t title = LibraryTitle(sys);
++
++    for (size_t i = 0; i < hddvd_xpl_track_count(sys->playlist, title); i++)
++    {
++        hddvd_xpl_track track;
++        hddvd_xpl_track_details details;
++
++        /* Secondary (picture-in-picture) streams are not the ones chosen. */
++        if (hddvd_xpl_get_track(sys->playlist, title, i, &track) != HDDVD_OK ||
++            track.kind != kind ||
++            hddvd_xpl_get_track_details(sys->playlist, title, i, &details) != HDDVD_OK ||
++            details.secondary)
++            continue;
++        if (language != NULL ? track.language != NULL && !strcasecmp(track.language, language)
++                             : track.track == number)
++        {
++            *out = track;
++            return true;
++        }
++    }
++    return false;
++}
++
++/* Selects the EVO stream a playlist track plays: its streamNumber (1-based)
++   is the substream number in the packet id plus one. A stream the parser has
++   not found yet is selected when it appears. */
++static void SelectStream(demux_t *demux, int cat, const hddvd_xpl_track *track)
++{
++    demux_sys_t *sys = demux->p_sys;
++    hddvd_es_out *priv = sys->es_out;
++    uint32_t number = track->has_stream_number ? track->stream_number : track->track;
++    int wanted = number > 0 ? (int)(number - 1) : 0;
++    es_out_id_t *id = NULL;
++
++    vlc_mutex_lock(&priv->lock);
++    if (cat == AUDIO_ES)
++        priv->wanted_audio = wanted;
++    else
++        priv->wanted_spu = wanted;
++    for (int i = 0; i < priv->stream_count; i++)
++        if (priv->streams[i].cat == cat &&
++            StreamNumber(cat, priv->streams[i].packet) == wanted)
++            id = priv->streams[i].id;
++    if (cat == SPU_ES && priv->spu_hidden)
++        id = NULL;
++    vlc_mutex_unlock(&priv->lock);
++    if (id != NULL)
++        es_out_Control(demux->out, ES_OUT_SET_ES, id);
++    if (cat == AUDIO_ES)
++        sys->audio_track = track->track;
++    else
++        sys->subtitle_track = track->track;
++    msg_Dbg(demux, "menu command: %s track %" PRIu32 " (stream %d%s)",
++            cat == AUDIO_ES ? "audio" : "subtitle", track->track, wanted,
++            id != NULL ? "" : ", when it appears");
++}
++
++/* Shows or hides subtitles: hiding unselects the subtitle streams, and
++   showing selects the one chosen, or else the first. */
++static void ShowSubtitles(demux_t *demux, bool visible)
++{
++    demux_sys_t *sys = demux->p_sys;
++    hddvd_es_out *priv = sys->es_out;
++    es_out_id_t **ids;
++    int count = 0;
++
++    vlc_mutex_lock(&priv->lock);
++    priv->spu_hidden = !visible;
++    ids = vlc_alloc(priv->stream_count > 0 ? priv->stream_count : 1, sizeof(*ids));
++    for (int i = 0; ids != NULL && i < priv->stream_count; i++)
++    {
++        if (priv->streams[i].cat != SPU_ES)
++            continue;
++        if (!visible || priv->wanted_spu < 0 ||
++            StreamNumber(SPU_ES, priv->streams[i].packet) == priv->wanted_spu)
++            ids[count++] = priv->streams[i].id;
++    }
++    vlc_mutex_unlock(&priv->lock);
++    for (int i = 0; i < count; i++)
++    {
++        if (!visible)
++            es_out_Control(demux->out, ES_OUT_UNSET_ES, ids[i]);
++        else if (i == 0)
++            es_out_Control(demux->out, ES_OUT_SET_ES, ids[i]);
++    }
++    free(ids);
++    msg_Dbg(demux, "menu command: subtitles %s", visible ? "shown" : "hidden");
++}
++
++/* Carries out what the application asked of the player. */
++static hddvd_command_result RunCommand(demux_t *demux, const hddvd_runtime_command *command)
++{
++    demux_sys_t *sys = demux->p_sys;
++    hddvd_xpl_track track;
++    bool audio;
++
++    switch (command->type)
++    {
++        case HDDVD_RUNTIME_COMMAND_PLAY:
++        case HDDVD_RUNTIME_COMMAND_PAUSE:
++            sys->held = command->type == HDDVD_RUNTIME_COMMAND_PAUSE;
++            msg_Dbg(demux, "menu command: %s", sys->held ? "pause" : "play");
++            return HDDVD_COMMAND_ACCEPTED;
++        case HDDVD_RUNTIME_COMMAND_SELECT_AUDIO:
++        case HDDVD_RUNTIME_COMMAND_SELECT_SUBTITLE:
++        case HDDVD_RUNTIME_COMMAND_SELECT_AUDIO_LANGUAGE:
++        case HDDVD_RUNTIME_COMMAND_SELECT_SUBTITLE_LANGUAGE:
++            audio = command->type == HDDVD_RUNTIME_COMMAND_SELECT_AUDIO ||
++                    command->type == HDDVD_RUNTIME_COMMAND_SELECT_AUDIO_LANGUAGE;
++            if (!FindTrack(sys, audio ? HDDVD_XPL_MEDIA_AUDIO : HDDVD_XPL_MEDIA_SUBPICTURE,
++                           command->number,
++                           command->type == HDDVD_RUNTIME_COMMAND_SELECT_AUDIO_LANGUAGE ||
++                                   command->type == HDDVD_RUNTIME_COMMAND_SELECT_SUBTITLE_LANGUAGE
++                               ? command->text
++                               : NULL,
++                           &track))
++                return HDDVD_COMMAND_REJECTED;
++            SelectStream(demux, audio ? AUDIO_ES : SPU_ES, &track);
++            return HDDVD_COMMAND_ACCEPTED;
++        case HDDVD_RUNTIME_COMMAND_SUBTITLE_VISIBLE:
++            ShowSubtitles(demux, command->number != 0);
++            return HDDVD_COMMAND_ACCEPTED;
++        case HDDVD_RUNTIME_COMMAND_APPLICATION_TO_TOP:
++        case HDDVD_RUNTIME_COMMAND_APPLICATION_TO_BOTTOM:
++            /* Only one application is drawn, so its order changes nothing. */
++            msg_Dbg(demux, "menu command: application order");
++            return HDDVD_COMMAND_ACCEPTED;
++        default:
++            /* Starting or stopping other applications: one runs per title. */
++            return HDDVD_COMMAND_REJECTED;
++    }
++}
++
++static void RunCommands(demux_t *demux)
++{
++    demux_sys_t *sys = demux->p_sys;
++    hddvd_runtime_command command;
++    bool report = false;
++
++    while (sys->menu != NULL && hddvd_menu_take_command(sys->menu, &command) == HDDVD_OK)
++    {
++        hddvd_command_result result;
++        uint64_t id = command.id;
++
++        if (command.type == HDDVD_RUNTIME_COMMAND_JUMP)
++        {
++            int title = OfferedTitle(sys, command.title);
++
++            if (title >= 0)
++            {
++                hddvd_menu *menu = sys->menu;
++
++                msg_Dbg(demux, "menu command: jump to title %d", title);
++                /* The session that made the command gets its answer before
++                   the title change replaces it. */
++                hddvd_menu_acknowledge(menu, id, HDDVD_COMMAND_ACCEPTED);
++                PlayTitle(demux, (unsigned)title,
++                          OffsetAt(sys, command.title, command.time));
++                RestartParser(demux);
++                report = sys->menu != NULL;
++                continue;
++            }
++            result = HDDVD_COMMAND_REJECTED;
++        }
++        else
++            result = RunCommand(demux, &command);
++        if (result != HDDVD_COMMAND_ACCEPTED)
++            msg_Dbg(demux, "menu command %d not carried out", (int)command.type);
++        else
++            report = true;
++        hddvd_menu_acknowledge(sys->menu, id, result);
++    }
++    if (report)
++        ReportPlayer(demux);
++}
++
++/* Gives the menu the time, the pointer and a look at its commands. */
++static void RunMenu(demux_t *demux)
++{
++    demux_sys_t *sys = demux->p_sys;
++    unsigned count;
++
++    if (sys->menu_cell)
++    {
++        StdMenuMouse(demux);
++        return;
++    }
++    if (sys->menu == NULL)
++        return;
++    hddvd_menu_advance(sys->menu, TitleTime(sys));
++
++    vlc_mutex_lock(&sys->mouse_lock);
++    count = sys->mouse_count;
++    vlc_mutex_unlock(&sys->mouse_lock);
++    if (count > 0)
++    {
++        /* Mouse positions are in the video's own pixels. */
++        vlc_mutex_lock(&sys->es_out->lock);
++        unsigned width = sys->es_out->width, height = sys->es_out->height;
++        vlc_mutex_unlock(&sys->es_out->lock);
++        vlc_mutex_lock(&sys->video_size->lock);
++        if (sys->video_size->width > 0)
++        {
++            width = sys->video_size->width;
++            height = sys->video_size->height;
++        }
++        vlc_mutex_unlock(&sys->video_size->lock);
++        if (width > 0 && height > 0)
++            hddvd_menu_set_viewport(sys->menu, width, height);
++        msg_Dbg(demux, "menu viewport %ux%u", width, height);
++    }
++    for (unsigned i = 0; i < count && sys->menu != NULL; i++)
++    {
++        int x, y;
++        bool pressed;
++
++        vlc_mutex_lock(&sys->mouse_lock);
++        x = sys->mouse[i].x;
++        y = sys->mouse[i].y;
++        pressed = sys->mouse[i].pressed;
++        vlc_mutex_unlock(&sys->mouse_lock);
++        hddvd_menu_pointer(sys->menu, x, y, pressed);
++        msg_Dbg(demux, "menu pointer at %d,%d%s: focus %zu", x, y, pressed ? " pressed" : "",
++                hddvd_runtime_focus(hddvd_menu_runtime(sys->menu)));
++        /* What a click asked for is done before the next state. */
++        RunCommands(demux);
++    }
++    if (count > 0)
++    {
++        /* States that came meanwhile move to the front. */
++        vlc_mutex_lock(&sys->mouse_lock);
++        memmove(sys->mouse, sys->mouse + count, (sys->mouse_count - count) * sizeof(sys->mouse[0]));
++        sys->mouse_count -= count;
++        vlc_mutex_unlock(&sys->mouse_lock);
++    }
++    RunCommands(demux);
++    if (sys->menu != NULL)
++        UpdateOverlay(demux);
++}
++
++/*****************************************************************************
++ * Demux
++ *****************************************************************************/
++/* Tells the user why reading stopped, once. */
++static void ReportError(demux_t *demux, int status)
++{
++    demux_sys_t *sys = demux->p_sys;
++    hddvd_error_detail detail;
++
++    if (sys->failed)
++        return;
++    sys->failed = true;
++    if (hddvd_get_last_error(sys->ctx, &detail) == HDDVD_OK)
++        msg_Err(demux, "%s: %s (%s)", detail.resource, detail.message, hddvd_strerror(status));
++    if (status == HDDVD_EPROTECTED)
++        vlc_dialog_display_error(demux, _("Encrypted HD DVD"), "%s",
++                                 _("This HD DVD title is protected by AACS. libhddvd does "
++                                   "not decrypt protected content, so it cannot be played."));
++    else
++        vlc_dialog_display_error(demux, _("HD DVD read error"),
++                                 _("This HD DVD title could not be read: %s."),
++                                 hddvd_strerror(status));
++}
++
++static int Demux(demux_t *demux)
++{
++    demux_sys_t *sys = demux->p_sys;
++    size_t got = 0, wanted;
++    block_t *block;
++    int status;
++
++    RunMenu(demux);
++    if (sys->finishing || sys->eof || sys->failed || sys->parser == NULL)
++        return Finish(demux);
++    if (sys->held)
++    {
++        /* Paused by the application: the menu still runs. */
++        vlc_tick_sleep(VLC_TICK_FROM_MS(10));
++        return VLC_DEMUXER_SUCCESS;
++    }
++    if (atomic_load(&sys->pending) > MAX_PENDING)
++    {
++        /* The parser is paced by the decoders; reading waits for it. */
++        vlc_tick_sleep(VLC_TICK_FROM_MS(10));
++        return VLC_DEMUXER_SUCCESS;
++    }
++
++    if (sys->offset >= sys->end)
++    {
++        if (sys->navigating)
++        {
++            /* The cell is over: what the disc does next. */
++            hddvd_std_nav_step step;
++            uint64_t previous = sys->end;
++            unsigned title = sys->title;
++            bool menu_cell = sys->menu_cell;
++
++            if (menu_cell && sys->still != 0)
++            {
++                /* A still menu waits: for ever (255) or for its seconds. */
++                vlc_tick_t now = vlc_tick_now();
++
++                if (sys->still_until == VLC_TICK_INVALID)
++                    sys->still_until = now + vlc_tick_from_sec(sys->still);
++                if (sys->still == 255 || now < sys->still_until)
++                {
++                    vlc_tick_sleep(VLC_TICK_FROM_MS(10));
++                    return VLC_DEMUXER_SUCCESS;
++                }
++            }
++            if (hddvd_std_nav_next(sys->nav, &step) != HDDVD_OK || !ApplyStep(demux, &step))
++                return Finish(demux);
++            if (menu_cell || sys->menu_cell || sys->title != title || sys->offset != previous)
++                RestartParser(demux);
++        }
++        else
++        {
++            if (sys->menu != NULL)
++            {
++                /* The application may send the player somewhere else. */
++                hddvd_event event;
++
++                memset(&event, 0, sizeof(event));
++                event.type = HDDVD_EVENT_TITLE_END;
++                hddvd_menu_post(sys->menu, &event);
++                RunCommands(demux);
++            }
++            if (sys->offset >= sys->end)
++                return Finish(demux);
++        }
++    }
++
++    wanted = (size_t)__MIN(sys->end - sys->offset, (uint64_t)READ_SECTORS * SECTOR);
++    block = NewBlock(sys, wanted);
++    if (block == NULL)
++        return VLC_DEMUXER_EGENERIC;
++    if (sys->menu_cell)
++        status = hddvd_std_nav_read_menu(sys->nav, sys->offset, block->p_buffer, wanted, &got);
++    else
++        status = hddvd_titles_read(sys->titles, LibraryTitle(sys), sys->offset, block->p_buffer,
++                                   wanted, &got);
++    if (got == 0)
++    {
++        block_Release(block);
++        if (status != HDDVD_OK)
++            ReportError(demux, status);
++        return Finish(demux);
++    }
++    /* What was read plays; a failure after it comes back on the next call. */
++    block->i_buffer = got;
++    sys->offset += got;
++    if (!sys->menu_cell)
++        UpdateSeekpoint(sys);
++    vlc_demux_chained_Send(sys->parser, block);
++    return VLC_DEMUXER_SUCCESS;
++}
++
++/*****************************************************************************
++ * Control
++ *****************************************************************************/
++static int SelectTitle(demux_t *demux, int title, int chapter)
++{
++    demux_sys_t *sys = demux->p_sys;
++    hddvd_title_chapter where = {{0}, 0};
++
++    if (title < 0 || (size_t)title >= sys->count || chapter < 0)
++        return VLC_EGENERIC;
++    if (hddvd_titles_get_chapter(sys->titles, sys->map[title], (size_t)chapter, &where) !=
++            HDDVD_OK &&
++        chapter != 0)
++        return VLC_EGENERIC;
++    if (sys->nav != NULL && sys->menus)
++    {
++        /* The user's choice goes through the disc's navigation. */
++        hddvd_std_nav_step step;
++
++        if (hddvd_std_nav_select_title(sys->nav, sys->map[title], (size_t)chapter, &step) ==
++                HDDVD_OK &&
++            ApplyStep(demux, &step))
++        {
++            sys->failed = false;
++            sys->updates |= INPUT_UPDATE_TITLE | INPUT_UPDATE_SEEKPOINT;
++            RestartParser(demux);
++            return VLC_SUCCESS;
++        }
++    }
++    sys->navigating = false;
++    PlayTitle(demux, (unsigned)title, where.offset);
++    RestartParser(demux);
++    return VLC_SUCCESS;
++}
++
++static int SeekTo(demux_t *demux, uint64_t offset)
++{
++    demux_sys_t *sys = demux->p_sys;
++    hddvd_title_info info;
++
++    /* A menu cell is not part of a title. */
++    if (sys->menu_cell ||
++        hddvd_titles_get_info(sys->titles, LibraryTitle(sys), &info) != HDDVD_OK ||
++        info.size == 0)
++        return VLC_EGENERIC;
++    if (offset >= info.size)
++        offset = info.size - SECTOR;
++    offset -= offset % SECTOR;
++    sys->offset = offset;
++    sys->end = info.size;
++    sys->failed = false;
++    sys->eof = false;
++    if (sys->navigating)
++    {
++        /* The navigator moves to the cell sought; reading starts inside it. */
++        hddvd_std_nav_step step;
++
++        if (hddvd_std_nav_seek(sys->nav, LibraryTitle(sys), offset, &step) == HDDVD_OK &&
++            step.kind == HDDVD_STD_NAV_PLAY)
++        {
++            sys->end = step.offset + step.size;
++            msg_Dbg(demux, "navigation: seek into title %u cell %u at offset %" PRIu64, sys->title,
++                    step.cell, offset);
++        }
++        else
++        {
++            msg_Dbg(demux, "navigation: seek outside the disc's navigation");
++            sys->navigating = false;
++        }
++    }
++    else
++        msg_Dbg(demux, "seek to offset %" PRIu64, offset);
++    UpdateSeekpoint(sys);
++    if (sys->menu != NULL)
++        hddvd_menu_seek(sys->menu, TitleTime(sys));
++    RestartParser(demux);
++    return VLC_SUCCESS;
++}
++
++static int MenuKey(demux_t *demux, uint32_t key)
++{
++    demux_sys_t *sys = demux->p_sys;
++
++    if (sys->menu == NULL)
++        return VLC_EGENERIC;
++    hddvd_menu_key(sys->menu, key, 1);
++    hddvd_menu_key(sys->menu, key, 0);
++    msg_Dbg(demux, "menu key 0x%x: focus %zu", (unsigned)key,
++            hddvd_runtime_focus(hddvd_menu_runtime(sys->menu)));
++    RunCommands(demux);
++    if (sys->menu != NULL)
++        UpdateOverlay(demux);
++    return VLC_SUCCESS;
++}
++
++static int Control(demux_t *demux, int query, va_list args)
++{
++    demux_sys_t *sys = demux->p_sys;
++    hddvd_title_info info;
++
++    switch (query)
++    {
++        case DEMUX_CAN_SEEK:
++        case DEMUX_CAN_PAUSE:
++        case DEMUX_CAN_CONTROL_PACE:
++            *va_arg(args, bool *) = true;
++            return VLC_SUCCESS;
++
++        case DEMUX_SET_PAUSE_STATE:
++            return VLC_SUCCESS;
++
++        case DEMUX_GET_PTS_DELAY:
++            *va_arg(args, vlc_tick_t *) =
++                VLC_TICK_FROM_MS(var_InheritInteger(demux, "disc-caching"));
++            return VLC_SUCCESS;
++
++        case DEMUX_GET_TITLE_INFO:
++        {
++            input_title_t ***out = va_arg(args, input_title_t ***);
++            int *out_count = va_arg(args, int *);
++            int *title_offset = va_arg(args, int *);
++            int *chapter_offset = va_arg(args, int *);
++            input_title_t **list = vlc_alloc(sys->count, sizeof(*list));
++
++            if (list == NULL)
++                return VLC_ENOMEM;
++            *out_count = 0;
++            for (size_t i = 0; i < sys->count; i++)
++            {
++                input_title_t *copy = vlc_input_title_Duplicate(sys->list[i]);
++
++                if (copy != NULL)
++                    list[(*out_count)++] = copy;
++            }
++            *out = list;
++            *title_offset = 0;
++            *chapter_offset = 0;
++            return VLC_SUCCESS;
++        }
++
++        case DEMUX_GET_TITLE:
++            *va_arg(args, int *) = (int)sys->title;
++            return VLC_SUCCESS;
++
++        case DEMUX_GET_SEEKPOINT:
++            *va_arg(args, int *) = (int)sys->seekpoint;
++            return VLC_SUCCESS;
++
++        case DEMUX_SET_TITLE:
++            return SelectTitle(demux, va_arg(args, int), 0);
++
++        case DEMUX_SET_SEEKPOINT:
++            return SelectTitle(demux, (int)sys->title, va_arg(args, int));
++
++        case DEMUX_TEST_AND_CLEAR_FLAGS:
++        {
++            unsigned *flags = va_arg(args, unsigned *);
++
++            *flags &= sys->updates;
++            sys->updates &= ~*flags;
++            return VLC_SUCCESS;
++        }
++
++        case DEMUX_GET_LENGTH:
++            /* A menu cell is not part of a title: it has no length or
++               position, as dvdnav's menus have none. */
++            if (sys->menu_cell)
++            {
++                *va_arg(args, vlc_tick_t *) = 0;
++                return VLC_SUCCESS;
++            }
++            if (hddvd_titles_get_info(sys->titles, LibraryTitle(sys), &info) != HDDVD_OK)
++                return VLC_EGENERIC;
++            *va_arg(args, vlc_tick_t *) = ToTick(info.duration);
++            return VLC_SUCCESS;
++
++        case DEMUX_GET_TIME:
++            *va_arg(args, vlc_tick_t *) = sys->menu_cell ? 0 : ToTick(TitleTime(sys));
++            return VLC_SUCCESS;
++
++        case DEMUX_GET_POSITION:
++            if (sys->menu_cell)
++            {
++                *va_arg(args, double *) = 0.0;
++                return VLC_SUCCESS;
++            }
++            if (hddvd_titles_get_info(sys->titles, LibraryTitle(sys), &info) != HDDVD_OK ||
++                info.size == 0)
++                return VLC_EGENERIC;
++            *va_arg(args, double *) = (double)sys->offset / (double)info.size;
++            return VLC_SUCCESS;
++
++        case DEMUX_SET_POSITION:
++        {
++            double position = va_arg(args, double);
++
++            if (hddvd_titles_get_info(sys->titles, LibraryTitle(sys), &info) != HDDVD_OK ||
++                position < 0.0 || position > 1.0)
++                return VLC_EGENERIC;
++            return SeekTo(demux, (uint64_t)(position * (double)info.size));
++        }
++
++        case DEMUX_SET_TIME:
++        {
++            vlc_tick_t tick = va_arg(args, vlc_tick_t);
++            hddvd_time time;
++
++            if (tick < 0)
++                return VLC_EGENERIC;
++            time.ticks = (uint64_t)samples_from_vlc_tick(tick, 90000);
++            return SeekTo(demux, OffsetAt(sys, LibraryTitle(sys), time));
++        }
++
++        case DEMUX_NAV_ACTIVATE:
++            return sys->menu_cell ? StdMenuKey(demux, -1) : MenuKey(demux, HDDVD_KEY_ENTER);
++        case DEMUX_NAV_UP:
++            return sys->menu_cell ? StdMenuKey(demux, 0) : MenuKey(demux, HDDVD_KEY_UP);
++        case DEMUX_NAV_DOWN:
++            return sys->menu_cell ? StdMenuKey(demux, 1) : MenuKey(demux, HDDVD_KEY_DOWN);
++        case DEMUX_NAV_LEFT:
++            return sys->menu_cell ? StdMenuKey(demux, 2) : MenuKey(demux, HDDVD_KEY_LEFT);
++        case DEMUX_NAV_RIGHT:
++            return sys->menu_cell ? StdMenuKey(demux, 3) : MenuKey(demux, HDDVD_KEY_RIGHT);
++
++        case DEMUX_NAV_MENU:
++        {
++            /* The disc's title menu, on a Standard Content disc. */
++            hddvd_std_nav_step step;
++
++            if (sys->nav == NULL || !sys->menus ||
++                hddvd_std_nav_menu(sys->nav, 2, &step) != HDDVD_OK || !ApplyStep(demux, &step))
++                return VLC_EGENERIC;
++            sys->failed = false;
++            RestartParser(demux);
++            return VLC_SUCCESS;
++        }
++
++        default:
++            return VLC_EGENERIC;
++    }
++}
++
++/*****************************************************************************
++ * Open and Close
++ *****************************************************************************/
++static void Release(demux_t *demux)
++{
++    demux_sys_t *sys = demux->p_sys;
++
++    CloseMenu(demux);
++    if (sys->parser != NULL)
++        vlc_demux_chained_Delete(sys->parser);
++    if (sys->es_out != NULL)
++    {
++        EsOutDropKept(sys->es_out);
++        es_out_Delete(&sys->es_out->out);
++    }
++    if (sys->images != NULL)
++        image_HandlerDelete(sys->images);
++    VideoSizeRelease(sys->video_size);
++    for (size_t i = 0; sys->list != NULL && i < sys->count; i++)
++        if (sys->list[i] != NULL)
++            vlc_input_title_Delete(sys->list[i]);
++    free(sys->list);
++    free(sys->map);
++    if (sys->nav != NULL)
++        hddvd_std_nav_close(sys->nav);
++    else if (sys->own_titles)
++        hddvd_titles_close(sys->titles);
++    hddvd_xpl_close(sys->playlist);
++    hddvd_close(sys->ctx);
++}
++
++static int Open(vlc_object_t *obj)
++{
++    demux_t *demux = (demux_t *)obj;
++    bool forced = demux->psz_name != NULL && !strcmp(demux->psz_name, "hddvd");
++    demux_sys_t *sys;
++    int status;
++
++    if (demux->out == NULL || demux->psz_filepath == NULL || demux->psz_filepath[0] == '\0')
++        return VLC_EGENERIC;
++
++    sys = vlc_obj_calloc(obj, 1, sizeof(*sys));
++    if (sys == NULL)
++        return VLC_ENOMEM;
++    demux->p_sys = sys;
++    vlc_mutex_init(&sys->mouse_lock);
++    sys->menus = var_InheritBool(demux, "hddvd-menu");
++    /* The parser names each stream by its id, so that the application's
++       track choices find their EVO substreams. */
++    var_Create(demux, "ps-stream-ids", VLC_VAR_BOOL);
++    var_SetBool(demux, "ps-stream-ids", true);
++    sys->ctx = hddvd_open(demux->psz_filepath);
++    if (sys->ctx == NULL)
++        return VLC_ENOMEM;
++
++    /* Standard Content with its navigation, else the playlist's titles. */
++    status = hddvd_std_nav_open(sys->ctx, &sys->nav);
++    if (status == HDDVD_OK)
++    {
++        sys->titles = hddvd_std_nav_titles(sys->nav);
++        if (var_InheritBool(demux, "hddvd-guess"))
++        {
++            msg_Warn(demux, "guessing the disc's menu cells, angle blocks and PGC links");
++            hddvd_std_nav_set_options(sys->nav, HDDVD_STD_NAV_GUESS_PGC_LINKS |
++                                                    HDDVD_STD_NAV_GUESS_ANGLES |
++                                                    HDDVD_STD_NAV_GUESS_MENU_CELLS);
++        }
++    }
++    else if (status == HDDVD_ENOTFOUND && hddvd_has_advanced_content(sys->ctx))
++    {
++        status = hddvd_open_playlist(sys->ctx, &sys->playlist);
++        if (status == HDDVD_OK)
++            status = hddvd_titles_open_playlist(sys->ctx, sys->playlist, &sys->titles);
++        sys->own_titles = status == HDDVD_OK;
++    }
++    if (status == HDDVD_OK)
++    {
++        size_t all = hddvd_titles_count(sys->titles);
++
++        sys->map = calloc(all ? all : 1, sizeof(*sys->map));
++        sys->list = calloc(all ? all : 1, sizeof(*sys->list));
++        if (sys->map == NULL || sys->list == NULL)
++        {
++            Release(demux);
++            return VLC_ENOMEM;
++        }
++        /* Playlist titles that only run a menu have nothing to play. */
++        for (size_t i = 0; i < all; i++)
++        {
++            hddvd_title_info info;
++
++            if (hddvd_titles_get_info(sys->titles, i, &info) != HDDVD_OK || info.size == 0)
++                continue;
++            sys->list[sys->count] = NewTitle(sys->titles, i);
++            if (sys->list[sys->count] != NULL)
++                sys->map[sys->count++] = i;
++        }
++        if (sys->count == 0)
++        {
++            if (forced)
++                msg_Err(demux, "the disc has no title with audio or video to play");
++            Release(demux);
++            return VLC_EGENERIC;
++        }
++    }
++    else
++    {
++        hddvd_error_detail detail;
++
++        /* Without hddvd://, anything but an HD DVD disc is someone else's. */
++        if (forced && hddvd_get_last_error(sys->ctx, &detail) == HDDVD_OK)
++            msg_Err(demux, "%s: %s (%s)", detail.resource, detail.message, hddvd_strerror(status));
++        Release(demux);
++        return VLC_EGENERIC;
++    }
++
++    sys->es_out = calloc(1, sizeof(*sys->es_out));
++    if (sys->es_out == NULL)
++    {
++        Release(demux);
++        return VLC_ENOMEM;
++    }
++    sys->es_out->out.cbs = &es_out_callbacks;
++    sys->es_out->dst = demux->out;
++    sys->es_out->demux = demux;
++    sys->es_out->wanted_audio = -1;
++    sys->es_out->wanted_spu = -1;
++    vlc_mutex_init(&sys->es_out->lock);
++    sys->images = image_HandlerCreate(demux);
++    sys->video_size = calloc(1, sizeof(*sys->video_size));
++    if (sys->video_size == NULL)
++    {
++        Release(demux);
++        return VLC_ENOMEM;
++    }
++    vlc_mutex_init(&sys->video_size->lock);
++    vlc_atomic_rc_init(&sys->video_size->rc);
++
++    msg_Dbg(demux, "libhddvd %s: %zu titles", hddvd_version(), sys->count);
++    demux->pf_demux = Demux;
++    demux->pf_control = Control;
++
++    /* Where playback starts: where the disc's first play leads, or the
++       first title. */
++    sys->title = UINT_MAX;
++    if (sys->nav != NULL && sys->menus)
++    {
++        hddvd_std_nav_step step;
++
++        if (hddvd_std_nav_start(sys->nav, &step) != HDDVD_OK || !ApplyStep(demux, &step))
++            sys->eof = false;
++    }
++    if (!sys->navigating)
++    {
++        sys->title = 0;
++        PlayTitle(demux, 0, 0);
++    }
++    RestartParser(demux);
++    if (sys->parser == NULL)
++    {
++        Release(demux);
++        return VLC_EGENERIC;
++    }
++    return VLC_SUCCESS;
++}
++
++static void Close(vlc_object_t *obj)
++{
++    Release((demux_t *)obj);
++}
+diff --git a/modules/access/meson.build b/modules/access/meson.build
+index 43031e6..2cc1e75 100644
+--- a/modules/access/meson.build
++++ b/modules/access/meson.build
+@@ -401,6 +401,17 @@ if dvdread_dep.found()
+     }
+ endif
+ 
++# HD DVD access
++libhddvd_dep = dependency('libhddvd', version: '>= 0.6.0', required: get_option('hddvd'))
++if libhddvd_dep.found()
++    vlc_modules += {
++        'name' : 'hddvd',
++        'sources' : files('hddvd.c'),
++        'dependencies' : [libhddvd_dep],
++        'plugin_dir' : 'access',
++    }
++endif
++
+ # Blu-ray access
+ libbluray_dep = dependency('libbluray', version: '>= 1.1.0', required: get_option('bluray'))
+ if libbluray_dep.found()
+diff --git a/po/POTFILES.in b/po/POTFILES.in
+index cc781ef..97abeed 100644
+--- a/po/POTFILES.in
++++ b/po/POTFILES.in
+@@ -169,6 +169,7 @@ modules/access/dvdnav.c
+ modules/access/dvdread.c
+ modules/access/fs.c
+ modules/access/ftp.c
++modules/access/hddvd.c
+ modules/access/http.c
+ modules/access/http/access.c
+ modules/access/idummy.c
+-- 
+2.43.0
+

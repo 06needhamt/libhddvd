@@ -861,7 +861,8 @@ with a contrib entry that needs a tagged libhddvd release.
   nothing itself.
 
 **Third slice (done), the VLC module** (prepared as a patch series against
-VLC master; it lives in VLC's tree, not here). It is an access-demux like
+VLC master; it lives in VLC's tree, and the patches and their headless
+checks are kept in `contrib/vlc/` until they are submitted). It is an access-demux like
 VLC's Blu-ray module, with a chained PS demuxer:
 - Standard Content plays as authored through `hddvd_std_nav` (first play,
   menus that jump, cell links, the user's title, chapter and menu choices,
