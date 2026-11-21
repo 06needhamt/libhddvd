@@ -1018,9 +1018,12 @@ the longest with audio or video) and optionally a chapter range
 nested MPEG-PS demuxer, which already knows the EVO substreams (AC-3/E-AC-3,
 DTS-HD, LPCM, MLP, subpictures, VC-1). The sub-demuxer is restarted where the
 title's data jumps (a cell or clip that does not follow the previous one on the
-disc). Each extent's timestamps are moved onto the title's time by the first
-video PTS in the PES headers at the extent's start (clear even on AACS discs),
-so timestamps stay continuous across joins, chapter ranges and seeks. A seek
+disc). Each extent's timestamps are moved onto the title's time, so they stay
+continuous across joins, chapter ranges and seeks: for Advanced Content by the
+title's time maps (`hddvd_title_map_locate`), because a clip's extent can
+start at an EVOBU before the clip does; otherwise, or when the maps disagree
+with the stream by more than a second, by the first video PTS in the PES
+headers at the extent's start. A seek
 interpolates within the extent (from a chapter's offset when one starts in it)
 and reads from about a second early. Chapters are exported; audio and
 subpicture streams take their language from the title set's stream attributes
@@ -1038,7 +1041,13 @@ decode with every frame, in order and with steady timestamps across the join;
 chapter ranges start and end at their chapters; seeks land at the requested
 frame; remuxing to Matroska keeps the streams, languages and chapters; a
 scrambled packet ends demuxing with the AACS error; directories that are not
-discs, missing paths and bad titles or chapters are refused.
+discs, missing paths and bad titles or chapters are refused. A clip that starts
+1.5 s into its EVO plays from its own first frame, and a disc whose VTI start
+times are wrong falls back to the PES timestamps. A review against the rules of
+FFmpeg's review bot (Fairy) found and fixed a build break with MSVC (GNU `?:`),
+a NULL dereference after a failed sub-demuxer reopen, the late timestamps of
+clips starting inside an EVOBU, and the raw demuxers that codec probing needs
+in minimal builds.
 
 ## Phase 8 — release hardening
 
