@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 """Builds a synthetic Advanced Content disc for checking the VLC module:
 two 20 s titles from generated MPEG-2 program streams, and a menu
 application (loose files) on the first. Its "play" button, pressed with a

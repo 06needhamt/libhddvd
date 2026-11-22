@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 # frames.sh FFMPEG_DIR DISC [demuxer options...]: per decoded video frame,
 # its time and a colour name from the plane averages; then a summary.
 FF=$1; DISC=$2; shift 2

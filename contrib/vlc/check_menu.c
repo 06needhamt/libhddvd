@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* Copyright (C) 2026 Tom Needham */
 /* Headless libvlc checks of the HD DVD module on an Advanced Content disc
    with a menu (make_ac_disc.py): the menu application runs, VLC's
    navigation keys and the mouse reach it, and its commands are carried out:

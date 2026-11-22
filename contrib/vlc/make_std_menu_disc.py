@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 """Builds a scratch copy of tests/fixtures/guesses whose title menu cell
 (VMG PGC 1) is a VOBU at sector 12 of HV000M01.EVO: the fixture's navigation
 pack, with its buttons, then a decodable MPEG-2 still (still.vob), so that

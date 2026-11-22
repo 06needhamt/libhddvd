@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 """Run tools/inventory_hdi_scripts.py on the original fixtures and compare its
 whole report with the expected one."""
 

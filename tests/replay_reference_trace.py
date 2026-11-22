@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 """Replay an interaction trace recorded on a player against hddvd-menurun.
 
 The trace (tests/reference_trace.schema.json) lists menu states and the

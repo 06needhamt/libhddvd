@@ -58,3 +58,4 @@ dkms.conf
 
 # build directory
 /build
+__pycache__/

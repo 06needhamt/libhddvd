@@ -251,6 +251,10 @@ version 2.1 or (at your option) any later version, as libbluray and
 libdvdnav are; see `LICENSE`. Releases up to 0.5.0 were under the GNU
 General Public License, version 2.
 
+Each source file names its licence with an SPDX identifier
+(`LGPL-2.1-or-later`). The test fixtures under `tests/fixtures` are generated
+by `tests/fixtures/generate_objects.py` and are under the same licence.
+
 ## Status
 
 This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content navigation follows DVD-Video's rules and has not been checked against a player; menu cells, angle blocks and conformance against a real player's behavior are future work.

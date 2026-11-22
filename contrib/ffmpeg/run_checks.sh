@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 # run_checks.sh FFMPEG_BUILD_DIR DISCS_DIR
 # Runs the demuxer over the discs make_discs.py builds and compares what it
 # prints with checks.expected (next to this script). FFMPEG_BUILD_DIR holds

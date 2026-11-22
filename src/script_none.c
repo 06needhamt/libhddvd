@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* Copyright (C) 2026 Tom Needham */
 #include "script_engine.h"
 
 /* Builds without an ECMAScript engine (HDDVD_SCRIPT_ENGINE=none). */

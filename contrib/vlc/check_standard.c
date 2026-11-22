@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* Copyright (C) 2026 Tom Needham */
 /* Runs the plugin headless in libvlc over the synthetic disc in
    tests/fixtures/standard (see generate_objects.py): title 1 has chapters at
    0 and 45 frames (byte 24576), title 2 one chapter; 75 and 60 frames at

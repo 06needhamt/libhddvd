@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 """Builds decodable synthetic HD DVD discs for checking FFmpeg's hddvd
 demuxer (not part of any patch).
 

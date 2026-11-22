@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 # After the v0.6.0 tag exists on GitHub: downloads its tarball, writes
 # contrib/src/hddvd/SHA512SUMS into the contrib commit (the first of the
 # three), and re-exports the patches. Usage: fill_sha512.sh VLC_TREE OUT_DIR

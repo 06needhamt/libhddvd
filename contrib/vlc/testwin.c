@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* Copyright (C) 2026 Tom Needham */
 /* A window for the headless checks: like the dummy window, but it hands
    itself to the check program (check_window, looked up in the process), so
    that the check can report mouse events through VLC's own video output
