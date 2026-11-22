@@ -257,4 +257,7 @@ by `tests/fixtures/generate_objects.py` and are under the same licence.
 
 ## Status
 
+Changes in each release are listed in `CHANGELOG.md`. To report a
+security issue, see `SECURITY.md`.
+
 This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content navigation follows DVD-Video's rules and has not been checked against a player; menu cells, angle blocks and conformance against a real player's behavior are future work.
