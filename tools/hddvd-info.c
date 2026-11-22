@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* Copyright (C) 2026 Tom Needham */
 #include "hddvd.h"
 #include <stdio.h>
 static int show(void *o, const hddvd_file_info *f)

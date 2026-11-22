@@ -189,7 +189,15 @@ tree, as VLC's modules for libdvdnav and libbluray are. This library supplies
 the versioned ABI, capability negotiation, playable titles (`hddvd_titles`),
 Standard Content navigation (`hddvd_std_nav`),
 renderer-neutral display list, and serialized navigation foundations those
-modules consume.
+modules consume. `contrib/vlc/` holds the patch series against VLC master and
+its headless checks (see its README).
+
+FFmpeg's `hddvd` demuxer (`libavformat/hddvddec.c`, built with
+`--enable-libhddvd`) is developed in FFmpeg's tree in the same way, as its
+`dvdvideo` demuxer over libdvdnav is. It demuxes one title through
+`hddvd_titles`, with its chapters and stream languages; it has no menus.
+`contrib/ffmpeg/` holds the patch against FFmpeg master, its checks over
+synthetic discs and a review of it (see its README).
 
 Context-bound resource failures are available through
 `hddvd_get_last_error()`, which reports a stable status, subsystem, resource URI,
@@ -243,6 +251,13 @@ version 2.1 or (at your option) any later version, as libbluray and
 libdvdnav are; see `LICENSE`. Releases up to 0.5.0 were under the GNU
 General Public License, version 2.
 
+Each source file names its licence with an SPDX identifier
+(`LGPL-2.1-or-later`). The test fixtures under `tests/fixtures` are generated
+by `tests/fixtures/generate_objects.py` and are under the same licence.
+
 ## Status
+
+Changes in each release are listed in `CHANGELOG.md`. To report a
+security issue, see `SECURITY.md`.
 
 This remains experimental software. ACA parsing is now based on observed media and strongly validated by offsets and CRCs. Standard Content navigation follows DVD-Video's rules and has not been checked against a player; menu cells, angle blocks and conformance against a real player's behavior are future work.

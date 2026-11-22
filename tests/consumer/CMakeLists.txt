@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 cmake_minimum_required(VERSION 3.16)
 project(hddvd_consumer LANGUAGES C CXX)
 

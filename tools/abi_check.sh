@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 # Compare two builds of the shared library and fail on anything but
 # additions: a removed or changed function or variable (which includes a
 # public struct changing size or layout) breaks the ABI rule in CLAUDE.md.

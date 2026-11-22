@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 if(NOT DEFINED HDDVD_SOURCE_DIR OR NOT DEFINED HDDVD_BINARY_DIR)
     message(FATAL_ERROR "source and binary directories are required")
 endif()

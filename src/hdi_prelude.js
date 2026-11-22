@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* Copyright (C) 2026 Tom Needham */
 /* HDi host objects for libhddvd's script runtime (runtime_dom.c).
 
    Evaluated once per runtime before any disc script. Its value is a function

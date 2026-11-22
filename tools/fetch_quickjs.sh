@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 # Downloads the pinned QuickJS release into DEST, checks its SHA-256, unpacks
 # it and prints the source directory to pass as HDDVD_QUICKJS_SOURCE_DIR.
 # Keep DEST outside the source tree; the QuickJS source is never committed.

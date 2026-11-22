@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 # Writes INPUT as a NUL-terminated C byte array named NAME into OUTPUT, so the
 # library carries the file without reading it at run time.
 #   cmake -DINPUT=file -DOUTPUT=header.h -DNAME=symbol -P EmbedFile.cmake

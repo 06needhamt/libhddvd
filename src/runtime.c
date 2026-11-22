@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* Copyright (C) 2026 Tom Needham */
 #include "runtime_internal.h"
 #include <stdlib.h>
 #include <string.h>

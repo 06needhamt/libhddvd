@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* Copyright (C) 2026 Tom Needham */
 #ifndef LIBHDDVD_SCRIPT_ENGINE_H
 #define LIBHDDVD_SCRIPT_ENGINE_H
 #include "hddvd.h"

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* Copyright (C) 2026 Tom Needham */
 #ifndef LIBHDDVD_RUNTIME_INTERNAL_H
 #define LIBHDDVD_RUNTIME_INTERNAL_H
 #include "internal.h"

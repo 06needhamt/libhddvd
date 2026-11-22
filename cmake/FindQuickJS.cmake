@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 # Finds QuickJS as installed by its own Makefile or by distributions:
 # <prefix>/include/quickjs/quickjs.h and <prefix>/lib/quickjs/libquickjs.a.
 # Defines QuickJS::QuickJS. The QuickJS-ng fork has a different API and is

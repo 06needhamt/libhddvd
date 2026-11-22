@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 """List the host objects, methods and events that HDi ECMAScript files use.
 
 Each argument is a source: a .js file or a directory searched recursively for

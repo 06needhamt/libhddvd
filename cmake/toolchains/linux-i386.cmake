@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2026 Tom Needham
 # 32-bit x86 build on a 64-bit Debian/Ubuntu host with multiarch packages
 # (gcc-multilib, g++-multilib, libxml2-dev:i386). Used by the CI 32-bit job;
 # the install-consumer test passes it on to the consumer projects.

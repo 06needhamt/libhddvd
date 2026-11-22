@@ -1,0 +1,113 @@
+== frames ac
+frames 240 first 0.0 last 7.974633 min step 0.0334 max step 0.0334
+  red      0.000 -   3.971  120 frames
+  blue     4.004 -   7.975  120 frames
+== frames ac -title 2
+frames 120 first 0.0 last 3.970633 min step 0.0334 max step 0.0334
+  blue     0.000 -   3.971  120 frames
+== frames ac -title 3
+frames 75 first 0.0 last 2.469133 min step 0.0334 max step 0.0334
+  red      0.000 -   2.469  75 frames
+== frames ac-badvti
+frames 240 first 0.0 last 7.974633 min step 0.0334 max step 0.0334
+  red      0.000 -   3.971  120 frames
+  blue     4.004 -   7.975  120 frames
+== frames ac-badvti -title 3
+frames 75 first 0.3003 last 2.769433 min step 0.0334 max step 0.0334
+  red      0.300 -   2.769  75 frames
+== frames std
+frames 75 first 0.0 last 2.469133 min step 0.0334 max step 0.0334
+  white    0.000 -   0.968  30 frames
+  green    1.001 -   2.469  45 frames
+== frames std -title 2
+frames 60 first 0.0 last 1.968633 min step 0.0334 max step 0.0334
+  yellow   0.000 -   1.969  60 frames
+== frames ac -chapter_start 2 -chapter_end 3
+frames 105 first 0.5005 last 3.970633 min step 0.0334 max step 0.0334
+  red      0.500 -   1.969  45 frames
+  blue     2.002 -   3.971  60 frames
+== frames std -chapter_start 2
+frames 45 first 0.0 last 1.468133 min step 0.0334 max step 0.0334
+  green    0.000 -   1.468  45 frames
+== frames std -chapter_end 1
+frames 30 first 0.0 last 0.967633 min step 0.0334 max step 0.0334
+  white    0.000 -   0.968  30 frames
+== frames ac -ss 0.3
+frames 231 first 0.3003 last 7.974633 min step 0.0334 max step 0.0334
+  red      0.300 -   3.971  111 frames
+  blue     4.004 -   7.975  120 frames
+== frames ac -ss 1.0
+frames 210 first 1.001 last 7.974633 min step 0.0334 max step 0.0334
+  red      1.001 -   3.971  90 frames
+  blue     4.004 -   7.975  120 frames
+== frames ac -ss 3.9
+frames 123 first 3.9039 last 7.974633 min step 0.0334 max step 0.0334
+  red      3.904 -   3.971  3 frames
+  blue     4.004 -   7.975  120 frames
+== frames ac -ss 5.0
+frames 90 first 5.005 last 7.974633 min step 0.0334 max step 0.0334
+  blue     5.005 -   7.975  90 frames
+== frames ac -ss 6.5
+frames 45 first 6.5065 last 7.974633 min step 0.0334 max step 0.0334
+  blue     6.506 -   7.975  45 frames
+== frames ac -ss 7.9
+frames 3 first 7.9079 last 7.974633 min step 0.0334 max step 0.0334
+  blue     7.908 -   7.975  3 frames
+== frames std -ss 0.5
+frames 60 first 0.5005 last 2.469133 min step 0.0334 max step 0.0334
+  white    0.500 -   0.968  15 frames
+  green    1.001 -   2.469  45 frames
+== frames std -ss 1.2
+frames 39 first 1.2012 last 2.469133 min step 0.0334 max step 0.0334
+  green    1.201 -   2.469  39 frames
+== frames std -ss 2.3
+frames 6 first 2.3023 last 2.469133 min step 0.0334 max step 0.0334
+  green    2.302 -   2.469  6 frames
+== remux ac
+exit 0
+stream|codec_name=mpeg2video
+stream|codec_name=ac3|tag:language=eng
+stream|codec_name=ac3|tag:language=fre
+chapter|start_time=0.000000|end_time=2.002000
+chapter|start_time=2.002000|end_time=4.004000
+chapter|start_time=4.004000|end_time=6.006000
+chapter|start_time=6.006000|end_time=8.008000
+format|duration=8.008000
+== remux std
+exit 0
+stream|codec_name=mpeg2video
+stream|codec_name=ac3|tag:language=eng
+stream|codec_name=ac3
+chapter|start_time=0.000000|end_time=1.001000
+chapter|start_time=1.001000|end_time=2.502500
+format|duration=2.527700
+== scrambled
+Reading the title failed: file:///dvddisc/HVDVD_TS/TWO.EVO: encrypted EVO sector (protected content requires a decryption provider)
+This HD DVD title is protected by AACS, and libhddvd does not decrypt protected content
+Error during demuxing: Permission denied
+exit 0 (the ffmpeg tool ends a file on a demuxing error; -xerror fails)
+exit 243 with -xerror
+== refused -i DISCS
+DISCS is not an HD DVD: it has neither a Standard Content title table nor an Advanced Content playlist
+DISCS: Invalid data found when processing input
+exit 1
+== refused -i DISCS/missing
+Unable to open DISCS/missing as an HD DVD: it must be the directory of a mounted disc or of a copy of its files
+DISCS/missing: No such file or directory
+exit 1
+== refused -title 4 -i DISCS/ac
+Title 4 does not exist (the disc has 3)
+DISCS/ac: Invalid argument
+exit 1
+== refused -chapter_start 5 -i DISCS/ac
+Chapter range [5, 0] is invalid (title 1 has 4)
+DISCS/ac: Invalid argument
+exit 1
+== refused -chapter_start 3 -chapter_end 2 -i DISCS/ac
+Chapter range [3, 2] is invalid (title 1 has 4)
+DISCS/ac: Invalid argument
+exit 1
+== refused -title 2 -chapter_start 2 -i DISCS/ac
+Chapter range [2, 0] is invalid (title 2 has 0)
+DISCS/ac: Invalid argument
+exit 1
