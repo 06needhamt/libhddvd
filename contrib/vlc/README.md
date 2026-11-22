@@ -6,12 +6,11 @@ itself belongs in VLC's tree.
 
 1. `0001-contrib-add-libhddvd.patch` – contrib package for libhddvd
    0.6.0, the first release under the LGPL (2.1 or later, as libbluray),
-   so it builds in VLC's LGPL builds too, with no GPL gate. Its SHA512SUMS
-   file needs the v0.6.0 tarball: the tag is to be made once 0.6.0 is on
-   libhddvd's main, and the repository is private, so its tarball cannot
-   be downloaded yet. Once both hold, `fill_sha512.sh VLC_TREE OUT_DIR` downloads its tarball, adds
-   `contrib/src/hddvd/SHA512SUMS` to this commit, and re-exports the
-   three patches.
+   so it builds in VLC's LGPL builds too, with no GPL gate. Its
+   `contrib/src/hddvd/SHA512SUMS` holds the hash of the v0.6.0 tarball
+   from GitHub. `fill_sha512.sh VLC_TREE OUT_DIR` downloads that tarball,
+   writes the file into this commit and re-exports the three patches, for
+   use if the tarball ever changes.
 2. `0002-demux-ps-optionally-give-streams-their-stream-id-as-.patch` – a
    private `ps-stream-ids` option, so a module chaining the PS demuxer can
    tell its streams apart. Without it the PS demuxer behaves as before.
