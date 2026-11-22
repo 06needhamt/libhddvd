@@ -5,7 +5,7 @@ Notable changes to libhddvd. Versions follow `project(... VERSION)` in
 `CLAUDE.md` and `tools/abi_check.sh`). Task IDs such as P7-02 refer to
 `docs/IMPLEMENTATION_TASKS.md`.
 
-## 0.6.0 (not yet tagged)
+## 0.6.0 (2026-11-22, tag v0.6.0)
 
 ### Licence
 

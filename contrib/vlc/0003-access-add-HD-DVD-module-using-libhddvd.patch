@@ -1,4 +1,4 @@
-From df0efa5108b72919153d58cbd5d3d0bf033ae92b Mon Sep 17 00:00:00 2001
+From ed8c9682979f06bb0e9ebb0d1eafa588f27478eb Mon Sep 17 00:00:00 2001
 From: Tom Needham <06needhamt@gmail.com>
 Date: Thu, 12 Nov 2026 21:56:32 +0000
 Subject: [PATCH 3/3] access: add HD DVD module using libhddvd
